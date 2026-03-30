@@ -1,0 +1,52 @@
+{
+  "network": {
+    "name": "Sinergy Local",
+    "chainId": 1716124615666775,
+    "chainIdHex": "0x618ce661b6c57",
+    "rollupChainId": "Sinergy-2",
+    "l1ChainId": "initiation-2",
+    "gasDenom": "GAS",
+    "rpcUrl": "http://127.0.0.1:8545",
+    "wsUrl": "ws://127.0.0.1:8546",
+    "tendermintRpc": "http://127.0.0.1:26657",
+    "restUrl": "http://127.0.0.1:1317"
+  },
+  "operator": {
+    "matcherAddress": "0x6eC8AcC95Da5f752eCeAB1c214C1b62080023283"
+  },
+  "contracts": {
+    "vault": "0x3fF37bE2C8B8179cBfd97CB1e75fEd91e5e38B19",
+    "market": "0xe1d9c4EcC2ba58274733C61Fb25919F0eA902575",
+    "quoteToken": "0xA0cf839E30789cBB13292B80727103105D971872"
+  },
+  "tokens": [
+    {
+      "symbol": "sUSDC",
+      "name": "Sinergy Mock USD",
+      "address": "0xA0cf839E30789cBB13292B80727103105D971872",
+      "decimals": 6,
+      "kind": "quote"
+    },
+    {
+      "symbol": "tAAPL",
+      "name": "Tokenized Apple",
+      "address": "0xc7bcA502bCeBb25b1CFf139aeD86DE2639a922D7",
+      "decimals": 18,
+      "kind": "rwa"
+    },
+    {
+      "symbol": "tBOND",
+      "name": "Tokenized Treasury Bond",
+      "address": "0x910a546A1763C38dcf352cfdB6e752b3DBDAb029",
+      "decimals": 18,
+      "kind": "rwa"
+    },
+    {
+      "symbol": "tNVDA",
+      "name": "Tokenized Nvidia",
+      "address": "0xCBA194D6576379CfebA944cB696Be34F20e8a987",
+      "decimals": 18,
+      "kind": "rwa"
+    }
+  ]
+}

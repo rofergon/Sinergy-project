@@ -1,0 +1,274 @@
+:root {
+  color-scheme: dark;
+  --bg: #120f0b;
+  --bg-elevated: rgba(31, 24, 17, 0.88);
+  --card: rgba(47, 37, 28, 0.85);
+  --line: rgba(244, 194, 118, 0.18);
+  --text: #f8efe4;
+  --muted: #d0b79a;
+  --accent: #f4c276;
+  --accent-strong: #ff9e4f;
+  --ok: #8adb9c;
+  --danger: #ff8f7c;
+  font-family: "Space Grotesk", "Sora", sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(255, 158, 79, 0.18), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(114, 191, 188, 0.12), transparent 24%),
+    linear-gradient(180deg, #15110c, #090806 65%);
+  color: var(--text);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: transparent;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.shell {
+  width: min(1280px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 32px 0 48px;
+}
+
+.hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-start;
+  padding: 28px;
+  border: 1px solid var(--line);
+  background: linear-gradient(135deg, rgba(255, 204, 102, 0.08), rgba(25, 20, 16, 0.92));
+  border-radius: 28px;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.28);
+}
+
+.hero h1,
+.panel h2 {
+  margin: 0;
+  font-size: clamp(2.2rem, 4vw, 4rem);
+  line-height: 0.95;
+  letter-spacing: -0.05em;
+}
+
+.hero-copy {
+  max-width: 52ch;
+  color: var(--muted);
+  margin-top: 14px;
+  line-height: 1.6;
+}
+
+.hero-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.wallet-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.badge,
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.72rem;
+  color: var(--accent);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.left-column,
+.right-column {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: 24px;
+  background: var(--bg-elevated);
+  backdrop-filter: blur(20px);
+}
+
+.panel-header {
+  margin-bottom: 18px;
+}
+
+.panel-header h2 {
+  font-size: 1.8rem;
+  margin-top: 6px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--muted);
+}
+
+input,
+select {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(11, 11, 11, 0.45);
+  color: var(--text);
+  padding: 12px 14px;
+}
+
+.action-cluster,
+.action-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 18px;
+  flex-wrap: wrap;
+}
+
+button {
+  border: none;
+  border-radius: 999px;
+  padding: 12px 18px;
+  cursor: pointer;
+  transition: transform 140ms ease, opacity 140ms ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  color: #1e1308;
+  font-weight: 700;
+}
+
+.secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.balance-grid,
+.order-list {
+  display: grid;
+  gap: 12px;
+}
+
+.balance-card,
+.market-card,
+.order-card {
+  display: grid;
+  grid-template-columns: 1.2fr repeat(2, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: var(--card);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.market-card,
+.order-card {
+  grid-template-columns: 1fr auto;
+}
+
+.symbol {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.muted,
+.status-copy,
+.inline-note,
+.order-card small,
+.market-card small,
+.value-group small {
+  color: var(--muted);
+}
+
+.value-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: right;
+}
+
+.price {
+  margin: 0;
+  color: var(--accent);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.error-banner {
+  color: var(--danger);
+  margin: 16px 4px 0;
+}
+
+@media (max-width: 980px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .hero {
+    flex-direction: column;
+  }
+
+  .hero-actions {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .shell {
+    width: min(100vw - 20px, 100%);
+    padding-top: 20px;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .balance-card,
+  .market-card,
+  .order-card {
+    grid-template-columns: 1fr;
+    text-align: left;
+  }
+
+  .value-group {
+    text-align: left;
+  }
+}

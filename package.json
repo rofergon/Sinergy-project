@@ -1,0 +1,18 @@
+{
+  "name": "sinergy-rwa-darkpool",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @sinergy/shared && npm run build -w @sinergy/matcher && npm run build -w @sinergy/web",
+    "dev:web": "npm run dev -w @sinergy/web",
+    "dev:matcher": "npm run dev -w @sinergy/matcher",
+    "lint": "npm run typecheck -w @sinergy/shared && npm run typecheck -w @sinergy/matcher && npm run typecheck -w @sinergy/web",
+    "typecheck": "npm run typecheck -w @sinergy/shared && npm run typecheck -w @sinergy/matcher && npm run typecheck -w @sinergy/web"
+  }
+}
+
