@@ -93,11 +93,12 @@ app.get("/orders/:address", async (request) => {
 });
 
 app.post("/vault/sync-deposit", async (request) => {
-  const { txHash, userAddress } = request.body as {
-    txHash: Hex;
+  const { txHash, userAddress, logs } = request.body as {
+    txHash: string;
     userAddress: Address;
+    logs?: Array<{ address: Address; topics: Hex[]; data: Hex }>;
   };
-  return await vaultService.syncDeposit(txHash, userAddress);
+  return await vaultService.syncDeposit(txHash, userAddress, logs);
 });
 
 app.post("/vault/withdrawal-quote", async (request) => {
@@ -116,11 +117,12 @@ app.post("/vault/withdrawal-quote", async (request) => {
 });
 
 app.post("/vault/sync-withdrawal", async (request) => {
-  const { txHash, userAddress } = request.body as {
-    txHash: Hex;
+  const { txHash, userAddress, logs } = request.body as {
+    txHash: string;
     userAddress: Address;
+    logs?: Array<{ address: Address; topics: Hex[]; data: Hex }>;
   };
-  return await vaultService.syncWithdrawal(txHash, userAddress);
+  return await vaultService.syncWithdrawal(txHash, userAddress, logs);
 });
 
 app.post("/orders", async (request) => {
