@@ -77,25 +77,42 @@ export class VaultService {
     });
   }
 
-  async syncDeposit(txHash: Hex, userAddress: Address) {
+  private async resolveExecutionLogs(
+    txHash: string,
+    logs?: Array<{ address: Address; topics: Hex[]; data: Hex }>
+  ) {
+    if (logs && logs.length > 0) {
+      return logs;
+    }
+
+    const receipt = await this.publicClient.getTransactionReceipt({ hash: txHash as Hex });
+    return receipt.logs;
+  }
+
+  async syncDeposit(
+    txHash: string,
+    userAddress: Address,
+    logs?: Array<{ address: Address; topics: Hex[]; data: Hex }>
+  ) {
     const vault = this.deployment.contracts.vault;
     if (vault === "0x0000000000000000000000000000000000000000") {
       throw new Error("Vault address not configured");
     }
 
     return this.store.mutateAsync(async (state) => {
-      if (state.processedDeposits.includes(txHash)) {
+      const txKey = keyOf(txHash);
+      if (state.processedDeposits.includes(txKey)) {
         return { alreadyProcessed: true };
       }
 
-      const receipt = await this.publicClient.getTransactionReceipt({ hash: txHash });
-      const logs = parseEventLogs({
+      const executionLogs = await this.resolveExecutionLogs(txHash, logs);
+      const parsedLogs = parseEventLogs({
         abi: darkPoolVaultAbi,
         eventName: "Deposit",
-        logs: receipt.logs
+        logs: executionLogs as any
       });
 
-      const depositLog = logs.find((log) => isAddressEqual(log.args.user!, userAddress));
+      const depositLog = parsedLogs.find((log) => isAddressEqual(log.args.user!, userAddress));
       if (!depositLog) {
         throw new Error("No vault deposit event found for this user");
       }
@@ -106,7 +123,7 @@ export class VaultService {
         depositLog.args.token!,
         BigInt(depositLog.args.amount!.toString())
       );
-      state.processedDeposits.push(txHash);
+      state.processedDeposits.push(txKey);
 
       return {
         alreadyProcessed: false,
@@ -184,20 +201,25 @@ export class VaultService {
     };
   }
 
-  async syncWithdrawal(txHash: Hex, userAddress: Address) {
+  async syncWithdrawal(
+    txHash: string,
+    userAddress: Address,
+    logs?: Array<{ address: Address; topics: Hex[]; data: Hex }>
+  ) {
     return this.store.mutateAsync(async (state) => {
-      if (state.processedWithdrawals.includes(txHash)) {
+      const txKey = keyOf(txHash);
+      if (state.processedWithdrawals.includes(txKey)) {
         return { alreadyProcessed: true };
       }
 
-      const receipt = await this.publicClient.getTransactionReceipt({ hash: txHash });
-      const logs = parseEventLogs({
+      const executionLogs = await this.resolveExecutionLogs(txHash, logs);
+      const parsedLogs = parseEventLogs({
         abi: darkPoolVaultAbi,
         eventName: "Withdraw",
-        logs: receipt.logs
+        logs: executionLogs as any
       });
 
-      const withdrawLog = logs.find((log) => isAddressEqual(log.args.recipient!, userAddress));
+      const withdrawLog = parsedLogs.find((log) => isAddressEqual(log.args.recipient!, userAddress));
       if (!withdrawLog) {
         throw new Error("No vault withdrawal event found for this user");
       }
@@ -215,7 +237,7 @@ export class VaultService {
         state.pendingWithdrawals.splice(pendingIndex, 1);
       }
 
-      state.processedWithdrawals.push(txHash);
+      state.processedWithdrawals.push(txKey);
       return {
         alreadyProcessed: false,
         nonce
