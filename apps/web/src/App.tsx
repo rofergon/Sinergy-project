@@ -12,6 +12,7 @@ import { SwapPanel } from "./components/SwapPanel";
 import { VaultPanel } from "./components/VaultPanel";
 import { BalancesPanel } from "./components/BalancesPanel";
 import { PortfolioView } from "./components/PortfolioView";
+import { BridgeLanding } from "./components/BridgeLanding";
 import "./styles.css";
 
 type Token = {
@@ -77,6 +78,7 @@ function Dashboard() {
     initiaAddress,
     isConnected,
     openConnect,
+    openBridge,
     openWallet,
     disconnect,
   } = useInterwovenKit();
@@ -92,7 +94,7 @@ function Dashboard() {
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus | null>(null);
   const [inventory, setInventory] = useState<InventoryPosition[]>([]);
   const [error, setError] = useState("");
-  const [activeView, setActiveView] = useState<"trade" | "markets" | "portfolio">("trade");
+  const [activeView, setActiveView] = useState<"trade" | "markets" | "portfolio" | "bridge">("trade");
 
   const userAddress = address as Address | undefined;
   const tokens: Token[] = useMemo(() => deployment?.tokens ?? [], [deployment]);
@@ -182,7 +184,7 @@ function Dashboard() {
     );
   }, [userAddress]);
 
-  function navigateTo(view: "trade" | "markets" | "portfolio") {
+  function navigateTo(view: "trade" | "markets" | "portfolio" | "bridge") {
     setActiveView(view);
   }
 
@@ -196,6 +198,16 @@ function Dashboard() {
       body: JSON.stringify({ userAddress }),
     });
     await refreshUser();
+  }
+
+  function handleBridgeIn() {
+    if (!initiaAddress) {
+      setError("");
+      openConnect();
+      return;
+    }
+
+    openBridge();
   }
 
   return (
@@ -227,7 +239,19 @@ function Dashboard() {
         </div>
       )}
 
-      {activeView === "portfolio" ? (
+      {activeView === "bridge" ? (
+        <BridgeLanding
+          connected={isConnected}
+          initiaAddress={initiaAddress}
+          onConnect={() => {
+            setError("");
+            openConnect();
+          }}
+          onOpenWallet={openWallet}
+          onOpenBridge={handleBridgeIn}
+          onGoTrade={() => setActiveView("trade")}
+        />
+      ) : activeView === "portfolio" ? (
         <PortfolioView
           connected={isConnected}
           address={userAddress}
@@ -278,7 +302,6 @@ function Dashboard() {
               connected={isConnected}
               address={userAddress}
               selectedMarket={selectedMarket}
-              bridgeStatus={bridgeStatus}
               inventory={inventory}
               onAfterMutation={refreshUser}
             />

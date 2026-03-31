@@ -72,7 +72,6 @@ type Props = {
   connected: boolean;
   address?: Address;
   selectedMarket?: Market;
-  bridgeStatus: BridgeStatus | null;
   inventory: InventoryPosition[];
   onAfterMutation: () => Promise<void>;
 };
@@ -96,7 +95,6 @@ export function SwapPanel({
   connected,
   address,
   selectedMarket,
-  bridgeStatus,
   inventory,
   onAfterMutation
 }: Props) {
@@ -251,13 +249,6 @@ export function SwapPanel({
       </div>
 
       <div className="swap-surface">
-        <div className="swap-status-row">
-          <span>Bridge</span>
-          <strong className={bridgeStatus?.ready ? "bridge-ready" : "bridge-down"}>
-            {bridgeStatus?.ready ? "Healthy" : "Degraded"}
-          </strong>
-        </div>
-
         <div className="swap-status-row">
           <span>Flow</span>
           <strong>{status}</strong>
