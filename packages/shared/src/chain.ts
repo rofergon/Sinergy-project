@@ -30,7 +30,7 @@ export type DeploymentToken = {
   name: string;
   address: `0x${string}`;
   decimals: number;
-  kind: "quote" | "rwa";
+  kind: "quote" | "rwa" | "crypto";
 };
 
 export type LocalDeployment = {
@@ -53,4 +53,3 @@ export type LocalDeployment = {
   };
   tokens: DeploymentToken[];
 };
-

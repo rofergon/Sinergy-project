@@ -22,7 +22,7 @@ export function resolveMarkets(deployment: LocalDeployment): ResolvedMarket[] {
   }
 
   return deployment.tokens
-    .filter((token) => token.kind === "rwa" && token.address.toLowerCase() !== ZERO)
+    .filter((token) => token.kind !== "quote" && token.address.toLowerCase() !== ZERO)
     .map((token) => {
       const symbol = `${token.symbol}/${quote.symbol}`;
       const id = keccak256(
@@ -39,4 +39,3 @@ export function resolveMarkets(deployment: LocalDeployment): ResolvedMarket[] {
 }
 
 export { darkPoolMarketAbi, darkPoolVaultAbi };
-

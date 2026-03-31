@@ -39,7 +39,7 @@ export type ResolvedToken = {
   name: string;
   address: `0x${string}`;
   decimals: number;
-  kind: "quote" | "rwa";
+  kind: "quote" | "rwa" | "crypto";
 };
 
 export type ResolvedMarket = {
@@ -48,4 +48,3 @@ export type ResolvedMarket = {
   baseToken: ResolvedToken;
   quoteToken: ResolvedToken;
 };
-

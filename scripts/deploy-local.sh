@@ -121,6 +121,10 @@ USDC_ADDRESS="$(deploy_contract MockUSDC '(address)' "$GAS_STATION_HEX")"
 TAAPL_ADDRESS="$(deploy_contract RwaShareToken '(string,string,address,uint256)' "Tokenized Apple" "tAAPL" "$GAS_STATION_HEX" "1000000000000000000000000")"
 TBOND_ADDRESS="$(deploy_contract RwaShareToken '(string,string,address,uint256)' "Tokenized Treasury Bond" "tBOND" "$GAS_STATION_HEX" "1000000000000000000000000")"
 TNVDA_ADDRESS="$(deploy_contract RwaShareToken '(string,string,address,uint256)' "Tokenized Nvidia" "tNVDA" "$GAS_STATION_HEX" "1000000000000000000000000")"
+CBTC_ADDRESS="$(deploy_contract RwaShareToken '(string,string,address,uint256)' "Connected Bitcoin" "cBTC" "$GAS_STATION_HEX" "1000000000000000000000000")"
+CETH_ADDRESS="$(deploy_contract RwaShareToken '(string,string,address,uint256)' "Connected Ether" "cETH" "$GAS_STATION_HEX" "1000000000000000000000000")"
+CSOL_ADDRESS="$(deploy_contract RwaShareToken '(string,string,address,uint256)' "Connected Solana" "cSOL" "$GAS_STATION_HEX" "1000000000000000000000000")"
+CINIT_ADDRESS="$(deploy_contract RwaShareToken '(string,string,address,uint256)' "Connected Initia" "cINIT" "$GAS_STATION_HEX" "1000000000000000000000000")"
 VAULT_ADDRESS="$(deploy_contract DarkPoolVault '(address,address)' "$GAS_STATION_HEX" "$MATCHER_ADDRESS")"
 MARKET_ADDRESS="$(deploy_contract DarkPoolMarket '(address,address)' "$GAS_STATION_HEX" "$MATCHER_ADDRESS")"
 
@@ -129,10 +133,18 @@ call_as_gas_station "$VAULT_ADDRESS" "setSupportedToken(address,bool)" "$USDC_AD
 call_as_gas_station "$VAULT_ADDRESS" "setSupportedToken(address,bool)" "$TAAPL_ADDRESS" true
 call_as_gas_station "$VAULT_ADDRESS" "setSupportedToken(address,bool)" "$TBOND_ADDRESS" true
 call_as_gas_station "$VAULT_ADDRESS" "setSupportedToken(address,bool)" "$TNVDA_ADDRESS" true
+call_as_gas_station "$VAULT_ADDRESS" "setSupportedToken(address,bool)" "$CBTC_ADDRESS" true
+call_as_gas_station "$VAULT_ADDRESS" "setSupportedToken(address,bool)" "$CETH_ADDRESS" true
+call_as_gas_station "$VAULT_ADDRESS" "setSupportedToken(address,bool)" "$CSOL_ADDRESS" true
+call_as_gas_station "$VAULT_ADDRESS" "setSupportedToken(address,bool)" "$CINIT_ADDRESS" true
 
 call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "tAAPL/sUSDC" "$TAAPL_ADDRESS" "$USDC_ADDRESS"
 call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "tBOND/sUSDC" "$TBOND_ADDRESS" "$USDC_ADDRESS"
 call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "tNVDA/sUSDC" "$TNVDA_ADDRESS" "$USDC_ADDRESS"
+call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cBTC/sUSDC" "$CBTC_ADDRESS" "$USDC_ADDRESS"
+call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cETH/sUSDC" "$CETH_ADDRESS" "$USDC_ADDRESS"
+call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cSOL/sUSDC" "$CSOL_ADDRESS" "$USDC_ADDRESS"
+call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cINIT/sUSDC" "$CINIT_ADDRESS" "$USDC_ADDRESS"
 
 jq -n \
   --arg matcherAddress "$MATCHER_ADDRESS" \
@@ -142,6 +154,10 @@ jq -n \
   --arg taapl "$TAAPL_ADDRESS" \
   --arg tbond "$TBOND_ADDRESS" \
   --arg tnvda "$TNVDA_ADDRESS" \
+  --arg cbtc "$CBTC_ADDRESS" \
+  --arg ceth "$CETH_ADDRESS" \
+  --arg csol "$CSOL_ADDRESS" \
+  --arg cinit "$CINIT_ADDRESS" \
   '{
     network: {
       name: "Sinergy Local",
@@ -191,6 +207,34 @@ jq -n \
         address: $tnvda,
         decimals: 18,
         kind: "rwa"
+      },
+      {
+        symbol: "cBTC",
+        name: "Connected Bitcoin",
+        address: $cbtc,
+        decimals: 18,
+        kind: "crypto"
+      },
+      {
+        symbol: "cETH",
+        name: "Connected Ether",
+        address: $ceth,
+        decimals: 18,
+        kind: "crypto"
+      },
+      {
+        symbol: "cSOL",
+        name: "Connected Solana",
+        address: $csol,
+        decimals: 18,
+        kind: "crypto"
+      },
+      {
+        symbol: "cINIT",
+        name: "Connected Initia",
+        address: $cinit,
+        decimals: 18,
+        kind: "crypto"
       }
     ]
   }' > "$DEPLOYMENTS_DIR/local.json"
@@ -201,6 +245,10 @@ MATCHER_PRIVATE_KEY=$MATCHER_PRIVATE_KEY
 PORT=8787
 DEPLOYMENT_FILE=$ROOT_DIR/deployments/local.json
 PRICE_BAND_BPS=1000
+PRICE_DB_FILE=./data/prices.sqlite
+PRICE_POLL_INTERVAL_MS=60000
+T_BOND_PROXY_SYMBOL=TLT
+INITIA_CONNECT_REST_URL=https://rest.testnet.initia.xyz
 EOF
 
 echo "Deployment complete."

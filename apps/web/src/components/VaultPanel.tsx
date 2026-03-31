@@ -22,9 +22,7 @@ type Props = {
 };
 
 async function gasPriceOverrides(publicClient: PublicClient) {
-  return {
-    gasPrice: await publicClient.getGasPrice()
-  };
+  return { gasPrice: await publicClient.getGasPrice() };
 }
 
 export function VaultPanel({
@@ -34,163 +32,174 @@ export function VaultPanel({
   publicClient,
   vaultAddress,
   tokens,
-  onAfterMutation
+  onAfterMutation,
 }: Props) {
+  const [mode, setMode] = useState<"deposit" | "withdraw">("deposit");
   const [tokenAddress, setTokenAddress] = useState<Address | "">("");
   const [amount, setAmount] = useState("10");
   const [status, setStatus] = useState("");
+
   const selectedToken = useMemo(
-    () => tokens.find((token) => token.address === tokenAddress),
+    () => tokens.find((t) => t.address === tokenAddress),
     [tokenAddress, tokens]
   );
 
   const disabled = !connected || !address || !walletClient || !publicClient || !selectedToken;
 
+  async function handleDeposit() {
+    if (!selectedToken || !walletClient || !publicClient || !address) return;
+    setStatus(`Approving ${selectedToken.symbol}…`);
+    try {
+      const amountAtomic = parseUnits(amount, selectedToken.decimals);
+
+      // Approve
+      const approveHash = await walletClient.writeContract({
+        account: address,
+        chain: walletClient.chain,
+        address: selectedToken.address,
+        abi: erc20Abi,
+        functionName: "approve",
+        args: [vaultAddress, amountAtomic],
+        ...(await gasPriceOverrides(publicClient)),
+      });
+      await publicClient.waitForTransactionReceipt({ hash: approveHash });
+
+      setStatus(`Depositing ${selectedToken.symbol}…`);
+      const hash = await walletClient.writeContract({
+        account: address,
+        chain: walletClient.chain,
+        address: vaultAddress,
+        abi: darkPoolVaultAbi,
+        functionName: "deposit",
+        args: [selectedToken.address, amountAtomic],
+        ...(await gasPriceOverrides(publicClient)),
+      });
+      await publicClient.waitForTransactionReceipt({ hash });
+      await api("/vault/sync-deposit", {
+        method: "POST",
+        body: JSON.stringify({ txHash: hash, userAddress: address }),
+      });
+      await onAfterMutation();
+      setStatus("Deposit synced ✓");
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleWithdraw() {
+    if (!selectedToken || !walletClient || !publicClient || !address) return;
+    setStatus(`Requesting withdrawal…`);
+    try {
+      const quote = await api<{ nonce: number; deadline: number; signature: Hex }>(
+        "/vault/withdrawal-quote",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            userAddress: address,
+            token: selectedToken.address,
+            amount,
+            decimals: selectedToken.decimals,
+          }),
+        }
+      );
+
+      const amountAtomic = parseUnits(amount, selectedToken.decimals);
+      const hash = await walletClient.writeContract({
+        account: address,
+        chain: walletClient.chain,
+        address: vaultAddress,
+        abi: darkPoolVaultAbi,
+        functionName: "withdraw",
+        args: [
+          selectedToken.address,
+          amountAtomic,
+          BigInt(quote.nonce),
+          BigInt(quote.deadline),
+          quote.signature,
+        ],
+        ...(await gasPriceOverrides(publicClient)),
+      });
+      await publicClient.waitForTransactionReceipt({ hash });
+      await api("/vault/sync-withdrawal", {
+        method: "POST",
+        body: JSON.stringify({ txHash: hash, userAddress: address }),
+      });
+      await onAfterMutation();
+      setStatus("Withdrawal settled ✓");
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   return (
-    <section className="panel">
-      <div className="panel-header">
-        <p className="eyebrow">Shielding Layer</p>
-        <h2>Move funds into the dark vault</h2>
+    <div className="vault-compact">
+      <div className="panel-head" style={{ padding: "0 0 10px", border: "none" }}>
+        <span className="panel-title">Dark Vault</span>
       </div>
 
-      <div className="form-grid">
-        <label>
-          Token
-          <select value={tokenAddress} onChange={(event) => setTokenAddress(event.target.value as Address)}>
-            <option value="">Select token</option>
-            {tokens.map((token) => (
-              <option key={token.address} value={token.address}>
-                {token.symbol}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label>
-          Amount
-          <input value={amount} onChange={(event) => setAmount(event.target.value)} />
-        </label>
-      </div>
-
-      <div className="action-cluster">
+      <div className="vault-tabs">
         <button
-          className="secondary"
-          disabled={disabled}
-          onClick={async () => {
-            if (!selectedToken || !walletClient || !publicClient || !address) return;
-
-            setStatus(`Approving ${selectedToken.symbol}...`);
-            try {
-              const amountAtomic = parseUnits(amount, selectedToken.decimals);
-              const hash = await walletClient.writeContract({
-                account: address,
-                chain: walletClient.chain,
-                address: selectedToken.address,
-                abi: erc20Abi,
-                functionName: "approve",
-                args: [vaultAddress, amountAtomic],
-                ...(await gasPriceOverrides(publicClient))
-              });
-              await publicClient.waitForTransactionReceipt({ hash });
-              setStatus("Approval confirmed.");
-            } catch (error) {
-              setStatus(error instanceof Error ? error.message : String(error));
-            }
-          }}
-        >
-          Approve
-        </button>
-
-        <button
-          className="primary"
-          disabled={disabled}
-          onClick={async () => {
-            if (!selectedToken || !walletClient || !publicClient || !address) return;
-
-            setStatus(`Depositing ${selectedToken.symbol} into vault...`);
-            try {
-              const amountAtomic = parseUnits(amount, selectedToken.decimals);
-              const hash = await walletClient.writeContract({
-                account: address,
-                chain: walletClient.chain,
-                address: vaultAddress,
-                abi: darkPoolVaultAbi,
-                functionName: "deposit",
-                args: [selectedToken.address, amountAtomic],
-                ...(await gasPriceOverrides(publicClient))
-              });
-              await publicClient.waitForTransactionReceipt({ hash });
-              await api("/vault/sync-deposit", {
-                method: "POST",
-                body: JSON.stringify({ txHash: hash, userAddress: address })
-              });
-              await onAfterMutation();
-              setStatus("Deposit synced into internal dark-vault ledger.");
-            } catch (error) {
-              setStatus(error instanceof Error ? error.message : String(error));
-            }
-          }}
+          className={`vault-tab ${mode === "deposit" ? "active" : ""}`}
+          onClick={() => setMode("deposit")}
         >
           Deposit
         </button>
-
         <button
-          className="secondary"
-          disabled={disabled}
-          onClick={async () => {
-            if (!selectedToken || !walletClient || !publicClient || !address) return;
-
-            setStatus(`Requesting withdrawal quote for ${selectedToken.symbol}...`);
-            try {
-              const quote = await api<{
-                nonce: number;
-                deadline: number;
-                signature: Hex;
-              }>("/vault/withdrawal-quote", {
-                method: "POST",
-                body: JSON.stringify({
-                  userAddress: address,
-                  token: selectedToken.address,
-                  amount,
-                  decimals: selectedToken.decimals
-                })
-              });
-
-              const amountAtomic = parseUnits(amount, selectedToken.decimals);
-              const hash = await walletClient.writeContract({
-                account: address,
-                chain: walletClient.chain,
-                address: vaultAddress,
-                abi: darkPoolVaultAbi,
-                functionName: "withdraw",
-                args: [
-                  selectedToken.address,
-                  amountAtomic,
-                  BigInt(quote.nonce),
-                  BigInt(quote.deadline),
-                  quote.signature
-                ],
-                ...(await gasPriceOverrides(publicClient))
-              });
-
-              await publicClient.waitForTransactionReceipt({ hash });
-              await api("/vault/sync-withdrawal", {
-                method: "POST",
-                body: JSON.stringify({ txHash: hash, userAddress: address })
-              });
-              await onAfterMutation();
-              setStatus("Withdrawal settled from dark vault.");
-            } catch (error) {
-              setStatus(error instanceof Error ? error.message : String(error));
-            }
-          }}
+          className={`vault-tab ${mode === "withdraw" ? "active" : ""}`}
+          onClick={() => setMode("withdraw")}
         >
           Withdraw
         </button>
       </div>
 
-      <p className="status-copy">{status}</p>
-    </section>
+      <div className="vault-form">
+        <select
+          value={tokenAddress}
+          onChange={(e) => setTokenAddress(e.target.value as Address)}
+        >
+          <option value="">Select token</option>
+          {tokens.map((t) => (
+            <option key={t.address} value={t.address}>
+              {t.symbol} — {t.name}
+            </option>
+          ))}
+        </select>
+
+        <div className="tt-input-wrap">
+          <input
+            type="text"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0.00"
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--text-primary)",
+              fontFamily: "var(--font-mono)",
+              fontSize: 14,
+              fontWeight: 600,
+              padding: "10px 0",
+              outline: "none",
+              width: "100%",
+            }}
+          />
+          <span className="tt-input-suffix">{selectedToken?.symbol ?? "TOKEN"}</span>
+        </div>
+
+        <div className="vault-actions">
+          {mode === "deposit" ? (
+            <button className="vault-btn primary-action" disabled={disabled} onClick={handleDeposit}>
+              Deposit
+            </button>
+          ) : (
+            <button className="vault-btn primary-action" disabled={disabled} onClick={handleWithdraw}>
+              Withdraw
+            </button>
+          )}
+        </div>
+
+        {status && <div className="vault-status">{status}</div>}
+      </div>
+    </div>
   );
 }
-

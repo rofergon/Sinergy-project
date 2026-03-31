@@ -21,6 +21,34 @@
   },
   "tokens": [
     {
+      "symbol": "cBTC",
+      "name": "Connected Bitcoin",
+      "address": "0x42f1F334493f23B40294D4827eB36704bCdd2229",
+      "decimals": 18,
+      "kind": "crypto"
+    },
+    {
+      "symbol": "cETH",
+      "name": "Connected Ether",
+      "address": "0x76Ada1d256D45806EF736B0F3CDb15c90188AFe6",
+      "decimals": 18,
+      "kind": "crypto"
+    },
+    {
+      "symbol": "cINIT",
+      "name": "Connected Initia",
+      "address": "0x308B830b96998E9080616C504C7562473E2d85df",
+      "decimals": 18,
+      "kind": "crypto"
+    },
+    {
+      "symbol": "cSOL",
+      "name": "Connected Solana",
+      "address": "0x84cE03F22F07E5F8813b0629c110E06D9BBBA142",
+      "decimals": 18,
+      "kind": "crypto"
+    },
+    {
       "symbol": "sUSDC",
       "name": "Sinergy Mock USD",
       "address": "0xA0cf839E30789cBB13292B80727103105D971872",

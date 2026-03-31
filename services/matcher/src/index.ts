@@ -17,7 +17,15 @@ const { publicClient, walletClient, account } = createClients(
   deployment.network.rpcUrl
 );
 const store = new StateStore();
-const priceService = new PriceService();
+const priceService = new PriceService({
+  dbFile: env.PRICE_DB_FILE,
+  pollIntervalMs: env.PRICE_POLL_INTERVAL_MS,
+  providerApiKey: env.TWELVE_DATA_API_KEY,
+  coingeckoDemoApiKey: env.COINGECKO_DEMO_API_KEY,
+  bondProxySymbol: env.T_BOND_PROXY_SYMBOL,
+  initiaConnectRestUrl: env.INITIA_CONNECT_REST_URL
+});
+await priceService.start();
 const matchingService = new MatchingService({
   store,
   markets,
@@ -35,7 +43,8 @@ await app.register(cors, { origin: true });
 app.get("/health", async () => ({
   ok: true,
   matcher: account.address,
-  markets: markets.length
+  markets: markets.length,
+  pricing: priceService.getStatus()
 }));
 
 app.get("/config", async () => ({
@@ -44,15 +53,31 @@ app.get("/config", async () => ({
 }));
 
 app.get("/prices", async () => ({
-  prices: priceService.getAll()
+  prices: priceService.getAll(),
+  status: priceService.getStatus()
 }));
 
 app.get("/markets", async () => ({
   markets: markets.map((market) => ({
     ...market,
-    referencePrice: priceService.getReferencePrice(market.baseToken.symbol)
+    referencePrice: priceService.getReferencePrice(market.baseToken.symbol),
+    series: priceService.getSparkline(market.baseToken.symbol, 32)
   }))
 }));
+
+app.get("/prices/:symbol/candles", async (request) => {
+  const { symbol } = request.params as { symbol: string };
+  const { interval = "15m", limit = "200" } = request.query as {
+    interval?: string;
+    limit?: string;
+  };
+
+  return {
+    symbol,
+    interval,
+    candles: priceService.getCandles(symbol, interval, Number(limit))
+  };
+});
 
 app.get("/balances/:address", async (request) => {
   vaultService.releaseExpiredWithdrawals();
