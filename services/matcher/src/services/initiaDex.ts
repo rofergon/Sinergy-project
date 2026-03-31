@@ -25,6 +25,7 @@ type ExecuteSwapInput = {
 export class InitiaDexClient {
   private readonly restClient: RESTClient;
   private readonly wallet?: Wallet;
+  private readonly metadataByDenom = new Map<string, string>();
 
   constructor(private readonly deps: InitiaDexClientDeps) {
     this.restClient = new RESTClient(deps.restUrl, {
@@ -43,14 +44,16 @@ export class InitiaDexClient {
   }
 
   async simulateSwap(input: SimulateSwapInput): Promise<bigint> {
+    const pairObjectId = this.resolvePairObjectId(input.market);
+    const metadataObjectId = await this.resolveMetadataObjectId(input.offerAsset);
     const response = await this.restClient.move.view(
       "0x1",
       "dex",
       "get_swap_simulation",
       [],
       [
-        bcs.object().serialize(input.market.pairObjectId).toBase64(),
-        bcs.object().serialize(input.offerAsset.metadataObjectId).toBase64(),
+        bcs.object().serialize(pairObjectId).toBase64(),
+        bcs.object().serialize(metadataObjectId).toBase64(),
         bcs.u64().serialize(input.offerAmountAtomic).toBase64()
       ]
     );
@@ -63,6 +66,8 @@ export class InitiaDexClient {
       throw new Error("L1 router mnemonic not configured");
     }
 
+    const pairObjectId = this.resolvePairObjectId(input.market);
+    const metadataObjectId = await this.resolveMetadataObjectId(input.offerAsset);
     const key = this.wallet.key;
     const msgs = [
       new MsgExecute(
@@ -72,8 +77,8 @@ export class InitiaDexClient {
         "swap_script",
         [],
         [
-          bcs.object().serialize(input.market.pairObjectId),
-          bcs.object().serialize(input.offerAsset.metadataObjectId),
+          bcs.object().serialize(pairObjectId),
+          bcs.object().serialize(metadataObjectId),
           bcs.u64().serialize(input.offerAmountAtomic),
           bcs.option(bcs.u64()).serialize(input.minOutAtomic)
         ].map((value) => value.toBase64())
@@ -103,5 +108,56 @@ export class InitiaDexClient {
     }
 
     throw new Error(`Unsupported InitiaDEX simulation response: ${JSON.stringify(value)}`);
+  }
+
+  private parseViewAddress(value: unknown): string {
+    if (typeof value === "string") {
+      return value.replace(/"/g, "");
+    }
+
+    if (Array.isArray(value) && value.length > 0) {
+      return this.parseViewAddress(value[0]);
+    }
+
+    if (value && typeof value === "object" && "data" in value) {
+      return this.parseViewAddress((value as { data: unknown }).data);
+    }
+
+    throw new Error(`Unsupported Initia metadata response: ${JSON.stringify(value)}`);
+  }
+
+  private resolvePairObjectId(market: RouterMarketConfig): string {
+    if (market.pairObjectId) {
+      return market.pairObjectId;
+    }
+
+    if (!market.pairDenom.startsWith("move/")) {
+      throw new Error(`Cannot derive pair object id from denom: ${market.pairDenom}`);
+    }
+
+    return `0x${market.pairDenom.slice("move/".length)}`;
+  }
+
+  private async resolveMetadataObjectId(asset: CanonicalAssetConfig): Promise<string> {
+    if (asset.metadataObjectId) {
+      return asset.metadataObjectId;
+    }
+
+    const cacheKey = asset.bridgeDenom.toLowerCase();
+    const cached = this.metadataByDenom.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const response = await this.restClient.move.view(
+      "0x1",
+      "coin",
+      "denom_to_metadata",
+      [],
+      [bcs.string().serialize(asset.bridgeDenom).toBase64()]
+    );
+    const metadata = this.parseViewAddress(response.data);
+    this.metadataByDenom.set(cacheKey, metadata);
+    return metadata;
   }
 }
