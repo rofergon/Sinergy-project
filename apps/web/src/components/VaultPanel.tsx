@@ -1,8 +1,11 @@
 import { useMemo, useState } from "react";
-import { parseUnits } from "viem";
-import type { Address, Hex, PublicClient, WalletClient } from "viem";
+import { MsgCallResponse } from "@initia/initia.proto/minievm/evm/v1/tx";
+import { useInterwovenKit } from "@initia/interwovenkit-react";
+import { encodeFunctionData, parseUnits } from "viem";
+import type { Address, Hex } from "viem";
 import { darkPoolVaultAbi, erc20Abi } from "@sinergy/shared";
 import { api } from "../lib/api";
+import { SINERGY_ROLLUP_CHAIN_ID } from "../initia";
 
 type Token = {
   symbol: string;
@@ -14,26 +17,45 @@ type Token = {
 type Props = {
   connected: boolean;
   address?: Address;
-  walletClient?: WalletClient;
-  publicClient?: PublicClient;
+  initiaAddress?: string;
   vaultAddress: Address;
   tokens: Token[];
   onAfterMutation: () => Promise<void>;
 };
 
-async function gasPriceOverrides(publicClient: PublicClient) {
-  return { gasPrice: await publicClient.getGasPrice() };
+type SyncLog = {
+  address: Address;
+  topics: Hex[];
+  data: Hex;
+};
+
+function decodeMsgCallLogs(messageResponses: Array<{ typeUrl: string; value: Uint8Array }>) {
+  return messageResponses.flatMap((response) => {
+    if (response.typeUrl !== "/minievm.evm.v1.MsgCallResponse") {
+      return [];
+    }
+
+    const decoded = MsgCallResponse.decode(response.value);
+    return decoded.logs.map(
+      (log) =>
+        ({
+          address: log.address as Address,
+          topics: log.topics as Hex[],
+          data: (log.data || "0x") as Hex,
+        }) satisfies SyncLog
+    );
+  });
 }
 
 export function VaultPanel({
   connected,
   address,
-  walletClient,
-  publicClient,
+  initiaAddress,
   vaultAddress,
   tokens,
   onAfterMutation,
 }: Props) {
+  const { requestTxBlock } = useInterwovenKit();
   const [mode, setMode] = useState<"deposit" | "withdraw">("deposit");
   const [tokenAddress, setTokenAddress] = useState<Address | "">("");
   const [amount, setAmount] = useState("10");
@@ -44,41 +66,71 @@ export function VaultPanel({
     [tokenAddress, tokens]
   );
 
-  const disabled = !connected || !address || !walletClient || !publicClient || !selectedToken;
+  const disabled = !connected || !address || !initiaAddress || !selectedToken;
+
+  async function submitMsgCall(contractAddr: Address, input: Hex) {
+    if (!initiaAddress) {
+      throw new Error("Connect your Initia wallet first.");
+    }
+
+    return requestTxBlock({
+      chainId: SINERGY_ROLLUP_CHAIN_ID,
+      messages: [
+        {
+          typeUrl: "/minievm.evm.v1.MsgCall",
+          value: {
+            sender: initiaAddress,
+            contractAddr,
+            input,
+            value: "0",
+            accessList: [],
+            authList: [],
+          },
+        },
+      ],
+    });
+  }
 
   async function handleDeposit() {
-    if (!selectedToken || !walletClient || !publicClient || !address) return;
+    if (!selectedToken || !address || !initiaAddress) return;
     setStatus(`Approving ${selectedToken.symbol}…`);
+
     try {
       const amountAtomic = parseUnits(amount, selectedToken.decimals);
 
-      // Approve
-      const approveHash = await walletClient.writeContract({
-        account: address,
-        chain: walletClient.chain,
-        address: selectedToken.address,
-        abi: erc20Abi,
-        functionName: "approve",
-        args: [vaultAddress, amountAtomic],
-        ...(await gasPriceOverrides(publicClient)),
-      });
-      await publicClient.waitForTransactionReceipt({ hash: approveHash });
+      await submitMsgCall(
+        selectedToken.address,
+        encodeFunctionData({
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [vaultAddress, amountAtomic],
+        })
+      );
 
       setStatus(`Depositing ${selectedToken.symbol}…`);
-      const hash = await walletClient.writeContract({
-        account: address,
-        chain: walletClient.chain,
-        address: vaultAddress,
-        abi: darkPoolVaultAbi,
-        functionName: "deposit",
-        args: [selectedToken.address, amountAtomic],
-        ...(await gasPriceOverrides(publicClient)),
-      });
-      await publicClient.waitForTransactionReceipt({ hash });
+      const depositTx = await submitMsgCall(
+        vaultAddress,
+        encodeFunctionData({
+          abi: darkPoolVaultAbi,
+          functionName: "deposit",
+          args: [selectedToken.address, amountAtomic],
+        })
+      );
+
+      const logs = decodeMsgCallLogs(depositTx.msgResponses);
+      if (logs.length === 0) {
+        throw new Error("Deposit completed but no EVM logs were returned.");
+      }
+
       await api("/vault/sync-deposit", {
         method: "POST",
-        body: JSON.stringify({ txHash: hash, userAddress: address }),
+        body: JSON.stringify({
+          txHash: depositTx.transactionHash,
+          userAddress: address,
+          logs,
+        }),
       });
+
       await onAfterMutation();
       setStatus("Deposit synced ✓");
     } catch (err) {
@@ -87,8 +139,9 @@ export function VaultPanel({
   }
 
   async function handleWithdraw() {
-    if (!selectedToken || !walletClient || !publicClient || !address) return;
-    setStatus(`Requesting withdrawal…`);
+    if (!selectedToken || !address || !initiaAddress) return;
+    setStatus("Requesting withdrawal…");
+
     try {
       const quote = await api<{ nonce: number; deadline: number; signature: Hex }>(
         "/vault/withdrawal-quote",
@@ -104,26 +157,35 @@ export function VaultPanel({
       );
 
       const amountAtomic = parseUnits(amount, selectedToken.decimals);
-      const hash = await walletClient.writeContract({
-        account: address,
-        chain: walletClient.chain,
-        address: vaultAddress,
-        abi: darkPoolVaultAbi,
-        functionName: "withdraw",
-        args: [
-          selectedToken.address,
-          amountAtomic,
-          BigInt(quote.nonce),
-          BigInt(quote.deadline),
-          quote.signature,
-        ],
-        ...(await gasPriceOverrides(publicClient)),
-      });
-      await publicClient.waitForTransactionReceipt({ hash });
+      const withdrawTx = await submitMsgCall(
+        vaultAddress,
+        encodeFunctionData({
+          abi: darkPoolVaultAbi,
+          functionName: "withdraw",
+          args: [
+            selectedToken.address,
+            amountAtomic,
+            BigInt(quote.nonce),
+            BigInt(quote.deadline),
+            quote.signature,
+          ],
+        })
+      );
+
+      const logs = decodeMsgCallLogs(withdrawTx.msgResponses);
+      if (logs.length === 0) {
+        throw new Error("Withdrawal completed but no EVM logs were returned.");
+      }
+
       await api("/vault/sync-withdrawal", {
         method: "POST",
-        body: JSON.stringify({ txHash: hash, userAddress: address }),
+        body: JSON.stringify({
+          txHash: withdrawTx.transactionHash,
+          userAddress: address,
+          logs,
+        }),
       });
+
       await onAfterMutation();
       setStatus("Withdrawal settled ✓");
     } catch (err) {
