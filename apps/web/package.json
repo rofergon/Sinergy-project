@@ -11,6 +11,7 @@
   "dependencies": {
     "@sinergy/shared": "0.1.0",
     "@tanstack/react-query": "^5.90.5",
+    "lightweight-charts": "^5.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "viem": "^2.39.0",
@@ -24,4 +25,3 @@
     "vite": "^7.1.7"
   }
 }
-
