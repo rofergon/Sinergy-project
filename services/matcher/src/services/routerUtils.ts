@@ -63,3 +63,19 @@ export function addInventoryAtomic(
 export function isAddressString(value: string | undefined): value is Address {
   return Boolean(value && value.startsWith("0x"));
 }
+
+export function scaleAtomic(
+  amount: bigint,
+  fromDecimals: number,
+  toDecimals: number
+): bigint {
+  if (fromDecimals === toDecimals) {
+    return amount;
+  }
+
+  if (fromDecimals > toDecimals) {
+    return amount / 10n ** BigInt(fromDecimals - toDecimals);
+  }
+
+  return amount * 10n ** BigInt(toDecimals - fromDecimals);
+}

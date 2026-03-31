@@ -11,7 +11,7 @@ import { InventoryService } from "./inventory.js";
 import { InitiaDexClient } from "./initiaDex.js";
 import { BridgeHealthService } from "./bridgeHealth.js";
 import { StateStore } from "./state.js";
-import { addAtomic, getAtomic, keyOf, nowIso } from "./routerUtils.js";
+import { addAtomic, getAtomic, keyOf, nowIso, scaleAtomic } from "./routerUtils.js";
 
 type RouterDeps = {
   store: StateStore;
@@ -61,7 +61,7 @@ export class LiquidityRouter {
     }
 
     const amountAtomic = parseUnits(input.amount, fromToken.decimals);
-    const l1DexAtomic = await this.simulateOnL1(routeConfig, fromToken.symbol, amountAtomic);
+    const l1DexAtomic = await this.simulateOnL1(routeConfig, fromToken, toToken, amountAtomic);
     const spreadAdjusted = (l1DexAtomic * BigInt(10_000 - this.deps.quoteSpreadBps)) / 10_000n;
     const localInventoryAtomic = this.deps.inventoryService.getLocalCapacity(toToken.symbol);
     const withinNotional = this.withinMaxLocalFill(market, fromToken, amountAtomic);
@@ -167,19 +167,29 @@ export class LiquidityRouter {
 
   private async simulateOnL1(
     routeConfig: NonNullable<ReturnType<InventoryService["getRouteConfigForMarket"]>>,
-    fromSymbol: string,
+    fromToken: ResolvedToken,
+    toToken: ResolvedToken,
     amountAtomic: bigint
   ) {
     const offerAsset =
-      keyOf(fromSymbol) === keyOf(routeConfig.baseAsset.localSymbol)
+      keyOf(fromToken.symbol) === keyOf(routeConfig.baseAsset.localSymbol)
         ? routeConfig.baseAsset
         : routeConfig.quoteAsset;
-
-    return this.deps.initiaDexClient.simulateSwap({
+    const returnAsset =
+      keyOf(toToken.symbol) === keyOf(routeConfig.baseAsset.localSymbol)
+        ? routeConfig.baseAsset
+        : routeConfig.quoteAsset;
+    const l1OfferAtomic = scaleAtomic(
+      amountAtomic,
+      fromToken.decimals,
+      offerAsset.l1Decimals
+    );
+    const l1OutAtomic = await this.deps.initiaDexClient.simulateSwap({
       market: routeConfig.market,
       offerAsset,
-      offerAmountAtomic: amountAtomic
+      offerAmountAtomic: l1OfferAtomic
     });
+    return scaleAtomic(l1OutAtomic, returnAsset.l1Decimals, toToken.decimals);
   }
 
   private withinMaxLocalFill(
