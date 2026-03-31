@@ -106,6 +106,8 @@ export function SwapPanel({
   const [status, setStatus] = useState("quoted");
   const [message, setMessage] = useState("");
   const [jobId, setJobId] = useState<string | null>(null);
+  const [isQuoting, setIsQuoting] = useState(false);
+  const [isExecuting, setIsExecuting] = useState(false);
 
   useEffect(() => {
     setFromToken(selectedMarket?.quoteToken.address);
@@ -166,6 +168,8 @@ export function SwapPanel({
 
   async function requestQuote() {
     if (!selectedMarket || !fromToken || !address) return;
+    setIsQuoting(true);
+    setJobId(null);
     setStatus("quoted");
     setMessage("Fetching InitiaDEX-backed quote…");
 
@@ -188,13 +192,18 @@ export function SwapPanel({
             : "This market is dark-pool only for now."
       );
     } catch (error) {
+      setJobId(null);
       setStatus("failed");
       setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsQuoting(false);
     }
   }
 
   async function executeSwap() {
     if (!selectedMarket || !fromToken || !address) return;
+    setIsExecuting(true);
+    setJobId(null);
     setStatus("executing");
     setMessage("Executing private router swap…");
 
@@ -216,7 +225,7 @@ export function SwapPanel({
 
       setQuote(result.quote);
       setStatus(result.status);
-      setJobId(result.jobId);
+      setJobId(result.status === "rebalancing" ? result.jobId : null);
       setMessage(
         result.status === "completed"
           ? "Swap completed with local liquidity."
@@ -224,8 +233,11 @@ export function SwapPanel({
       );
       await onAfterMutation();
     } catch (error) {
+      setJobId(null);
       setStatus("failed");
       setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsExecuting(false);
     }
   }
 
@@ -294,14 +306,22 @@ export function SwapPanel({
         <div className="swap-actions">
           <button
             className="swap-btn secondary"
-            disabled={!connected || !address || !selectedMarket}
+            disabled={!connected || !address || !selectedMarket || isQuoting || isExecuting}
             onClick={requestQuote}
           >
             Get Quote
           </button>
           <button
             className="swap-btn primary"
-            disabled={!connected || !address || !selectedMarket || !quote}
+            disabled={
+              !connected ||
+              !address ||
+              !selectedMarket ||
+              !quote ||
+              isQuoting ||
+              isExecuting ||
+              status === "rebalancing"
+            }
             onClick={executeSwap}
           >
             Execute

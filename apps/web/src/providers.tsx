@@ -14,6 +14,13 @@ injectStyles(InterwovenKitStyles);
 
 const queryClient = new QueryClient();
 const customChain = buildInterwovenCustomChain();
+const interwovenKitProps = {
+  ...TESTNET,
+  defaultChainId: SINERGY_ROLLUP_CHAIN_ID,
+  customChain,
+  customChains: [customChain],
+  theme: "dark",
+} as const;
 
 const wagmiConfig = createConfig({
   chains: [SINERGY_LOCAL_CHAIN],
@@ -26,12 +33,7 @@ export function Providers({ children }: PropsWithChildren) {
   return (
     <WagmiProvider config={wagmiConfig}>
       <QueryClientProvider client={queryClient}>
-        <InterwovenKitProvider
-          {...TESTNET}
-          defaultChainId={SINERGY_ROLLUP_CHAIN_ID}
-          customChain={customChain}
-          theme="dark"
-        >
+        <InterwovenKitProvider {...(interwovenKitProps as any)}>
           {children}
         </InterwovenKitProvider>
       </QueryClientProvider>
