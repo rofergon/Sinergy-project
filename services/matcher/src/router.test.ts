@@ -51,7 +51,7 @@ function makeHarness(options?: {
       localSymbol: "cINIT",
       l1Symbol: "INIT",
       bridgeDenom: "uinit",
-      metadataObjectId: "0x11",
+      l1Decimals: 6,
       minInventoryAtomic: "5000000",
       targetInventoryAtomic: "10000000",
       maxInventoryAtomic: "20000000"
@@ -60,12 +60,13 @@ function makeHarness(options?: {
       localSymbol: "sUSDC",
       l1Symbol: "USDC",
       bridgeDenom: "uusdc",
-      metadataObjectId: "0x22",
+      l1Decimals: 6,
       minInventoryAtomic: "5000000",
       targetInventoryAtomic: "10000000",
       maxInventoryAtomic: "20000000"
     });
     routerMarkets.set("cinit/susdc", {
+      pairDenom: "move/33",
       pairObjectId: "0x33",
       baseSymbol: "cINIT",
       quoteSymbol: "sUSDC"
