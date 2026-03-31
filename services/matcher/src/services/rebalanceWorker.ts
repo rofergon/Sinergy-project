@@ -66,7 +66,7 @@ export class RebalanceWorker {
 
     if (next.state === "l1_swap") {
       if (!this.deps.initiaDexClient.canSubmitTransactions) {
-        this.fail(next.id, next.linkedSwapJobId, "L1 router mnemonic not configured");
+        this.fail(next.id, next.linkedSwapJobId, "L1 router signer not configured");
         return;
       }
 
