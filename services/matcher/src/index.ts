@@ -1,5 +1,7 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import { resolve } from "node:path";
+import { homedir } from "node:os";
 import { parseUnits } from "viem";
 import type { Address, Hex } from "viem";
 import { env } from "./config/env.js";
@@ -88,10 +90,14 @@ const matchingService = new MatchingService({
 const vaultService = new VaultService(store, publicClient, walletClient, deployment, tokens, markets);
 const initiaDexClient = new InitiaDexClient({
   restUrl: env.L1_REST_URL,
+  rpcUrl: env.L1_RPC_URL,
   chainId: env.L1_CHAIN_ID,
   gasPrices: env.L1_GAS_PRICES,
   gasAdjustment: env.L1_GAS_ADJUSTMENT,
-  mnemonic: env.L1_ROUTER_MNEMONIC
+  mnemonic: env.L1_ROUTER_MNEMONIC,
+  keyName: env.L1_ROUTER_KEY_NAME ?? "weave_bridge_executor",
+  keyringBackend: env.L1_ROUTER_KEYRING_BACKEND ?? "test",
+  keyringHome: env.L1_ROUTER_HOME ?? resolve(homedir(), ".opinit", env.L1_CHAIN_ID)
 });
 const bridgeHealthService = new BridgeHealthService({
   relayerHealthUrl: env.RELAYER_HEALTH_URL,
