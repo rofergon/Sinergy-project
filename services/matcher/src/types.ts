@@ -48,14 +48,16 @@ export type CanonicalAssetConfig = {
   localSymbol: string;
   l1Symbol: string;
   bridgeDenom: string;
-  metadataObjectId: string;
+  l1Decimals: number;
+  metadataObjectId?: string;
   minInventoryAtomic: string;
   targetInventoryAtomic: string;
   maxInventoryAtomic: string;
 };
 
 export type RouterMarketConfig = {
-  pairObjectId: string;
+  pairDenom: string;
+  pairObjectId?: string;
   baseSymbol: string;
   quoteSymbol: string;
 };
