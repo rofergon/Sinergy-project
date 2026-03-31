@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { formatUnits } from "viem";
 import type { Hex } from "viem";
 
 type Market = {
@@ -6,14 +7,18 @@ type Market = {
   symbol: string;
   referencePrice: string;
   changePct?: number;
-  baseToken: { symbol: string; decimals: number };
-  quoteToken: { symbol: string; decimals: number };
+  baseToken: { symbol: string; decimals: number; address: `0x${string}` };
+  quoteToken: { symbol: string; decimals: number; address: `0x${string}` };
 };
 
 type Props = {
   connected: boolean;
   address?: `0x${string}`;
   markets: Market[];
+  balances: {
+    available: Record<string, string>;
+    locked: Record<string, string>;
+  } | null;
   selectedMarketId?: Hex;
   onSelectMarket: (marketId: Hex) => void;
   onSubmit: (input: {
@@ -29,13 +34,15 @@ export function OrderPanel({
   connected,
   address,
   markets,
+  balances,
   selectedMarketId,
   onSelectMarket,
   onSubmit,
 }: Props) {
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
-  const [orderType, setOrderType] = useState<"limit" | "market">("limit");
+  const [orderType, setOrderType] = useState<"limit" | "market">("market");
   const [quantity, setQuantity] = useState("1");
+  const [quoteTotal, setQuoteTotal] = useState("0");
   const [limitPrice, setLimitPrice] = useState("0");
   const [pctActive, setPctActive] = useState<number | null>(null);
   const [status, setStatus] = useState("");
@@ -47,12 +54,87 @@ export function OrderPanel({
 
   const baseSymbol = selected?.baseToken?.symbol ?? "TOKEN";
   const quoteSymbol = selected?.quoteToken?.symbol ?? "USDC";
+  const marketPrice = Number(selected?.referencePrice ?? "0");
+
+  function sanitizeDecimalInput(value: string) {
+    return value.replace(",", ".").replace(/[^0-9.]/g, "");
+  }
+
+  function trimDecimal(value: number, decimals = 6) {
+    if (!Number.isFinite(value)) return "0";
+    return value
+      .toFixed(decimals)
+      .replace(/\.?0+$/, "")
+      .replace(/^$/, "0");
+  }
+
+  const availableBalance = useMemo(() => {
+    if (!selected || !balances?.available) return 0;
+    const token =
+      side === "BUY" ? selected.quoteToken : selected.baseToken;
+    const atomic = balances.available[token.address.toLowerCase()] ?? "0";
+    return Number(formatUnits(BigInt(atomic), token.decimals));
+  }, [balances, selected, side]);
 
   const total = useMemo(() => {
+    if (orderType === "market") {
+      return trimDecimal(Number(quoteTotal) || 0, 2);
+    }
+
     const q = parseFloat(quantity) || 0;
-    const p = orderType === "market" ? parseFloat(selected?.referencePrice ?? "0") : parseFloat(limitPrice) || 0;
-    return (q * p).toFixed(2);
-  }, [quantity, limitPrice, orderType, selected]);
+    const p = parseFloat(limitPrice) || 0;
+    return trimDecimal(q * p, 2);
+  }, [quantity, limitPrice, orderType, quoteTotal]);
+
+  useEffect(() => {
+    if (!selected) return;
+    setLimitPrice(selected.referencePrice);
+    if (orderType === "market") {
+      const nextQuantity = Number(quantity) || 0;
+      setQuoteTotal(trimDecimal(nextQuantity * Number(selected.referencePrice || "0"), 2));
+    }
+  }, [selected, orderType]);
+
+  function updateQuantity(nextQuantityRaw: string) {
+    const nextQuantity = sanitizeDecimalInput(nextQuantityRaw);
+    setQuantity(nextQuantity);
+    setPctActive(null);
+
+    if (orderType === "market") {
+      const numericQuantity = Number(nextQuantity) || 0;
+      setQuoteTotal(trimDecimal(numericQuantity * marketPrice, 2));
+    }
+  }
+
+  function updateQuoteTotal(nextQuoteRaw: string) {
+    const nextQuote = sanitizeDecimalInput(nextQuoteRaw);
+    setQuoteTotal(nextQuote);
+    setPctActive(null);
+
+    if (orderType === "market") {
+      const numericQuote = Number(nextQuote) || 0;
+      const nextQuantity = marketPrice > 0 ? numericQuote / marketPrice : 0;
+      setQuantity(trimDecimal(nextQuantity));
+    }
+  }
+
+  function applyPercentage(pct: number) {
+    if (!selected) return;
+    setPctActive(pct);
+
+    const fraction = pct / 100;
+    if (side === "BUY") {
+      const totalQuote = availableBalance * fraction;
+      setQuoteTotal(trimDecimal(totalQuote, 2));
+      const baseAmount = marketPrice > 0 ? totalQuote / marketPrice : 0;
+      setQuantity(trimDecimal(baseAmount));
+      return;
+    }
+
+    const baseAmount = availableBalance * fraction;
+    setQuantity(trimDecimal(baseAmount));
+    setQuoteTotal(trimDecimal(baseAmount * marketPrice, 2));
+  }
 
   return (
     <div className="trade-ticket">
@@ -76,7 +158,8 @@ export function OrderPanel({
       <div className="tt-type-tabs">
         <button
           className={`tt-type-btn ${orderType === "limit" ? "active" : ""}`}
-          onClick={() => setOrderType("limit")}
+          onClick={() => setStatus("Limit quedara para despues; por ahora Market es el flujo activo.")}
+          disabled
         >
           Limit
         </button>
@@ -99,7 +182,11 @@ export function OrderPanel({
                 const next = e.target.value as Hex;
                 onSelectMarket(next);
                 const m = markets.find((item) => item.id === next);
-                if (m) setLimitPrice(m.referencePrice);
+                if (m) {
+                  setLimitPrice(m.referencePrice);
+                  const nextQuantity = Number(quantity) || 0;
+                  setQuoteTotal(trimDecimal(nextQuantity * Number(m.referencePrice || "0"), 2));
+                }
               }}
               style={{
                 background: "none",
@@ -122,7 +209,6 @@ export function OrderPanel({
           </div>
         </div>
 
-        {/* Price */}
         {orderType === "limit" && (
           <div className="tt-field">
             <span className="tt-field-label">Price</span>
@@ -139,12 +225,27 @@ export function OrderPanel({
         )}
 
         {orderType === "market" && (
-          <div className="tt-info-row" style={{ padding: "6px 0" }}>
-            <span>Price</span>
-            <span style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
-              Market ({selected?.referencePrice ?? "--"})
-            </span>
-          </div>
+          <>
+            <div className="tt-info-row" style={{ padding: "6px 0" }}>
+              <span>Reference price</span>
+              <span style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
+                {selected?.referencePrice ?? "--"} {quoteSymbol}
+              </span>
+            </div>
+
+            <div className="tt-field">
+              <span className="tt-field-label">Total</span>
+              <div className="tt-input-wrap">
+                <input
+                  type="text"
+                  value={quoteTotal}
+                  onChange={(e) => updateQuoteTotal(e.target.value)}
+                  placeholder="0.00"
+                />
+                <span className="tt-input-suffix">{quoteSymbol}</span>
+              </div>
+            </div>
+          </>
         )}
 
         {/* Amount */}
@@ -154,7 +255,7 @@ export function OrderPanel({
             <input
               type="text"
               value={quantity}
-              onChange={(e) => { setQuantity(e.target.value); setPctActive(null); }}
+              onChange={(e) => updateQuantity(e.target.value)}
               placeholder="0.00"
             />
             <span className="tt-input-suffix">{baseSymbol}</span>
@@ -167,7 +268,7 @@ export function OrderPanel({
             <button
               key={pct}
               className={`tt-pct-btn ${pctActive === pct ? "active" : ""}`}
-              onClick={() => setPctActive(pct)}
+              onClick={() => applyPercentage(pct)}
             >
               {pct}%
             </button>
@@ -203,7 +304,7 @@ export function OrderPanel({
                 marketId: selectedMarketId,
                 side,
                 quantity,
-                limitPrice: orderType === "market" ? (selected?.referencePrice ?? "0") : limitPrice,
+                limitPrice: selected?.referencePrice ?? limitPrice,
               });
               setStatus("Order accepted ✓");
               setTimeout(() => setStatus(""), 3000);
