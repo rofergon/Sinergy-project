@@ -9,13 +9,16 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@initia/initia.js": "^1.0.21",
+    "@initia/interwovenkit-react": "^2.5.1",
     "@sinergy/shared": "0.1.0",
     "@tanstack/react-query": "^5.90.5",
     "lightweight-charts": "^5.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "viem": "^2.39.0",
-    "wagmi": "^2.18.1"
+    "vite-plugin-node-polyfills": "^0.26.0",
+    "wagmi": "^2.17.2"
   },
   "devDependencies": {
     "@types/react": "^19.2.2",

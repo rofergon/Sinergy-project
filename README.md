@@ -1,13 +1,14 @@
 # Sinergy Dark RWA Market
 
-Mercado RWA mínimo viable sobre la appchain Initia `Sinergy-2` usando:
+Minimal viable RWA market on the Initia appchain `Sinergy-2` using:
 
-- `Foundry` para contratos EVM
-- `Vite + React + wagmi/viem` para frontend
-- `Fastify + viem` para matcher backend
-- `minitiad` para despliegue local en `MiniEVM`
+- `Foundry` for EVM contracts
+- `Vite + React + InterwovenKit` for wallet UX on Initia
+- `viem` for ABI encoding and EVM utilities in the frontend
+- `Fastify + viem` for the matcher backend
+- `minitiad` for local deployment on `MiniEVM`
 
-## Contexto de red
+## Network Context
 
 - Rollup chain id: `Sinergy-2`
 - L1: `initiation-2`
@@ -17,28 +18,28 @@ Mercado RWA mínimo viable sobre la appchain Initia `Sinergy-2` usando:
 - Tendermint RPC: `http://127.0.0.1:26657`
 - REST: `http://127.0.0.1:1317`
 
-## Estructura
+## Structure
 
 ```text
 contracts/         Foundry contracts
-apps/web/          Frontend Vite
-services/matcher/  Backend de matching, pricing y tickets de retiro
-packages/shared/   ABIs, chain config y tipos compartidos
-docs/              Arquitectura y roadmap
-deployments/       Direcciones locales desplegadas
-scripts/           Utilidades de despliegue y export
+apps/web/          Vite frontend
+services/matcher/  Matching, pricing, and withdrawal-ticket backend
+packages/shared/   ABIs, chain config, and shared types
+docs/              Architecture and roadmap
+deployments/       Deployed local addresses
+scripts/           Deployment and export utilities
 ```
 
-## Contratos incluidos
+## Included Contracts
 
 - `MockUSDC`
 - `RwaShareToken`
 - `DarkPoolVault`
 - `DarkPoolMarket`
 
-## Direcciones desplegadas en local
+## Locally Deployed Addresses
 
-Despliegue actual sobre `Sinergy-2`:
+Current deployment on `Sinergy-2`:
 
 - `Matcher signer`: `0x6eC8AcC95Da5f752eCeAB1c214C1b62080023283`
 - `DarkPoolVault`: `0x3fF37bE2C8B8179cBfd97CB1e75fEd91e5e38B19`
@@ -48,46 +49,50 @@ Despliegue actual sobre `Sinergy-2`:
 - `tBOND`: `0x910a546A1763C38dcf352cfdB6e752b3DBDAb029`
 - `tNVDA`: `0xCBA194D6576379CfebA944cB696Be34F20e8a987`
 
-Fuente de verdad runtime:
+Runtime source of truth:
 
 - [deployments/local.json](/home/sari/Sinergy-project/deployments/local.json)
 
-## Flujo MVP
+## MVP Flow
 
-1. El usuario aprueba y deposita tokens en `DarkPoolVault`.
-2. El frontend sincroniza ese depósito con `matcher-service`.
-3. El backend mantiene balances internos y un libro privado.
-4. Las órdenes se emparejan fuera de cadena con guardas de precio.
-5. Los retiros requieren un ticket EIP-712 firmado por el matcher.
-6. Los batches de matching pueden anclarse en `DarkPoolMarket`.
+1. The user connects a wallet through `InterwovenKit`.
+2. The frontend sends MiniEVM `MsgCall` messages for `approve`, `deposit`, and `withdraw`.
+3. The frontend decodes EVM logs from the `MsgCall` response and syncs the vault with `matcher-service`.
+4. The backend maintains internal balances and a private order book.
+5. Orders are matched off-chain with price-band guards.
+6. Withdrawals require an EIP-712 ticket signed by the matcher.
+7. Matching batches can be anchored in `DarkPoolMarket`.
 
-## Nuevos cripto para hackathon
+This flow previously used `walletClient.writeContract(...)` through `wagmi`.
+Now wallet UX and transaction submission live in `InterwovenKit`, while the EVM contracts remain unchanged.
 
-El matcher ya soporta un modelo híbrido de pricing:
+## New Crypto Assets for the Hackathon
 
-- RWAs vía `Twelve Data`
-- cripto vía `Initia Connect Oracle`
+The matcher already supports a hybrid pricing model:
 
-Feeds cripto mapeados:
+- RWAs through `Twelve Data`
+- Crypto through `Initia Connect Oracle`
+
+Mapped crypto feeds:
 
 - `cBTC -> BTC/USD`
 - `cETH -> ETH/USD`
 - `cSOL -> SOL/USD`
 - `cINIT -> INIT/USD`
 
-El endpoint oficial usado por defecto es:
+The official default endpoint is:
 
 - `INITIA_CONNECT_REST_URL=https://rest.testnet.initia.xyz`
 
-## Arranque rápido
+## Quick Start
 
-### 1. Instalar dependencias JS
+### 1. Install JS Dependencies
 
 ```bash
 npm install
 ```
 
-### 2. Compilar contratos
+### 2. Compile Contracts
 
 ```bash
 cd contracts
@@ -95,106 +100,126 @@ forge install OpenZeppelin/openzeppelin-contracts
 forge build
 ```
 
-### 3. Desplegar en `Sinergy-2`
+### 3. Deploy to `Sinergy-2`
 
 ```bash
 chmod +x scripts/deploy-local.sh
 ./scripts/deploy-local.sh
 ```
 
-Esto actualiza:
+This updates:
 
 - `deployments/local.json`
 - `services/matcher/.env`
 
-Si vuelves a ejecutar el deploy, estas direcciones pueden cambiar.
+If you run the deploy again, these addresses may change.
 
-### 4. Levantar backend
+### 4. Start the Backend
 
-Configura `services/matcher/.env` con una API key de Twelve Data si quieres precios reales:
+Configure `services/matcher/.env` with a Twelve Data API key if you want live real-world prices:
 
 ```bash
 cp services/matcher/.env.example services/matcher/.env
 ```
 
-Variables relevantes:
+Relevant variables:
 
-- `TWELVE_DATA_API_KEY`: API key del proveedor
-- `COINGECKO_DEMO_API_KEY`: demo key para backfill histórico de cripto
-- `T_BOND_PROXY_SYMBOL=TLT`: proxy ETF para `tBOND` (`TLT` o `IEF`)
-- `PRICE_POLL_INTERVAL_MS=60000`: refresco cada 1 minuto
-- `PRICE_DB_FILE=./data/prices.sqlite`: base local SQLite en Linux
-- `INITIA_CONNECT_REST_URL=https://rest.testnet.initia.xyz`: fuente Connect para cripto
+- `TWELVE_DATA_API_KEY`: provider API key
+- `COINGECKO_DEMO_API_KEY`: demo key for crypto historical backfill
+- `T_BOND_PROXY_SYMBOL=TLT`: ETF proxy for `tBOND` (`TLT` or `IEF`)
+- `PRICE_POLL_INTERVAL_MS=60000`: refresh every 1 minute
+- `PRICE_DB_FILE=./data/prices.sqlite`: local SQLite database on Linux
+- `INITIA_CONNECT_REST_URL=https://rest.testnet.initia.xyz`: Connect source for crypto
 
-Mapeo actual del MVP:
+Fallback behavior:
+
+- If `Twelve Data` fails or runs out of credits, the matcher keeps the fallback prices already seeded in SQLite so the markets can still resolve pairs.
+- If you already ran backfill before, `services/matcher/data/prices.sqlite` remains a valid source even if the external provider fails during startup.
+
+Current MVP mapping:
 
 - `tAAPL -> AAPL`
 - `tNVDA -> NVDA`
-- `tBOND -> TLT` por defecto
-- `cBTC -> BTC/USD` live por Initia Connect, histórico por CoinGecko
-- `cETH -> ETH/USD` live por Initia Connect, histórico por CoinGecko
-- `cSOL -> SOL/USD` live por Initia Connect, histórico por CoinGecko
-- `cINIT -> INIT/USD` live por Initia Connect, histórico por CoinGecko
+- `tBOND -> TLT` by default
+- `cBTC -> BTC/USD` live from Initia Connect, historical from CoinGecko
+- `cETH -> ETH/USD` live from Initia Connect, historical from CoinGecko
+- `cSOL -> SOL/USD` live from Initia Connect, historical from CoinGecko
+- `cINIT -> INIT/USD` live from Initia Connect, historical from CoinGecko
 
-Si quieres precargar 2 meses de histórico real antes de arrancar:
+If you want to preload 2 months of real historical data before startup:
 
 ```bash
 BACKFILL_DAYS=60 npm run backfill:prices
 ```
 
-Opcionalmente puedes controlar el tamaño de ventana:
+You can also control the window size:
 
 ```bash
 BACKFILL_DAYS=60 BACKFILL_CHUNK_DAYS=7 npm run backfill:prices
 ```
 
-Eso pobla `services/matcher/data/prices.sqlite` con histórico real y luego el matcher sigue alimentando el presente por polling.
+This populates `services/matcher/data/prices.sqlite` with real historical data, and then the matcher keeps filling in the present by polling.
 
-Notas del histórico:
+Historical data notes:
 
-- RWAs (`tAAPL`, `tNVDA`, `tBOND`) usan `Twelve Data` con granularidad `1min`
-- cripto (`cBTC`, `cETH`, `cSOL`, `cINIT`) usan `CoinGecko Demo` para bootstrap histórico y `Initia Connect` para live
-- el backfill cripto no es `1min` puro; CoinGecko entrega una granularidad más gruesa para rangos largos y el matcher la persiste en la misma SQLite
+- RWAs (`tAAPL`, `tNVDA`, `tBOND`) use `Twelve Data` with `1min` granularity
+- Crypto (`cBTC`, `cETH`, `cSOL`, `cINIT`) use `CoinGecko Demo` for bootstrap historical data and `Initia Connect` for live data
+- Crypto backfill is not pure `1min`; CoinGecko returns coarser granularity on long ranges, and the matcher persists it into the same SQLite database
 
-Luego inicia el matcher:
+Then start the matcher:
 
 ```bash
 npm run dev:matcher
 ```
 
-### 5. Levantar frontend
+If `tsx watch` has trouble in your remote environment, you can start a single-run process with:
+
+```bash
+npm run start -w @sinergy/matcher
+```
+
+### 5. Start the Frontend
 
 ```bash
 npm run dev:web
 ```
 
-### 6. Añadir cripto sobre un despliegue ya existente
+Frontend notes:
 
-Si no quieres redeploy completo y solo quieres sumar los nuevos activos cripto a tu chain local actual:
+- The wallet modal and session now use `InterwovenKit`.
+- The frontend resolves the matcher URL automatically:
+  - it uses `VITE_MATCHER_URL` if you define it
+  - otherwise it uses the same hostname you used to open the web app, with port `8787`
+- This helps when you are accessing the app through SSH, VS Code Ports, or remote forwarding and do not want to hardcode `127.0.0.1`.
+
+### 6. Add Crypto Assets to an Existing Deployment
+
+If you do not want a full redeploy and only want to add the new crypto assets to your current local chain:
 
 ```bash
 ./scripts/add-crypto-assets.sh
 ```
 
-Eso despliega:
+This deploys:
 
 - `cBTC`
 - `cETH`
 - `cSOL`
 - `cINIT`
 
-y actualiza [deployments/local.json](/home/sari/Sinergy-project/deployments/local.json) para que el matcher y el frontend los vean como nuevos mercados.
+and updates [deployments/local.json](/home/sari/Sinergy-project/deployments/local.json) so the matcher and frontend can see them as new markets.
 
-## Documentación interna
+## Internal Documentation
 
-- Arquitectura: [docs/architecture.md](/home/sari/Sinergy-project/docs/architecture.md)
-- Plan detallado: [docs/implementation-plan.md](/home/sari/Sinergy-project/docs/implementation-plan.md)
+- Architecture: [docs/architecture.md](/home/sari/Sinergy-project/docs/architecture.md)
+- Detailed plan: [docs/implementation-plan.md](/home/sari/Sinergy-project/docs/implementation-plan.md)
 
-## Notas importantes
+## Important Notes
 
-- Este primer corte da privacidad frente al observador on-chain y frente a otros traders, no frente al operador del backend.
-- El libro, matching y ledger interno viven fuera de cadena.
-- Los precios reales se ingieren desde internet al matcher, se guardan en `services/matcher/data/prices.sqlite` y el frontend consume velas desde el backend local.
-- Los cripto conectados a Initia Oracle construyen histórico local desde el momento en que el matcher empieza a muestrearlos; `Connect` no se está usando aquí como proveedor de backfill histórico.
-- La wallet del navegador debe estar configurada para la red local `Sinergy-2`.
-- Si actualizas `deployments/local.json`, reinicia backend y frontend para recargar direcciones.
+- This first cut provides privacy from on-chain observers and other traders, but not from the backend operator.
+- The order book, matching engine, and internal ledger live off-chain.
+- Real prices are ingested from the internet into the matcher, stored in `services/matcher/data/prices.sqlite`, and the frontend consumes candles from the local backend.
+- Crypto assets connected to Initia Oracle build local history from the moment the matcher starts sampling them; `Connect` is not being used here as a historical backfill provider.
+- Wallet connection is handled through `InterwovenKit` on the local chain `Sinergy-2`.
+- For `MsgCall` transactions on MiniEVM, the frontend uses the Initia `bech32` address as `sender`, and the EVM hex address for contracts and balances.
+- If you update `deployments/local.json`, restart both backend and frontend so the addresses reload.
