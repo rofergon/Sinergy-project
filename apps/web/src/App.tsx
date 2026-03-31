@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useInterwovenKit } from "@initia/interwovenkit-react";
 import type { Address, Hex } from "viem";
-import { api, API_BASE } from "./lib/api";
+import { api } from "./lib/api";
 import { Navbar } from "./components/Navbar";
 import { TickerStrip } from "./components/TickerStrip";
 import { TradingViewChart } from "./components/TradingViewChart";
@@ -10,6 +10,7 @@ import { BottomTabs } from "./components/BottomTabs";
 import { OrderPanel } from "./components/OrderPanel";
 import { VaultPanel } from "./components/VaultPanel";
 import { BalancesPanel } from "./components/BalancesPanel";
+import { PortfolioView } from "./components/PortfolioView";
 import "./styles.css";
 
 type Token = {
@@ -68,6 +69,7 @@ function Dashboard() {
   } | null>(null);
   const [orders, setOrders] = useState<any[]>([]);
   const [error, setError] = useState("");
+  const [activeView, setActiveView] = useState<"trade" | "markets" | "portfolio">("trade");
 
   const userAddress = address as Address | undefined;
   const tokens: Token[] = useMemo(() => deployment?.tokens ?? [], [deployment]);
@@ -150,12 +152,30 @@ function Dashboard() {
     );
   }, [userAddress]);
 
+  function navigateTo(view: "trade" | "markets" | "portfolio") {
+    setActiveView(view);
+  }
+
+  async function cancelOrder(orderId: string) {
+    if (!userAddress) {
+      throw new Error("Connect wallet to cancel orders.");
+    }
+
+    await api(`/orders/${orderId}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({ userAddress }),
+    });
+    await refreshUser();
+  }
+
   return (
     <>
       <Navbar
         markets={marketSnapshots}
         selectedMarketId={selectedMarket?.id}
         onSelectMarket={setSelectedMarketId}
+        activeView={activeView}
+        onNavigate={navigateTo}
         isConnected={isConnected}
         address={userAddress}
         onConnect={() => {
@@ -167,52 +187,70 @@ function Dashboard() {
         chainOk={true}
       />
 
-      <TickerStrip market={selectedMarket} />
+      {activeView !== "portfolio" && <TickerStrip market={selectedMarket} />}
 
       {error && <div className="error-bar">{error}</div>}
 
-      <div className="dex-grid">
-        <div className="dex-col-left">
-          <OrderBook market={selectedMarket} />
+      {activeView === "portfolio" ? (
+        <PortfolioView
+          connected={isConnected}
+          address={userAddress}
+          initiaAddress={initiaAddress}
+          vaultAddress={vaultAddress}
+          tokens={tokens}
+          balances={balances}
+          orders={orders}
+          markets={marketSnapshots}
+          onAfterMutation={refreshUser}
+          onCancelOrder={cancelOrder}
+        />
+      ) : (
+        <div className="dex-grid">
+          <div className="dex-col-left">
+            <OrderBook market={selectedMarket} />
+          </div>
+
+          <div className="dex-col-center">
+            <TradingViewChart market={selectedMarket} />
+            <BottomTabs
+              address={userAddress}
+              market={selectedMarket}
+              orders={orders}
+              markets={marketSnapshots}
+              onCancelOrder={cancelOrder}
+            />
+          </div>
+
+          <div className="dex-col-right">
+            <OrderPanel
+              connected={isConnected}
+              address={userAddress}
+              markets={marketSnapshots}
+              balances={balances}
+              selectedMarketId={selectedMarket?.id}
+              onSelectMarket={setSelectedMarketId}
+              onSubmit={async (input) => {
+                await api("/orders", {
+                  method: "POST",
+                  body: JSON.stringify(input),
+                });
+                await refreshUser();
+              }}
+            />
+
+            <VaultPanel
+              connected={isConnected}
+              address={userAddress}
+              initiaAddress={initiaAddress}
+              vaultAddress={vaultAddress}
+              tokens={tokens}
+              onAfterMutation={refreshUser}
+            />
+
+            <BalancesPanel tokens={tokens} balances={balances} />
+          </div>
         </div>
-
-        <div className="dex-col-center">
-          <TradingViewChart market={selectedMarket} />
-          <BottomTabs
-            market={selectedMarket}
-            orders={orders}
-            markets={marketSnapshots}
-          />
-        </div>
-
-        <div className="dex-col-right">
-          <OrderPanel
-            connected={isConnected}
-            address={userAddress}
-            markets={marketSnapshots}
-            selectedMarketId={selectedMarket?.id}
-            onSelectMarket={setSelectedMarketId}
-            onSubmit={async (input) => {
-              await api("/orders", {
-                method: "POST",
-                body: JSON.stringify(input),
-              });
-              await refreshUser();
-            }}
-          />
-
-          <VaultPanel
-            connected={isConnected}
-            address={userAddress}
-            initiaAddress={initiaAddress}
-            vaultAddress={vaultAddress}
-            tokens={tokens}
-            onAfterMutation={refreshUser}
-          />
-
-          <BalancesPanel tokens={tokens} balances={balances} />
-        </div>
-      </div>
+      )}
     </>
   );
 }
