@@ -9,7 +9,10 @@ const EMPTY_STATE: AppState = {
   processedDeposits: [],
   processedWithdrawals: [],
   pendingWithdrawals: [],
-  withdrawalNonces: {}
+  withdrawalNonces: {},
+  routerInventory: {},
+  swapJobs: [],
+  rebalanceJobs: []
 };
 
 export class StateStore {

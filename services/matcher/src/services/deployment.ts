@@ -33,7 +33,9 @@ export function resolveMarkets(deployment: LocalDeployment): ResolvedMarket[] {
         id,
         symbol,
         baseToken: token,
-        quoteToken: quote
+        quoteToken: quote,
+        routeable: false,
+        routePolicy: "dark-pool-only"
       };
     });
 }

@@ -7,6 +7,8 @@ type Market = {
   symbol: string;
   referencePrice: string;
   changePct?: number;
+  routeable: boolean;
+  routePolicy: "router-enabled" | "dark-pool-only";
   baseToken: { symbol: string; decimals: number; address: `0x${string}` };
   quoteToken: { symbol: string; decimals: number; address: `0x${string}` };
 };
@@ -284,11 +286,15 @@ export function OrderPanel({
         {/* Info rows */}
         <div className="tt-info-row">
           <span>Execution</span>
-          <span>Off-chain dark pool</span>
+          <span>{selected?.routeable ? "Dark pool / block flow" : "Off-chain dark pool"}</span>
         </div>
         <div className="tt-info-row">
           <span>Settlement</span>
           <span>On-chain via vault</span>
+        </div>
+        <div className="tt-info-row">
+          <span>Market policy</span>
+          <span>{selected?.routeable ? "Use Private Router for retail swaps" : "Dark-pool only"}</span>
         </div>
 
         {/* Submit */}

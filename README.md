@@ -73,6 +73,12 @@ The matcher already supports a hybrid pricing model:
 - RWAs through `Twelve Data`
 - Crypto through `Initia Connect Oracle`
 
+It also now exposes a `Private Router` path for crypto swaps:
+
+- instant local fills when protocol inventory is healthy;
+- async rebalance jobs when Initia L1 liquidity is needed;
+- strict gating so only canonical, bridgeable assets can claim `InitiaDEX`-backed routing.
+
 Mapped crypto feeds:
 
 - `cBTC -> BTC/USD`
@@ -130,6 +136,12 @@ Relevant variables:
 - `PRICE_POLL_INTERVAL_MS=60000`: refresh every 1 minute
 - `PRICE_DB_FILE=./data/prices.sqlite`: local SQLite database on Linux
 - `INITIA_CONNECT_REST_URL=https://rest.testnet.initia.xyz`: Connect source for crypto
+- `L1_REST_URL=https://rest.testnet.initia.xyz`: Initia L1 REST for router quotes and swaps
+- `RELAYER_HEALTH_URL`: relayer health endpoint used to gate L1-backed routing
+- `OPINIT_HEALTH_URL`: OPinit health endpoint used to gate L1-backed routing
+- `ROUTER_CANONICAL_ASSETS_JSON`: local symbol -> canonical L1 metadata mapping
+- `ROUTER_MARKETS_JSON`: local market symbol -> InitiaDEX pair object mapping
+- `ROUTER_BOOTSTRAP_INVENTORY_JSON`: local hot inventory bootstrap for instant fills
 
 Fallback behavior:
 
@@ -187,6 +199,9 @@ npm run dev:web
 Frontend notes:
 
 - The wallet modal and session now use `InterwovenKit`.
+- The right rail now contains both the private dark-pool ticket and a dedicated `Private Router` panel.
+- Markets are labeled as `Router-enabled` or `Dark-pool only`.
+- `InitiaDEX`-backed routing only activates when canonical asset mappings and bridge health endpoints are configured.
 - The frontend resolves the matcher URL automatically:
   - it uses `VITE_MATCHER_URL` if you define it
   - otherwise it uses the same hostname you used to open the web app, with port `8787`

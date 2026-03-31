@@ -7,6 +7,7 @@ type MarketSnapshot = {
   referencePrice: string;
   changePct: number;
   trend: "up" | "down";
+  routePolicy: "router-enabled" | "dark-pool-only";
 };
 
 type Props = {
@@ -21,6 +22,7 @@ type Props = {
   onOpenWallet: () => void;
   onDisconnect: () => void;
   chainOk: boolean;
+  bridgeReady: boolean;
 };
 
 function shorten(addr?: string) {
@@ -40,6 +42,7 @@ export function Navbar({
   onOpenWallet,
   onDisconnect,
   chainOk,
+  bridgeReady,
 }: Props) {
   const [ddOpen, setDdOpen] = useState(false);
   const ddRef = useRef<HTMLDivElement>(null);
@@ -83,9 +86,14 @@ export function Navbar({
                 }}
               >
                 <span>{m.symbol}</span>
-                <span className={`dd-change ${m.trend}`}>
-                  {m.changePct >= 0 ? "+" : ""}
-                  {m.changePct.toFixed(2)}%
+                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className={`route-badge ${m.routePolicy === "router-enabled" ? "router" : "dark"}`}>
+                    {m.routePolicy === "router-enabled" ? "Router" : "Dark"}
+                  </span>
+                  <span className={`dd-change ${m.trend}`}>
+                    {m.changePct >= 0 ? "+" : ""}
+                    {m.changePct.toFixed(2)}%
+                  </span>
                 </span>
               </button>
             ))}
@@ -116,7 +124,7 @@ export function Navbar({
 
       <div className="nav-status">
         <div className="nav-status-dot" />
-        {chainOk ? "Live" : "Offline"}
+        {chainOk ? (bridgeReady ? "Live" : "Degraded") : "Offline"}
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>

@@ -12,7 +12,22 @@ const envSchema = z.object({
   T_BOND_PROXY_SYMBOL: z.string().default("TLT"),
   TWELVE_DATA_API_KEY: z.string().optional(),
   COINGECKO_DEMO_API_KEY: z.string().optional(),
-  INITIA_CONNECT_REST_URL: z.string().default("https://rest.testnet.initia.xyz")
+  INITIA_CONNECT_REST_URL: z.string().default("https://rest.testnet.initia.xyz"),
+  L1_REST_URL: z.string().default("https://rest.testnet.initia.xyz"),
+  L1_RPC_URL: z.string().default("https://rpc.testnet.initia.xyz"),
+  L1_CHAIN_ID: z.string().default("initiation-2"),
+  L1_GAS_PRICES: z.string().default("0.015uinit"),
+  L1_GAS_ADJUSTMENT: z.string().default("1.75"),
+  L1_ROUTER_MNEMONIC: z.string().optional(),
+  RELAYER_HEALTH_URL: z.string().optional(),
+  OPINIT_HEALTH_URL: z.string().optional(),
+  OPINIT_BRIDGE_ID: z.string().optional(),
+  ROUTER_QUOTE_SPREAD_BPS: z.coerce.number().int().nonnegative().default(35),
+  ROUTER_MAX_LOCAL_FILL_USD: z.coerce.number().positive().default(25_000),
+  ROUTER_REBALANCE_INTERVAL_MS: z.coerce.number().int().positive().default(15_000),
+  ROUTER_CANONICAL_ASSETS_JSON: z.string().default("{}"),
+  ROUTER_MARKETS_JSON: z.string().default("{}"),
+  ROUTER_BOOTSTRAP_INVENTORY_JSON: z.string().default("{}")
 });
 
 export const env = envSchema.parse(process.env);

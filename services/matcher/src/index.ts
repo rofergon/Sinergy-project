@@ -8,10 +8,16 @@ import { StateStore } from "./services/state.js";
 import { PriceService } from "./services/priceService.js";
 import { MatchingService } from "./services/matcher.js";
 import { VaultService, createClients } from "./services/vault.js";
+import { InventoryService } from "./services/inventory.js";
+import { InitiaDexClient } from "./services/initiaDex.js";
+import { BridgeHealthService } from "./services/bridgeHealth.js";
+import { LiquidityRouter } from "./services/router.js";
+import { RebalanceWorker } from "./services/rebalanceWorker.js";
+import type { CanonicalAssetConfig, RouterMarketConfig } from "./types.js";
 
 const deployment = loadDeployment(env.DEPLOYMENT_FILE);
 const tokens = resolveTokens(deployment);
-const markets = resolveMarkets(deployment);
+const rawMarkets = resolveMarkets(deployment);
 const { publicClient, walletClient, account } = createClients(
   env.MATCHER_PRIVATE_KEY as Hex,
   deployment.network.rpcUrl
@@ -26,6 +32,50 @@ const priceService = new PriceService({
   initiaConnectRestUrl: env.INITIA_CONNECT_REST_URL
 });
 await priceService.start();
+
+function parseJsonRecord<T>(label: string, raw: string): Record<string, T> {
+  try {
+    return JSON.parse(raw) as Record<string, T>;
+  } catch (error) {
+    throw new Error(
+      `Invalid ${label}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+const canonicalAssets = new Map<string, CanonicalAssetConfig>(
+  Object.entries(parseJsonRecord<Omit<CanonicalAssetConfig, "localSymbol">>(
+    "ROUTER_CANONICAL_ASSETS_JSON",
+    env.ROUTER_CANONICAL_ASSETS_JSON
+  )).map(([localSymbol, config]) => [
+    localSymbol.toLowerCase(),
+    {
+      localSymbol,
+      ...config
+    }
+  ])
+);
+const routerMarkets = new Map<string, RouterMarketConfig>(
+  Object.entries(
+    parseJsonRecord<RouterMarketConfig>("ROUTER_MARKETS_JSON", env.ROUTER_MARKETS_JSON)
+  ).map(([marketSymbol, config]) => [marketSymbol.toLowerCase(), config])
+);
+const bootstrapInventory = parseJsonRecord<string>(
+  "ROUTER_BOOTSTRAP_INVENTORY_JSON",
+  env.ROUTER_BOOTSTRAP_INVENTORY_JSON
+);
+const inventoryService = new InventoryService({
+  store,
+  tokens,
+  markets: rawMarkets,
+  canonicalAssets,
+  routerMarkets,
+  bootstrapInventory
+});
+const markets = rawMarkets.map((market) => ({
+  ...market,
+  ...inventoryService.getMarketPolicy(market)
+}));
 const matchingService = new MatchingService({
   store,
   markets,
@@ -36,6 +86,35 @@ const matchingService = new MatchingService({
   marketAddress: deployment.contracts.market
 });
 const vaultService = new VaultService(store, publicClient, walletClient, deployment, tokens, markets);
+const initiaDexClient = new InitiaDexClient({
+  restUrl: env.L1_REST_URL,
+  chainId: env.L1_CHAIN_ID,
+  gasPrices: env.L1_GAS_PRICES,
+  gasAdjustment: env.L1_GAS_ADJUSTMENT,
+  mnemonic: env.L1_ROUTER_MNEMONIC
+});
+const bridgeHealthService = new BridgeHealthService({
+  relayerHealthUrl: env.RELAYER_HEALTH_URL,
+  opinitHealthUrl: env.OPINIT_HEALTH_URL
+});
+const liquidityRouter = new LiquidityRouter({
+  store,
+  markets,
+  priceService,
+  inventoryService,
+  initiaDexClient,
+  bridgeHealthService,
+  quoteSpreadBps: env.ROUTER_QUOTE_SPREAD_BPS,
+  maxLocalFillUsd: env.ROUTER_MAX_LOCAL_FILL_USD
+});
+const rebalanceWorker = new RebalanceWorker({
+  inventoryService,
+  bridgeHealthService,
+  initiaDexClient,
+  intervalMs: env.ROUTER_REBALANCE_INTERVAL_MS,
+  markets
+});
+rebalanceWorker.start();
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
@@ -44,12 +123,15 @@ app.get("/health", async () => ({
   ok: true,
   matcher: account.address,
   markets: markets.length,
-  pricing: priceService.getStatus()
+  pricing: priceService.getStatus(),
+  bridge: await bridgeHealthService.getStatus()
 }));
 
 app.get("/config", async () => ({
   deployment,
-  markets
+  markets,
+  inventory: inventoryService.getInventory(),
+  bridge: await bridgeHealthService.getStatus()
 }));
 
 app.get("/prices", async () => ({
@@ -64,6 +146,13 @@ app.get("/markets", async () => ({
     series: priceService.getSparkline(market.baseToken.symbol, 32)
   }))
 }));
+
+app.get("/inventory", async () => ({
+  positions: inventoryService.getInventory(),
+  jobs: inventoryService.listJobs()
+}));
+
+app.get("/bridge/status", async () => await bridgeHealthService.getStatus());
 
 app.get("/prices/:symbol/candles", async (request) => {
   const { symbol } = request.params as { symbol: string };
@@ -90,6 +179,40 @@ app.get("/orders/:address", async (request) => {
   return {
     orders: matchingService.getOrders(address)
   };
+});
+
+app.post("/swap/quote", async (request) => {
+  const body = request.body as {
+    userAddress: Address;
+    marketId: Hex;
+    fromToken: Address;
+    amount: string;
+  };
+
+  return {
+    quote: await liquidityRouter.quote(body)
+  };
+});
+
+app.post("/swap/execute", async (request) => {
+  const body = request.body as {
+    userAddress: Address;
+    marketId: Hex;
+    fromToken: Address;
+    amount: string;
+  };
+
+  return await liquidityRouter.execute(body);
+});
+
+app.get("/swap/status/:id", async (request) => {
+  const { id } = request.params as { id: string };
+  const job = inventoryService.getSwapJob(id);
+  if (!job) {
+    throw new Error("Swap job not found");
+  }
+
+  return { job };
 });
 
 app.post("/vault/sync-deposit", async (request) => {

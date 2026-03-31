@@ -8,6 +8,7 @@ import { TradingViewChart } from "./components/TradingViewChart";
 import { OrderBook } from "./components/OrderBook";
 import { BottomTabs } from "./components/BottomTabs";
 import { OrderPanel } from "./components/OrderPanel";
+import { SwapPanel } from "./components/SwapPanel";
 import { VaultPanel } from "./components/VaultPanel";
 import { BalancesPanel } from "./components/BalancesPanel";
 import { PortfolioView } from "./components/PortfolioView";
@@ -28,6 +29,26 @@ type Market = {
   quoteToken: Token;
   referencePrice: string;
   series?: number[];
+  routeable: boolean;
+  routePolicy: "router-enabled" | "dark-pool-only";
+};
+
+type BridgeStatus = {
+  relayer: boolean;
+  opinit: boolean;
+  ready: boolean;
+  checkedAt: string;
+  details: string[];
+};
+
+type InventoryPosition = {
+  symbol: string;
+  tokenAddress: Address;
+  amountAtomic: string;
+  minAtomic: string;
+  targetAtomic: string;
+  maxAtomic: string;
+  routeable: boolean;
 };
 
 type MarketSnapshot = Market & {
@@ -68,6 +89,8 @@ function Dashboard() {
     locked: Record<string, string>;
   } | null>(null);
   const [orders, setOrders] = useState<any[]>([]);
+  const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus | null>(null);
+  const [inventory, setInventory] = useState<InventoryPosition[]>([]);
   const [error, setError] = useState("");
   const [activeView, setActiveView] = useState<"trade" | "markets" | "portfolio">("trade");
 
@@ -103,10 +126,17 @@ function Dashboard() {
   );
 
   async function refreshConfig() {
-    const config = await api<{ deployment: any; markets: Market[] }>("/config");
+    const config = await api<{
+      deployment: any;
+      markets: Market[];
+      bridge: BridgeStatus;
+      inventory: InventoryPosition[];
+    }>("/config");
     const marketList = await api<{ markets: Market[] }>("/markets");
     setDeployment(config.deployment);
     setMarkets(marketList.markets);
+    setBridgeStatus(config.bridge);
+    setInventory(config.inventory);
   }
 
   async function refreshUser() {
@@ -185,11 +215,17 @@ function Dashboard() {
         onOpenWallet={openWallet}
         onDisconnect={disconnect}
         chainOk={true}
+        bridgeReady={bridgeStatus?.ready ?? false}
       />
 
       {activeView !== "portfolio" && <TickerStrip market={selectedMarket} />}
 
       {error && <div className="error-bar">{error}</div>}
+      {activeView !== "portfolio" && bridgeStatus && !bridgeStatus.ready && (
+        <div className="bridge-banner">
+          <strong>Bridge degraded.</strong> Router-enabled markets will fall back to async routing or stay unavailable until relayer and OPinit recover.
+        </div>
+      )}
 
       {activeView === "portfolio" ? (
         <PortfolioView
@@ -236,6 +272,15 @@ function Dashboard() {
                 });
                 await refreshUser();
               }}
+            />
+
+            <SwapPanel
+              connected={isConnected}
+              address={userAddress}
+              selectedMarket={selectedMarket}
+              bridgeStatus={bridgeStatus}
+              inventory={inventory}
+              onAfterMutation={refreshUser}
             />
 
             <VaultPanel
