@@ -296,7 +296,25 @@ export class PriceService {
     }
 
     if (interval === "1m") {
-      return ascending.slice(-limit);
+      // Post-process: synthesize OHLC for flat bars (where open==high==low==close)
+      // by using the previous bar's close as the open
+      const result = ascending.slice(-limit);
+      for (let i = 1; i < result.length; i++) {
+        const bar = result[i];
+        const prevClose = result[i - 1].close;
+        if (bar.open === bar.high && bar.open === bar.low && bar.open === bar.close) {
+          // Flat bar from legacy data: synthesize OHLC
+          bar.open = prevClose;
+          bar.high = Math.max(prevClose, bar.close);
+          bar.low = Math.min(prevClose, bar.close);
+        } else if (bar.open === bar.close && bar.high === bar.close && bar.low === bar.close) {
+          // Another flat bar pattern
+          bar.open = prevClose;
+          bar.high = Math.max(prevClose, bar.close);
+          bar.low = Math.min(prevClose, bar.close);
+        }
+      }
+      return result;
     }
 
     const aggregated: StoredBarRow[] = [];
@@ -566,19 +584,44 @@ export class PriceService {
     const close = Number(priceRaw) / 10 ** decimals;
     const ts = Math.floor(parseProviderTime(blockTimestamp) / 60) * 60;
 
-    this.db
+    // Look up previous bar's close to use as this bar's open
+    const prevRow = this.db
       .prepare(
-        `
-          INSERT INTO price_bars (
-            asset_symbol,
-            provider_symbol,
-            ts,
-            open,
-            high,
-            low,
-            close,
-            volume,
-            source
+        `SELECT close FROM price_bars
+         WHERE asset_symbol = ? AND ts < ? AND source != 'fallback'
+         ORDER BY ts DESC LIMIT 1`
+      )
+      .get(assetSymbol, ts) as { close: number } | undefined;
+
+    const open = prevRow ? prevRow.close : close;
+    const high = Math.max(open, close);
+    const low = Math.min(open, close);
+
+    // Check if a bar already exists for this minute so we can merge high/low
+    const existingRow = this.db
+      .prepare(
+        `SELECT open, high, low FROM price_bars
+         WHERE asset_symbol = ? AND ts = ? AND source != 'fallback'`
+      )
+      .get(assetSymbol, ts) as { open: number; high: number; low: number } | undefined;
+
+    if (existingRow) {
+      // Merge: keep the original open, extend high/low, update close
+      this.db
+        .prepare(
+          `UPDATE price_bars SET
+             high = MAX(high, ?),
+             low = MIN(low, ?),
+             close = ?,
+             source = 'initia-connect'
+           WHERE asset_symbol = ? AND ts = ?`
+        )
+        .run(Math.max(high, existingRow.high), Math.min(low, existingRow.low), close, assetSymbol, ts);
+    } else {
+      this.db
+        .prepare(
+          `INSERT INTO price_bars (
+            asset_symbol, provider_symbol, ts, open, high, low, close, volume, source
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'initia-connect')
           ON CONFLICT(asset_symbol, ts) DO UPDATE SET
             provider_symbol = excluded.provider_symbol,
@@ -587,10 +630,10 @@ export class PriceService {
             low = excluded.low,
             close = excluded.close,
             volume = excluded.volume,
-            source = excluded.source
-        `
-      )
-      .run(assetSymbol, config.providerSymbol, ts, close, close, close, close, 0);
+            source = excluded.source`
+        )
+        .run(assetSymbol, config.providerSymbol, ts, open, high, low, close, 0);
+    }
 
     this.db.prepare("DELETE FROM price_bars WHERE asset_symbol = ? AND source = 'fallback'").run(assetSymbol);
   }
