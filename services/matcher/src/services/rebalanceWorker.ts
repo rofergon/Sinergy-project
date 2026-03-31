@@ -3,6 +3,7 @@ import type { ResolvedMarket } from "../types.js";
 import { InitiaDexClient } from "./initiaDex.js";
 import { InventoryService } from "./inventory.js";
 import { BridgeHealthService } from "./bridgeHealth.js";
+import { scaleAtomic } from "./routerUtils.js";
 
 type WorkerDeps = {
   inventoryService: InventoryService;
@@ -86,11 +87,27 @@ export class RebalanceWorker {
           next.inputSymbol === routeConfig.baseAsset.localSymbol
             ? routeConfig.baseAsset
             : routeConfig.quoteAsset;
+        const returnAsset =
+          next.outputSymbol === routeConfig.baseAsset.localSymbol
+            ? routeConfig.baseAsset
+            : routeConfig.quoteAsset;
+        const inputToken =
+          market.baseToken.symbol === next.inputSymbol ? market.baseToken : market.quoteToken;
+        const outputToken =
+          market.baseToken.symbol === next.outputSymbol ? market.baseToken : market.quoteToken;
         const result = await this.deps.initiaDexClient.executeSwap({
           market: routeConfig.market,
           offerAsset,
-          offerAmountAtomic: BigInt(next.amountInAtomic),
-          minOutAtomic: BigInt(next.minAmountOutAtomic)
+          offerAmountAtomic: scaleAtomic(
+            BigInt(next.amountInAtomic),
+            inputToken.decimals,
+            offerAsset.l1Decimals
+          ),
+          minOutAtomic: scaleAtomic(
+            BigInt(next.minAmountOutAtomic),
+            outputToken.decimals,
+            returnAsset.l1Decimals
+          )
         });
 
         this.deps.inventoryService.updateRebalanceJob(next.id, (job) => {
