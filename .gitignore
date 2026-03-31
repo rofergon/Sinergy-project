@@ -23,6 +23,9 @@ contracts/broadcast
 contracts/.env
 contracts/.env.*
 services/matcher/data/*.json
+services/matcher/data/*.sqlite
+services/matcher/data/*.sqlite-shm
+services/matcher/data/*.sqlite-wal
 !services/matcher/data/.gitkeep
 services/matcher/.env
 services/matcher/dist
