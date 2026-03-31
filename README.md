@@ -79,6 +79,19 @@ It also now exposes a `Private Router` path for crypto swaps:
 - async rebalance jobs when Initia L1 liquidity is needed;
 - strict gating so only canonical, bridgeable assets can claim `InitiaDEX`-backed routing.
 
+Current `InitiaDEX`-backed router-enabled markets in this repo:
+
+- `cINIT/sUSDC` -> mapped to the live `INIT/USDC` testnet pool
+- `cETH/sUSDC` -> mapped to the live `ETH/USDC` testnet pool
+
+Current dark-pool-only markets:
+
+- `cBTC/sUSDC`
+- `cSOL/sUSDC`
+- `tAAPL/sUSDC`
+- `tBOND/sUSDC`
+- `tNVDA/sUSDC`
+
 Mapped crypto feeds:
 
 - `cBTC -> BTC/USD`
@@ -137,11 +150,16 @@ Relevant variables:
 - `PRICE_DB_FILE=./data/prices.sqlite`: local SQLite database on Linux
 - `INITIA_CONNECT_REST_URL=https://rest.testnet.initia.xyz`: Connect source for crypto
 - `L1_REST_URL=https://rest.testnet.initia.xyz`: Initia L1 REST for router quotes and swaps
-- `RELAYER_HEALTH_URL`: relayer health endpoint used to gate L1-backed routing
-- `OPINIT_HEALTH_URL`: OPinit health endpoint used to gate L1-backed routing
+- `RELAYER_HEALTH_URL`: optional relayer health endpoint; not required for the current OPinit-based local route mode
+- `OPINIT_HEALTH_URL`: optional override for OPinit health checks; if omitted, the matcher autodetects `opinitd` from `~/.opinit/executor.json` and uses `/status`
 - `ROUTER_CANONICAL_ASSETS_JSON`: local symbol -> canonical L1 metadata mapping
-- `ROUTER_MARKETS_JSON`: local market symbol -> InitiaDEX pair object mapping
+- `ROUTER_MARKETS_JSON`: local market symbol -> InitiaDEX pair denom/object mapping
 - `ROUTER_BOOTSTRAP_INVENTORY_JSON`: local hot inventory bootstrap for instant fills
+
+The checked-in `.env.example` already includes a working local/testnet starter mapping for:
+
+- `cINIT/sUSDC`
+- `cETH/sUSDC`
 
 Fallback behavior:
 
@@ -201,7 +219,8 @@ Frontend notes:
 - The wallet modal and session now use `InterwovenKit`.
 - The right rail now contains both the private dark-pool ticket and a dedicated `Private Router` panel.
 - Markets are labeled as `Router-enabled` or `Dark-pool only`.
-- `InitiaDEX`-backed routing only activates when canonical asset mappings and bridge health endpoints are configured.
+- `InitiaDEX`-backed routing only activates when canonical asset mappings are configured and the bridge health check is green.
+- In the current local setup, the bridge check is considered healthy when `opinitd` is healthy; relayer health is treated as optional unless you explicitly wire a relayer-dependent route mode.
 - The frontend resolves the matcher URL automatically:
   - it uses `VITE_MATCHER_URL` if you define it
   - otherwise it uses the same hostname you used to open the web app, with port `8787`
@@ -237,4 +256,7 @@ and updates [deployments/local.json](/home/sari/Sinergy-project/deployments/loca
 - Crypto assets connected to Initia Oracle build local history from the moment the matcher starts sampling them; `Connect` is not being used here as a historical backfill provider.
 - Wallet connection is handled through `InterwovenKit` on the local chain `Sinergy-2`.
 - For `MsgCall` transactions on MiniEVM, the frontend uses the Initia `bech32` address as `sender`, and the EVM hex address for contracts and balances.
+- The private router quotes against live InitiaDEX testnet pools for `cINIT/sUSDC` and `cETH/sUSDC`, but instant fills still come from local protocol inventory first.
+- Router math scales between local `18`-decimal MiniEVM assets (`cINIT`, `cETH`) and `6`-decimal Initia L1 denoms (`uinit`, `ueth`, `uusdc`) before quoting or rebalancing.
 - If you update `deployments/local.json`, restart both backend and frontend so the addresses reload.
+- If you update `services/matcher/.env`, restart the matcher so router market mappings and inventory bootstrap are reloaded.
