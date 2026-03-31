@@ -80,7 +80,7 @@ El MVP ya implementa los componentes principales:
 - matching precio-tiempo;
 - validaciones por bandas de precio;
 - firma de tickets de retiro;
-- pricing híbrido para RWA y cripto;
+- pricing híbrido para RWA y cripto con oráculos de Initia y adaptadores custom;
 - router privado con fills locales y rebalanceo asíncrono cuando se necesita liquidez externa.
 
 ### Frontend
@@ -123,6 +123,27 @@ El proyecto ya usa piezas nativas del ecosistema:
 - `InterwovenKit`
 - `Initia Connect`
 - `InitiaDEX` para ciertos mercados habilitados
+
+### Capa de oráculos y pricing
+
+Sinergy combina infraestructura del ecosistema Initia con una capa propia de pricing en el matcher.
+
+Para cripto, usa **`Initia Connect Oracle`** como fuente de precio en vivo para:
+
+- `cBTC -> BTC/USD`
+- `cETH -> ETH/USD`
+- `cSOL -> SOL/USD`
+- `cINIT -> INIT/USD`
+
+Además, el proyecto implementa un **price service custom** que:
+
+- unifica las fuentes de datos para que el matcher trabaje con una sola interfaz;
+- usa `Twelve Data` para RWAs como `tAAPL`, `tNVDA` y `tBOND`;
+- usa `CoinGecko` para bootstrap histórico de cripto;
+- guarda histórico y fallback en `SQLite` para resiliencia operativa;
+- permite seguir operando incluso si una fuente externa falla temporalmente.
+
+Esto es importante para el hackathon porque demuestra no sólo integración con Initia, sino también capacidad de construir infraestructura de mercado más robusta alrededor de esa base.
 
 ### Camino claro de evolución
 
@@ -176,7 +197,7 @@ Es importante presentarlo con honestidad:
 - el operador del backend todavía puede ver las órdenes;
 - no hay TEE ni zk en esta versión;
 - el compliance fuerte aún no está on-chain;
-- parte de la liquidez y pricing depende de servicios y adaptadores externos.
+- parte del pricing sigue dependiendo de proveedores y adaptadores externos aunque ya exista una capa propia de agregación.
 
 Esto no debilita el proyecto; al contrario, muestra una estrategia sensata de construcción:
 
@@ -184,11 +205,11 @@ Esto no debilita el proyecto; al contrario, muestra una estrategia sensata de co
 
 ## 11. Mensaje corto para presentar el proyecto
 
-> Sinergy es un mercado privado de RWAs y cripto construido sobre Initia. Usamos una vault on-chain para custodia y retiros seguros, mientras el order book y el matching viven off-chain para reducir exposición pública. El MVP ya permite onboarding con wallet, bridge, depósitos, órdenes privadas, pricing híbrido y retiros firmados, con una evolución clara hacia mayor privacidad, compliance y settlement confidencial.
+> Sinergy es un mercado privado de RWAs y cripto construido sobre Initia. Usamos una vault on-chain para custodia y retiros seguros, mientras el order book y el matching viven off-chain para reducir exposición pública. El MVP ya permite onboarding con wallet, depósitos, órdenes privadas, pricing híbrido con `Initia Connect Oracle` y un servicio de precios custom, además de retiros firmados y una evolución clara hacia mayor privacidad, compliance y settlement confidencial.
 
 ## 12. Pitch de 30 segundos
 
-**Sinergy convierte Initia en una base para mercados privados de activos tokenizados. En lugar de exponer cada orden on-chain, movemos el matching fuera de cadena y dejamos en la appchain sólo la custodia, los retiros y el anclaje de estado. Eso mejora privacidad, simplifica UX y habilita un flujo real para RWAs y cripto dentro del ecosistema Initia.**
+**Sinergy convierte Initia en una base para mercados privados de activos tokenizados. En lugar de exponer cada orden on-chain, movemos el matching fuera de cadena y dejamos en la appchain sólo la custodia, los retiros y el anclaje de estado. Combinamos `Initia Connect Oracle` para cripto con una capa propia de pricing para RWAs e histórico, lo que mejora privacidad, da resiliencia operativa y habilita un flujo real para RWAs y cripto dentro del ecosistema Initia.**
 
 ## 13. Stack del proyecto
 
