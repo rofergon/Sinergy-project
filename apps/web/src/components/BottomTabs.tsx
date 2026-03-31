@@ -20,13 +20,37 @@ type Order = {
 };
 
 type Props = {
+  address?: `0x${string}`;
   market?: MarketSnapshot;
   orders: Order[];
   markets: MarketSnapshot[];
+  onCancelOrder: (orderId: string) => Promise<void>;
 };
 
-export function BottomTabs({ market, orders, markets }: Props) {
+export function BottomTabs({ address, market, orders, markets, onCancelOrder }: Props) {
   const [activeTab, setActiveTab] = useState<"trades" | "open" | "history">("trades");
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [status, setStatus] = useState("");
+
+  async function handleCancel(orderId: string) {
+    if (!address) {
+      setStatus("Connect wallet to cancel orders.");
+      return;
+    }
+
+    setCancellingId(orderId);
+    setStatus("");
+    try {
+      await onCancelOrder(orderId);
+      setStatus("Order cancelled. Funds returned to available balance.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCancellingId(null);
+    }
+  }
+
+  const openOrders = orders.filter((o) => o.status === "OPEN" || o.status === "PARTIAL");
 
   return (
     <div className="bottom-panel">
@@ -35,7 +59,7 @@ export function BottomTabs({ market, orders, markets }: Props) {
           className={`bottom-tab ${activeTab === "open" ? "active" : ""}`}
           onClick={() => setActiveTab("open")}
         >
-          Open Orders ({orders.filter((o) => o.status === "OPEN" || o.status === "PARTIAL").length})
+          Open Orders ({openOrders.length})
         </button>
         <button
           className={`bottom-tab ${activeTab === "trades" ? "active" : ""}`}
@@ -63,13 +87,12 @@ export function BottomTabs({ market, orders, markets }: Props) {
               <span>Remaining</span>
               <span>Time</span>
               <span>Status</span>
+              <span>Action</span>
             </div>
-            {orders.filter((o) => o.status === "OPEN" || o.status === "PARTIAL").length === 0 ? (
+            {openOrders.length === 0 ? (
               <div className="no-orders-msg">No open orders</div>
             ) : (
-              orders
-                .filter((o) => o.status === "OPEN" || o.status === "PARTIAL")
-                .map((order) => {
+              openOrders.map((order) => {
                   const m = markets.find((item) => item.id === order.marketId);
                   const dec = m?.baseToken.decimals ?? 18;
                   return (
@@ -90,10 +113,18 @@ export function BottomTabs({ market, orders, markets }: Props) {
                       <span className={`order-status ${order.status.toLowerCase()}`}>
                         {order.status}
                       </span>
+                      <button
+                        className="order-action-btn"
+                        disabled={!address || cancellingId === order.id}
+                        onClick={() => void handleCancel(order.id)}
+                      >
+                        {cancellingId === order.id ? "Cancelling..." : "Cancel"}
+                      </button>
                     </div>
                   );
                 })
             )}
+            {status && <div className="table-status-msg">{status}</div>}
           </>
         )}
 
@@ -106,6 +137,7 @@ export function BottomTabs({ market, orders, markets }: Props) {
               <span>Remaining</span>
               <span>Time</span>
               <span>Status</span>
+              <span>Action</span>
             </div>
             {orders.length === 0 ? (
               <div className="no-orders-msg">No order history</div>
@@ -130,6 +162,9 @@ export function BottomTabs({ market, orders, markets }: Props) {
                     </span>
                     <span className={`order-status ${order.status.toLowerCase()}`}>
                       {order.status}
+                    </span>
+                    <span style={{ color: "var(--text-tertiary)", fontSize: 12 }}>
+                      {order.status === "OPEN" || order.status === "PARTIAL" ? "Active" : "Closed"}
                     </span>
                   </div>
                 );
