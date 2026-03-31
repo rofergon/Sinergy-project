@@ -135,7 +135,7 @@ export class LiquidityRouter {
         mode: quote.mode,
         status: "completed" as const,
         quote,
-        jobId: rebalanceJob?.id ?? null,
+        jobId: null,
         settledOutAtomic: quote.minOutAtomic,
         executedAt: nowIso()
       };

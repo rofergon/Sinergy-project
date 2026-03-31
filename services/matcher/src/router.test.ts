@@ -196,3 +196,25 @@ test("async execution locks user funds and creates rebalance work when bridge is
     harness.cleanup();
   }
 });
+
+test("instant local execution does not expose rebalance job ids as swap status ids", async () => {
+  const harness = makeHarness();
+
+  try {
+    const result = await harness.router.execute({
+      userAddress: harness.userAddress,
+      marketId: harness.market.id,
+      fromToken: harness.quote.address,
+      amount: "10"
+    });
+
+    assert.equal(result.status, "completed");
+    assert.equal(result.jobId, null);
+
+    const snapshot = harness.store.get();
+    assert.equal(snapshot.rebalanceJobs.length, 1);
+    assert.equal(snapshot.swapJobs.length, 0);
+  } finally {
+    harness.cleanup();
+  }
+});

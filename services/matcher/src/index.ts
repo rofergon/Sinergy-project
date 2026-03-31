@@ -205,11 +205,16 @@ app.post("/swap/execute", async (request) => {
   return await liquidityRouter.execute(body);
 });
 
-app.get("/swap/status/:id", async (request) => {
+app.get("/swap/status/:id", async (request, reply) => {
   const { id } = request.params as { id: string };
   const job = inventoryService.getSwapJob(id);
   if (!job) {
-    throw new Error("Swap job not found");
+    reply.code(404);
+    return {
+      statusCode: 404,
+      error: "Not Found",
+      message: "Swap job not found"
+    };
   }
 
   return { job };
