@@ -1,21 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  WagmiProvider,
-  createConfig,
-  http,
-  useAccount,
-  useChainId,
-  useConnect,
-  useDisconnect,
-  usePublicClient,
-  useSwitchChain,
-  useWalletClient,
-} from "wagmi";
-import { coinbaseWallet, injected, metaMask } from "wagmi/connectors";
+import { useInterwovenKit } from "@initia/interwovenkit-react";
 import type { Address, Hex } from "viem";
-import { formatUnits } from "viem";
-import { SINERGY_LOCAL_CHAIN } from "@sinergy/shared";
 import { api, API_BASE } from "./lib/api";
 import { Navbar } from "./components/Navbar";
 import { TickerStrip } from "./components/TickerStrip";
@@ -26,43 +11,6 @@ import { OrderPanel } from "./components/OrderPanel";
 import { VaultPanel } from "./components/VaultPanel";
 import { BalancesPanel } from "./components/BalancesPanel";
 import "./styles.css";
-
-const queryClient = new QueryClient();
-
-type EthereumProvider = {
-  request(args: { method: string; params?: unknown[] | object }): Promise<unknown>;
-};
-
-function runtimeRpcUrl() {
-  if (typeof window === "undefined") {
-    return SINERGY_LOCAL_CHAIN.rpcUrls.default.http[0];
-  }
-  const host = window.location.hostname;
-  if (!host || host === "localhost" || host === "127.0.0.1") {
-    return "http://127.0.0.1:8545";
-  }
-  return `http://${host}:8545`;
-}
-
-const SINERGY_WALLET_CHAIN = {
-  ...SINERGY_LOCAL_CHAIN,
-  rpcUrls: {
-    default: { http: [runtimeRpcUrl()] },
-    public: { http: [runtimeRpcUrl()] },
-  },
-} as const;
-
-const wagmiConfig = createConfig({
-  chains: [SINERGY_WALLET_CHAIN],
-  connectors: [
-    metaMask(),
-    coinbaseWallet({ appName: "Sinergy DEX" }),
-    injected(),
-  ],
-  transports: {
-    [SINERGY_WALLET_CHAIN.id]: http(SINERGY_WALLET_CHAIN.rpcUrls.default.http[0]),
-  },
-});
 
 type Token = {
   symbol: string;
@@ -88,10 +36,6 @@ type MarketSnapshot = Market & {
   volumeLabel: string;
 };
 
-function chainIdHex() {
-  return `0x${SINERGY_WALLET_CHAIN.id.toString(16)}`;
-}
-
 function buildSeries(key: string, anchor: number) {
   let seed = Array.from(key).reduce((acc, char) => acc + char.charCodeAt(0), 0);
   let current = anchor * (0.955 + (seed % 8) / 100);
@@ -105,51 +49,15 @@ function buildSeries(key: string, anchor: number) {
   });
 }
 
-async function addOrSwitchSinergyNetwork(provider: EthereumProvider) {
-  try {
-    await provider.request({
-      method: "wallet_switchEthereumChain",
-      params: [{ chainId: chainIdHex() }],
-    });
-    return;
-  } catch (error) {
-    const code =
-      typeof error === "object" && error && "code" in error
-        ? Number(error.code)
-        : undefined;
-    if (code !== 4902 && code !== -32603) throw error;
-  }
-
-  await provider.request({
-    method: "wallet_addEthereumChain",
-    params: [
-      {
-        chainId: chainIdHex(),
-        chainName: SINERGY_WALLET_CHAIN.name,
-        nativeCurrency: SINERGY_WALLET_CHAIN.nativeCurrency,
-        rpcUrls: [SINERGY_WALLET_CHAIN.rpcUrls.default.http[0]],
-      },
-    ],
-  });
-}
-
-function walletLabel(name: string) {
-  if (name.toLowerCase().includes("meta")) return "MetaMask";
-  if (name.toLowerCase().includes("coinbase")) return "Coinbase";
-  return name;
-}
-
-/* ═══════════════════════════════════════════════════════
-   Dashboard
-   ═══════════════════════════════════════════════════════ */
 function Dashboard() {
-  const { address, isConnected } = useAccount();
-  const chainId = useChainId();
-  const { connectors, connectAsync, isPending } = useConnect();
-  const { disconnect } = useDisconnect();
-  const { switchChainAsync } = useSwitchChain();
-  const publicClient = usePublicClient({ chainId: SINERGY_WALLET_CHAIN.id });
-  const { data: walletClient } = useWalletClient({ chainId: SINERGY_WALLET_CHAIN.id });
+  const {
+    address,
+    initiaAddress,
+    isConnected,
+    openConnect,
+    openWallet,
+    disconnect,
+  } = useInterwovenKit();
 
   const [deployment, setDeployment] = useState<any | null>(null);
   const [markets, setMarkets] = useState<Market[]>([]);
@@ -161,17 +69,10 @@ function Dashboard() {
   const [orders, setOrders] = useState<any[]>([]);
   const [error, setError] = useState("");
 
+  const userAddress = address as Address | undefined;
   const tokens: Token[] = useMemo(() => deployment?.tokens ?? [], [deployment]);
   const vaultAddress = (deployment?.contracts?.vault ??
     "0x0000000000000000000000000000000000000000") as Address;
-
-  const displayedConnectors = useMemo(() => {
-    const preferred = connectors.filter((c) => {
-      const name = c.name.toLowerCase();
-      return name.includes("meta") || name.includes("coinbase") || name.includes("injected");
-    });
-    return preferred.length > 0 ? preferred : connectors;
-  }, [connectors]);
 
   const marketSnapshots = useMemo<MarketSnapshot[]>(() => {
     return markets.map((market) => {
@@ -199,9 +100,6 @@ function Dashboard() {
     [marketSnapshots, selectedMarketId]
   );
 
-  const chainOk = chainId === SINERGY_WALLET_CHAIN.id;
-
-  /* ── Data fetching ─────────────────────────────────── */
   async function refreshConfig() {
     const config = await api<{ deployment: any; markets: Market[] }>("/config");
     const marketList = await api<{ markets: Market[] }>("/markets");
@@ -210,16 +108,17 @@ function Dashboard() {
   }
 
   async function refreshUser() {
-    if (!address) {
+    if (!userAddress) {
       setBalances(null);
       setOrders([]);
       return;
     }
+
     const [balResult, orderResult] = await Promise.all([
       api<{ available: Record<string, string>; locked: Record<string, string> }>(
-        `/balances/${address}`
+        `/balances/${userAddress}`
       ),
-      api<{ orders: any[] }>(`/orders/${address}`),
+      api<{ orders: any[] }>(`/orders/${userAddress}`),
     ]);
     setBalances(balResult);
     setOrders(orderResult.orders);
@@ -249,40 +148,8 @@ function Dashboard() {
     refreshUser().catch((err) =>
       setError(err instanceof Error ? err.message : String(err))
     );
-  }, [address]);
+  }, [userAddress]);
 
-  useEffect(() => {
-    if (!isConnected || !switchChainAsync) return;
-    if (chainOk) return;
-
-    switchChainAsync({ chainId: SINERGY_WALLET_CHAIN.id }).catch(() => {
-      setError(
-        `Switch to Sinergy Local. RPC: ${SINERGY_WALLET_CHAIN.rpcUrls.default.http[0]}`
-      );
-    });
-  }, [chainId, isConnected, switchChainAsync]);
-
-  /* ── Wallet connect ────────────────────────────────── */
-  async function connectWallet(connectorId: string) {
-    const connector = connectors.find((c) => c.id === connectorId);
-    if (!connector) {
-      setError("Connector not found.");
-      return;
-    }
-    setError("");
-    try {
-      const provider = (connector as any).getProvider
-        ? await (connector as any).getProvider()
-        : undefined;
-      if (provider) await addOrSwitchSinergyNetwork(provider);
-      await connectAsync({ connector, chainId: SINERGY_WALLET_CHAIN.id });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(`Connect failed: ${msg}`);
-    }
-  }
-
-  /* ── Render ────────────────────────────────────────── */
   return (
     <>
       <Navbar
@@ -290,15 +157,14 @@ function Dashboard() {
         selectedMarketId={selectedMarket?.id}
         onSelectMarket={setSelectedMarketId}
         isConnected={isConnected}
-        address={address}
-        connectors={displayedConnectors.map((c) => ({
-          id: c.id,
-          name: walletLabel(c.name),
-        }))}
-        isPending={isPending}
-        onConnect={connectWallet}
-        onDisconnect={() => disconnect()}
-        chainOk={chainOk}
+        address={userAddress}
+        onConnect={() => {
+          setError("");
+          openConnect();
+        }}
+        onOpenWallet={openWallet}
+        onDisconnect={disconnect}
+        chainOk={true}
       />
 
       <TickerStrip market={selectedMarket} />
@@ -306,12 +172,10 @@ function Dashboard() {
       {error && <div className="error-bar">{error}</div>}
 
       <div className="dex-grid">
-        {/* Left: Order Book */}
         <div className="dex-col-left">
           <OrderBook market={selectedMarket} />
         </div>
 
-        {/* Center: Chart + Bottom Tabs */}
         <div className="dex-col-center">
           <TradingViewChart market={selectedMarket} />
           <BottomTabs
@@ -321,11 +185,10 @@ function Dashboard() {
           />
         </div>
 
-        {/* Right: Trade Ticket + Vault + Balances */}
         <div className="dex-col-right">
           <OrderPanel
             connected={isConnected}
-            address={address}
+            address={userAddress}
             markets={marketSnapshots}
             selectedMarketId={selectedMarket?.id}
             onSelectMarket={setSelectedMarketId}
@@ -340,9 +203,8 @@ function Dashboard() {
 
           <VaultPanel
             connected={isConnected}
-            address={address}
-            walletClient={walletClient}
-            publicClient={publicClient}
+            address={userAddress}
+            initiaAddress={initiaAddress}
             vaultAddress={vaultAddress}
             tokens={tokens}
             onAfterMutation={refreshUser}
@@ -356,11 +218,5 @@ function Dashboard() {
 }
 
 export default function App() {
-  return (
-    <WagmiProvider config={wagmiConfig}>
-      <QueryClientProvider client={queryClient}>
-        <Dashboard />
-      </QueryClientProvider>
-    </WagmiProvider>
-  );
+  return <Dashboard />;
 }
