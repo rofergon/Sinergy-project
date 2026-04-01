@@ -1,7 +1,25 @@
-import deployment from "../../../deployments/local.json";
-import { SINERGY_LOCAL_CHAIN } from "@sinergy/shared";
+import localDeployment from "../../../deployments/local.json";
+import testnetDeployment from "../../../deployments/testnet.json";
+import {
+  createSinergyChain,
+  resolveNativeCurrency,
+  type SinergyDeployment,
+  buildPublicSubdomainHost,
+  isDirectHost,
+  isTryCloudflareHostname,
+} from "@sinergy/shared";
 
-function runtimeHost() {
+const deploymentEnv = import.meta.env.VITE_DEPLOYMENT_ENV === "testnet" ? "testnet" : "local";
+
+const deployments = {
+  local: localDeployment as SinergyDeployment,
+  testnet: testnetDeployment as SinergyDeployment,
+};
+
+export const deployment = deployments[deploymentEnv];
+export const SINERGY_EVM_CHAIN = createSinergyChain(deployment);
+
+function runtimeHost(subdomain?: string) {
   if (typeof window === "undefined") {
     return "127.0.0.1";
   }
@@ -11,20 +29,78 @@ function runtimeHost() {
     return "127.0.0.1";
   }
 
-  return host;
+  return subdomain ? buildPublicSubdomainHost(host, subdomain) : host;
 }
 
-function runtimeHttpUrl(port: number) {
-  return `http://${runtimeHost()}:${port}`;
+function runtimeHttpProtocol() {
+  if (typeof window === "undefined") {
+    return "http";
+  }
+
+  return window.location.protocol === "https:" ? "https" : "http";
 }
 
-function runtimeWsUrl(port: number) {
-  return `ws://${runtimeHost()}:${port}`;
+function runtimeWsProtocol() {
+  if (typeof window === "undefined") {
+    return "ws";
+  }
+
+  return window.location.protocol === "https:" ? "wss" : "ws";
+}
+
+function runtimeHttpUrl(port: number, subdomain?: string) {
+  if (typeof window !== "undefined" && isTryCloudflareHostname(window.location.hostname)) {
+    switch (port) {
+      case 26657:
+        return `${window.location.origin}/tm`;
+      case 1317:
+        return `${window.location.origin}/rest`;
+      case 8080:
+        return `${window.location.origin}/indexer`;
+      case 8545:
+        return `${window.location.origin}/rpc`;
+      default:
+        return `${window.location.origin}`;
+    }
+  }
+
+  const host = runtimeHost(subdomain);
+  if (isDirectHost(host)) {
+    return `${runtimeHttpProtocol()}://${host}:${port}`;
+  }
+
+  return `${runtimeHttpProtocol()}://${host}`;
+}
+
+function runtimeWsUrl(port: number, subdomain?: string) {
+  if (typeof window !== "undefined" && isTryCloudflareHostname(window.location.hostname)) {
+    return `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`;
+  }
+
+  const host = runtimeHost(subdomain);
+  if (isDirectHost(host)) {
+    return `${runtimeWsProtocol()}://${host}:${port}`;
+  }
+
+  return `${runtimeWsProtocol()}://${host}`;
 }
 
 export const SINERGY_ROLLUP_CHAIN_ID = deployment.network.rollupChainId;
+export const SINERGY_BRIDGE_SOURCE_CHAIN_ID =
+  import.meta.env.VITE_BRIDGE_SRC_CHAIN_ID ?? "initiation-2";
+export const SINERGY_BRIDGE_SOURCE_DENOM =
+  import.meta.env.VITE_BRIDGE_SRC_DENOM ?? "uinit";
+
+export function buildBridgeDefaults() {
+  return {
+    srcChainId: SINERGY_BRIDGE_SOURCE_CHAIN_ID,
+    srcDenom: SINERGY_BRIDGE_SOURCE_DENOM,
+  };
+}
 
 export function buildInterwovenCustomChain() {
+  const nativeCurrency = resolveNativeCurrency(deployment.network);
+
   return {
     chain_id: deployment.network.rollupChainId,
     chain_name: deployment.network.name,
@@ -32,11 +108,11 @@ export function buildInterwovenCustomChain() {
     network_type: "testnet" as const,
     bech32_prefix: "init",
     apis: {
-      rpc: [{ address: runtimeHttpUrl(26657) }],
-      rest: [{ address: runtimeHttpUrl(1317) }],
-      indexer: [{ address: runtimeHttpUrl(8080) }],
-      "json-rpc": [{ address: runtimeHttpUrl(8545) }],
-      websocket: [{ address: runtimeWsUrl(8546) }],
+      rpc: [{ address: import.meta.env.VITE_TENDERMINT_RPC_URL ?? runtimeHttpUrl(26657, "tm") }],
+      rest: [{ address: import.meta.env.VITE_REST_URL ?? runtimeHttpUrl(1317, "rest") }],
+      indexer: [{ address: import.meta.env.VITE_INDEXER_URL ?? runtimeHttpUrl(8080, "indexer") }],
+      "json-rpc": [{ address: import.meta.env.VITE_JSON_RPC_URL ?? runtimeHttpUrl(8545, "rpc") }],
+      websocket: [{ address: import.meta.env.VITE_EVM_WS_URL ?? runtimeWsUrl(8546, "ws") }],
     },
     fees: {
       fee_tokens: [
@@ -55,9 +131,9 @@ export function buildInterwovenCustomChain() {
     native_assets: [
       {
         denom: deployment.network.gasDenom,
-        name: SINERGY_LOCAL_CHAIN.nativeCurrency.name,
-        symbol: SINERGY_LOCAL_CHAIN.nativeCurrency.symbol,
-        decimals: SINERGY_LOCAL_CHAIN.nativeCurrency.decimals,
+        name: nativeCurrency.name,
+        symbol: nativeCurrency.symbol,
+        decimals: nativeCurrency.decimals,
       },
     ],
     metadata: {

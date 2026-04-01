@@ -2,6 +2,8 @@ import { useMemo } from "react";
 import { useInterwovenKit } from "@initia/interwovenkit-react";
 import { useBalance } from "wagmi";
 import { sepolia } from "wagmi/chains";
+import { buildPublicSubdomainHost, isDirectHost } from "@sinergy/shared";
+import { buildBridgeDefaults } from "./initia";
 import "./styles.css";
 
 function shorten(addr?: string) {
@@ -24,7 +26,11 @@ function exchangeUrl() {
     return "http://127.0.0.1:5173";
   }
 
-  return `${protocol}//app.${hostname}`;
+  if (isDirectHost(hostname)) {
+    return `${protocol}//${hostname}:5173`;
+  }
+
+  return `${protocol}//${buildPublicSubdomainHost(hostname, "app")}`;
 }
 
 export default function App() {
@@ -80,7 +86,7 @@ export default function App() {
             <div className="hero-kicker">Subdomain-ready</div>
             <h1>Bridge first. Trade second.</h1>
             <p>
-              This app isolates the source-chain connection flow from the trading app so Sepolia
+              This app isolates the source-chain connection flow from the trading app so bridge
               onboarding does not compete with rollup trading state.
             </p>
 
@@ -90,7 +96,7 @@ export default function App() {
                   Connect For Bridge
                 </button>
               ) : (
-                <button className="primary-btn" onClick={() => openBridge()}>
+                <button className="primary-btn" onClick={() => openBridge(buildBridgeDefaults())}>
                   Open Official Bridge
                 </button>
               )}
@@ -101,15 +107,15 @@ export default function App() {
             </div>
 
             <div className="helper-copy">
-              Choose <strong>Ethereum Sepolia</strong> manually in the bridge modal, confirm the
-              source asset, and only then move on to deposit and trading.
+              Start with the configured bridge source asset, complete the official bridge flow, and
+              then continue into the exchange for deposit and trading.
             </div>
           </div>
 
           <div className="route-card">
             <div className="route-step">
               <span>Source</span>
-              <strong>Ethereum Sepolia</strong>
+              <strong>Configured bridge source</strong>
             </div>
             <div className="route-arrow">↓</div>
             <div className="route-step">
@@ -136,10 +142,10 @@ export default function App() {
 
           <article className="step-card">
             <div className="step-index">02</div>
-            <h2>Select Sepolia manually</h2>
+            <h2>Confirm the source route</h2>
             <p>
-              The official bridge should be opened without forcing the wrong source chain. Pick
-              Sepolia from the source selector.
+              The official bridge opens with the configured source defaults so the user does not
+              start from an unexpected chain or asset.
             </p>
           </article>
 
@@ -155,7 +161,7 @@ export default function App() {
 
         <section className="diagnostic-card">
           <div className="diagnostic-head">
-            <strong>Sepolia Balance Diagnostic</strong>
+            <strong>Sepolia EVM Diagnostic</strong>
             <span>{sepoliaBalance.isFetching ? "Refreshing" : "Live"}</span>
           </div>
           <div className="diagnostic-grid">

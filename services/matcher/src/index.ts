@@ -22,7 +22,7 @@ const tokens = resolveTokens(deployment);
 const rawMarkets = resolveMarkets(deployment);
 const { publicClient, walletClient, account } = createClients(
   env.MATCHER_PRIVATE_KEY as Hex,
-  deployment.network.rpcUrl
+  deployment
 );
 const store = new StateStore();
 const priceService = new PriceService({

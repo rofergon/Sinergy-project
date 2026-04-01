@@ -50,7 +50,7 @@ export function BridgeLanding({
             </button>
           ) : (
             <div className="bridge-note">
-              Start here, choose Sepolia in the bridge modal, and only then continue into the
+              Start here, confirm the configured bridge source, and only then continue into the
               exchange.
             </div>
           )}
@@ -59,7 +59,7 @@ export function BridgeLanding({
         <div className="bridge-visual-card">
           <div className="bridge-chain-row">
             <span className="bridge-chain-label">Source</span>
-            <strong>Ethereum Sepolia</strong>
+            <strong>Configured bridge source</strong>
           </div>
           <div className="bridge-arrow">↓</div>
           <div className="bridge-chain-row">
@@ -86,9 +86,9 @@ export function BridgeLanding({
 
         <section className="bridge-step-card">
           <span className="bridge-step-index">02</span>
-          <h2>Select Sepolia manually</h2>
+          <h2>Confirm the bridge source</h2>
           <p>
-            Confirm the source chain is <strong>Ethereum Sepolia</strong> before checking balances or
+            Confirm the source chain and asset the bridge opens with before checking balances or
             entering the amount.
           </p>
         </section>

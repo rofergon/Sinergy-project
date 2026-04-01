@@ -11,8 +11,11 @@
     "backfill:prices": "npm run backfill -w @sinergy/matcher",
     "build": "npm run build -w @sinergy/shared && npm run build -w @sinergy/matcher && npm run build -w @sinergy/web && npm run build -w @sinergy/bridge",
     "dev:bridge": "npm run dev -w @sinergy/bridge",
+    "dev:bridge:testnet": "npm run dev:testnet -w @sinergy/bridge",
     "dev:web": "npm run dev -w @sinergy/web",
+    "dev:web:testnet": "npm run dev:testnet -w @sinergy/web",
     "dev:matcher": "npm run dev -w @sinergy/matcher",
+    "dev:matcher:testnet": "npm run dev:testnet -w @sinergy/matcher",
     "lint": "npm run typecheck -w @sinergy/shared && npm run typecheck -w @sinergy/matcher && npm run typecheck -w @sinergy/web && npm run typecheck -w @sinergy/bridge",
     "typecheck": "npm run typecheck -w @sinergy/shared && npm run typecheck -w @sinergy/matcher && npm run typecheck -w @sinergy/web && npm run typecheck -w @sinergy/bridge"
   }

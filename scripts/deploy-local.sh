@@ -6,16 +6,30 @@ CONTRACTS_DIR="$ROOT_DIR/contracts"
 DEPLOYMENTS_DIR="$ROOT_DIR/deployments"
 TMP_DIR="$ROOT_DIR/.tmp/deploy"
 
-CHAIN_ID="${CHAIN_ID:-Sinergy-2}"
-NODE_URL="${NODE_URL:-http://127.0.0.1:26657}"
-RPC_URL="${RPC_URL:-http://127.0.0.1:8545}"
+ENV_NAME="${ENV_NAME:-local}"
+DEPLOYMENT_FILE="${DEPLOYMENT_FILE:-$DEPLOYMENTS_DIR/${ENV_NAME}.json}"
+NETWORK_NAME="${NETWORK_NAME:-Sinergy Local}"
+ROLLUP_CHAIN_ID="${ROLLUP_CHAIN_ID:-${CHAIN_ID:-Sinergy-2}}"
+L1_CHAIN_ID="${L1_CHAIN_ID:-initiation-2}"
+TENDERMINT_RPC_URL="${TENDERMINT_RPC_URL:-${NODE_URL:-http://127.0.0.1:26657}}"
+JSON_RPC_URL="${JSON_RPC_URL:-${RPC_URL:-http://127.0.0.1:8545}}"
+WS_URL="${WS_URL:-ws://127.0.0.1:8546}"
+REST_URL="${REST_URL:-http://127.0.0.1:1317}"
+EVM_CHAIN_ID="${EVM_CHAIN_ID:-1716124615666775}"
+EVM_CHAIN_ID_HEX="${EVM_CHAIN_ID_HEX:-0x618ce661b6c57}"
+GAS_DENOM="${GAS_DENOM:-GAS}"
+NATIVE_CURRENCY_NAME="${NATIVE_CURRENCY_NAME:-Gas}"
+NATIVE_CURRENCY_SYMBOL="${NATIVE_CURRENCY_SYMBOL:-$GAS_DENOM}"
+NATIVE_CURRENCY_DECIMALS="${NATIVE_CURRENCY_DECIMALS:-18}"
+EXPLORER_URL="${EXPLORER_URL:-$JSON_RPC_URL}"
 FROM_KEY="${FROM_KEY:-gas-station}"
 KEYRING_BACKEND="${KEYRING_BACKEND:-test}"
 MATCHER_PRIVATE_KEY="${MATCHER_PRIVATE_KEY:-0x59c6995e998f97a5a0044966f0945382d7dd2f0d5b0ce3f4bfefd4dc2621c4d6}"
 DEPLOY_GAS="${DEPLOY_GAS:-5000000}"
 CALL_GAS="${CALL_GAS:-800000}"
+MATCHER_ENV_FILE="${MATCHER_ENV_FILE:-$ROOT_DIR/services/matcher/.env}"
 
-mkdir -p "$TMP_DIR" "$DEPLOYMENTS_DIR"
+mkdir -p "$TMP_DIR" "$DEPLOYMENTS_DIR" "$(dirname "$DEPLOYMENT_FILE")"
 
 MATCHER_ADDRESS="$(cast wallet address --private-key "$MATCHER_PRIVATE_KEY")"
 GAS_STATION_BECH32="$(minitiad keys show "$FROM_KEY" -a --keyring-backend "$KEYRING_BACKEND")"
@@ -43,11 +57,11 @@ echo "Building contracts..."
 )
 
 echo "Funding matcher signer..."
-minitiad tx bank send "$GAS_STATION_BECH32" "$MATCHER_BECH32" 1000000000000000000GAS \
+minitiad tx bank send "$GAS_STATION_BECH32" "$MATCHER_BECH32" "1000000000000000000${GAS_DENOM}" \
   --from "$FROM_KEY" \
   --keyring-backend "$KEYRING_BACKEND" \
-  --chain-id "$CHAIN_ID" \
-  --node "$NODE_URL" \
+  --chain-id "$ROLLUP_CHAIN_ID" \
+  --node "$TENDERMINT_RPC_URL" \
   --gas 250000 \
   --yes \
   --output json >/dev/null
@@ -76,8 +90,8 @@ deploy_contract() {
       --input "$input" \
       --from "$FROM_KEY" \
       --keyring-backend "$KEYRING_BACKEND" \
-      --chain-id "$CHAIN_ID" \
-      --node "$NODE_URL" \
+      --chain-id "$ROLLUP_CHAIN_ID" \
+      --node "$TENDERMINT_RPC_URL" \
       --gas "$DEPLOY_GAS" \
       --broadcast-mode sync \
       --yes \
@@ -91,7 +105,7 @@ deploy_contract() {
   tx_hash="$(echo "$tx_json" | jq -r '.txhash // .tx_response.txhash')"
   local contract_address
   contract_address="$(
-    minitiad query tx "$tx_hash" --node "$NODE_URL" --output json |
+    minitiad query tx "$tx_hash" --node "$TENDERMINT_RPC_URL" --output json |
       jq -r '.events[] | select(.type=="contract_created") | .attributes[] | select(.key=="contract") | .value' |
       tail -n 1
   )"
@@ -109,8 +123,8 @@ call_as_gas_station() {
   minitiad tx evm call "$to" "$calldata" \
     --from "$FROM_KEY" \
     --keyring-backend "$KEYRING_BACKEND" \
-    --chain-id "$CHAIN_ID" \
-    --node "$NODE_URL" \
+    --chain-id "$ROLLUP_CHAIN_ID" \
+    --node "$TENDERMINT_RPC_URL" \
     --gas "$CALL_GAS" \
     --broadcast-mode sync \
     --yes \
@@ -151,6 +165,17 @@ jq -n \
   --arg vault "$VAULT_ADDRESS" \
   --arg market "$MARKET_ADDRESS" \
   --arg quote "$USDC_ADDRESS" \
+  --arg networkName "$NETWORK_NAME" \
+  --arg rollupChainId "$ROLLUP_CHAIN_ID" \
+  --arg l1ChainId "$L1_CHAIN_ID" \
+  --arg gasDenom "$GAS_DENOM" \
+  --arg rpcUrl "$JSON_RPC_URL" \
+  --arg wsUrl "$WS_URL" \
+  --arg tendermintRpc "$TENDERMINT_RPC_URL" \
+  --arg restUrl "$REST_URL" \
+  --arg explorerUrl "$EXPLORER_URL" \
+  --arg nativeCurrencyName "$NATIVE_CURRENCY_NAME" \
+  --arg nativeCurrencySymbol "$NATIVE_CURRENCY_SYMBOL" \
   --arg taapl "$TAAPL_ADDRESS" \
   --arg tbond "$TBOND_ADDRESS" \
   --arg tnvda "$TNVDA_ADDRESS" \
@@ -158,18 +183,27 @@ jq -n \
   --arg ceth "$CETH_ADDRESS" \
   --arg csol "$CSOL_ADDRESS" \
   --arg cinit "$CINIT_ADDRESS" \
+  --argjson chainId "$EVM_CHAIN_ID" \
+  --argjson nativeCurrencyDecimals "$NATIVE_CURRENCY_DECIMALS" \
+  --arg chainIdHex "$EVM_CHAIN_ID_HEX" \
   '{
     network: {
-      name: "Sinergy Local",
-      chainId: 1716124615666775,
-      chainIdHex: "0x618ce661b6c57",
-      rollupChainId: "Sinergy-2",
-      l1ChainId: "initiation-2",
-      gasDenom: "GAS",
-      rpcUrl: "http://127.0.0.1:8545",
-      wsUrl: "ws://127.0.0.1:8546",
-      tendermintRpc: "http://127.0.0.1:26657",
-      restUrl: "http://127.0.0.1:1317"
+      name: $networkName,
+      chainId: $chainId,
+      chainIdHex: $chainIdHex,
+      rollupChainId: $rollupChainId,
+      l1ChainId: $l1ChainId,
+      gasDenom: $gasDenom,
+      rpcUrl: $rpcUrl,
+      wsUrl: $wsUrl,
+      tendermintRpc: $tendermintRpc,
+      restUrl: $restUrl,
+      explorerUrl: $explorerUrl,
+      nativeCurrency: {
+        name: $nativeCurrencyName,
+        symbol: $nativeCurrencySymbol,
+        decimals: $nativeCurrencyDecimals
+      }
     },
     operator: {
       matcherAddress: $matcherAddress
@@ -237,13 +271,13 @@ jq -n \
         kind: "crypto"
       }
     ]
-  }' > "$DEPLOYMENTS_DIR/local.json"
+  }' > "$DEPLOYMENT_FILE"
 
 echo "Writing backend env example..."
-cat > "$ROOT_DIR/services/matcher/.env" <<EOF
+cat > "$MATCHER_ENV_FILE" <<EOF
 MATCHER_PRIVATE_KEY=$MATCHER_PRIVATE_KEY
 PORT=8787
-DEPLOYMENT_FILE=$ROOT_DIR/deployments/local.json
+DEPLOYMENT_FILE=$DEPLOYMENT_FILE
 PRICE_BAND_BPS=1000
 PRICE_DB_FILE=./data/prices.sqlite
 PRICE_POLL_INTERVAL_MS=60000
@@ -252,6 +286,8 @@ INITIA_CONNECT_REST_URL=https://rest.testnet.initia.xyz
 EOF
 
 echo "Deployment complete."
+echo "Environment: $ENV_NAME"
+echo "Deployment file: $DEPLOYMENT_FILE"
 echo "Matcher signer: $MATCHER_ADDRESS"
 echo "Vault: $VAULT_ADDRESS"
 echo "Market: $MARKET_ADDRESS"

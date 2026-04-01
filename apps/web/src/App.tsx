@@ -13,6 +13,8 @@ import { VaultPanel } from "./components/VaultPanel";
 import { BalancesPanel } from "./components/BalancesPanel";
 import { PortfolioView } from "./components/PortfolioView";
 import { BridgeLanding } from "./components/BridgeLanding";
+import { MarketsView } from "./components/MarketsView";
+import { buildBridgeDefaults } from "./initia";
 import "./styles.css";
 
 type Token = {
@@ -207,7 +209,7 @@ function Dashboard() {
       return;
     }
 
-    openBridge();
+    openBridge(buildBridgeDefaults());
   }
 
   return (
@@ -249,6 +251,13 @@ function Dashboard() {
           }}
           onOpenWallet={openWallet}
           onOpenBridge={handleBridgeIn}
+          onGoTrade={() => setActiveView("trade")}
+        />
+      ) : activeView === "markets" ? (
+        <MarketsView
+          markets={marketSnapshots}
+          selectedMarketId={selectedMarket?.id}
+          onSelectMarket={setSelectedMarketId}
           onGoTrade={() => setActiveView("trade")}
         />
       ) : activeView === "portfolio" ? (

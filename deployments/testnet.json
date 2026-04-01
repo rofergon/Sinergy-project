@@ -1,16 +1,16 @@
 {
   "network": {
-    "name": "Sinergy Local",
+    "name": "Sinergy Testnet",
     "chainId": 1716124615666775,
     "chainIdHex": "0x618ce661b6c57",
     "rollupChainId": "Sinergy-2",
     "l1ChainId": "initiation-2",
     "gasDenom": "GAS",
-    "rpcUrl": "http://127.0.0.1:8545",
-    "wsUrl": "ws://127.0.0.1:8546",
-    "tendermintRpc": "http://127.0.0.1:26657",
-    "restUrl": "http://127.0.0.1:1317",
-    "explorerUrl": "http://127.0.0.1:8545",
+    "rpcUrl": "http://192.168.1.14:8545",
+    "wsUrl": "ws://192.168.1.14:8546",
+    "tendermintRpc": "http://192.168.1.14:26657",
+    "restUrl": "http://192.168.1.14:1317",
+    "explorerUrl": "http://192.168.1.14:8545",
     "nativeCurrency": {
       "name": "Gas",
       "symbol": "GAS",

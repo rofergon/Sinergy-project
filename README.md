@@ -103,6 +103,12 @@ The official default endpoint is:
 
 - `INITIA_CONNECT_REST_URL=https://rest.testnet.initia.xyz`
 
+Bridge note:
+
+- the official `InterwovenKit` bridge can be opened from this repo, but Initia's own hackathon docs note that local appchains may not appear in the public bridge UI because only registered chain IDs are resolved there
+- this repo now pre-fills bridge defaults with `VITE_BRIDGE_SRC_CHAIN_ID` and `VITE_BRIDGE_SRC_DENOM` and falls back to `initiation-2` / `uinit`
+- for local demos, treat the bridge as the official ecosystem entry point and the local rollup deposit as a separate step unless your chain is registered
+
 ## Quick Start
 
 ### 1. Install JS Dependencies
@@ -214,6 +220,15 @@ npm run start -w @sinergy/matcher
 npm run dev:web
 ```
 
+For the testnet frontend path:
+
+```bash
+cp apps/web/.env.testnet.example apps/web/.env.testnet
+cp apps/bridge/.env.testnet.example apps/bridge/.env.testnet
+npm run dev:web:testnet
+npm run dev:bridge:testnet
+```
+
 Frontend notes:
 
 - The wallet modal and session now use `InterwovenKit`.
@@ -225,6 +240,200 @@ Frontend notes:
   - it uses `VITE_MATCHER_URL` if you define it
   - otherwise it uses the same hostname you used to open the web app, with port `8787`
 - This helps when you are accessing the app through SSH, VS Code Ports, or remote forwarding and do not want to hardcode `127.0.0.1`.
+- If you access the frontend through HTTPS forwarding or custom hostnames, you can also override rollup endpoints with:
+  - `VITE_TENDERMINT_RPC_URL`
+  - `VITE_REST_URL`
+  - `VITE_INDEXER_URL`
+  - `VITE_JSON_RPC_URL`
+  - `VITE_EVM_WS_URL`
+- To switch the apps from `local` to `testnet`, set `VITE_DEPLOYMENT_ENV=testnet`.
+
+### Testnet Matcher
+
+```bash
+cp services/matcher/.env.testnet.example services/matcher/.env.testnet
+npm run dev:matcher:testnet
+```
+
+### Testnet Stack Bootstrap
+
+Once the machine has the rollup, executor, relayer, matcher, and optional frontends configured,
+you can restore the whole stack after a reboot with:
+
+```bash
+./scripts/start-testnet-stack.sh
+```
+
+For the full public demo flow on this machine, run these three commands in order:
+
+```bash
+./scripts/start-testnet-stack.sh
+./scripts/public-nginx.sh start
+./scripts/cloudflare-tunnel.sh quick
+```
+
+What each one does:
+
+- `start-testnet-stack.sh`: restores rollup, executor, relayer, matcher, `web`, and `bridge`
+- `public-nginx.sh start`: builds the testnet frontends and serves the public HTTP layer locally
+- `cloudflare-tunnel.sh quick`: exposes that local public layer through a temporary `trycloudflare.com` HTTPS URL
+
+After that, check the current public URL with:
+
+```bash
+./scripts/cloudflare-tunnel.sh status
+```
+
+Useful variants:
+
+```bash
+./scripts/start-testnet-stack.sh status
+START_FRONTENDS=0 ./scripts/start-testnet-stack.sh
+```
+
+This script:
+
+- ensures the rollup is running
+- ensures the OPinit executor is running
+- ensures the relayer container is running
+- starts the matcher if it is down
+- starts the `web` and `bridge` dev servers unless `START_FRONTENDS=0`
+
+Logs and pid files for the non-systemd services live under:
+
+- `.tmp/testnet-runtime/`
+
+### Public Internet Access With Nginx
+
+This repo now includes a Dockerized Nginx reverse proxy so you can expose the stack without
+installing Nginx on the host:
+
+```bash
+./scripts/public-nginx.sh start
+```
+
+Useful commands:
+
+```bash
+./scripts/public-nginx.sh status
+./scripts/public-nginx.sh print-env
+./scripts/public-nginx.sh stop
+```
+
+Behavior:
+
+- defaults to `sslip.io` based on the machine public IP if you do not set `PUBLIC_ROOT_DOMAIN`
+- builds `@sinergy/web` and `@sinergy/bridge` in `testnet` mode and serves them as static sites
+- exposes subdomains for:
+  - `app`
+  - `bridge`
+  - `api`
+  - `rpc`
+  - `ws`
+  - `rest`
+  - `tm`
+  - `indexer`
+- runs as Docker container `sinergy-public-nginx`
+- proxies live backend endpoints for `api`, `rpc`, `ws`, `rest`, `tm`, and `indexer`
+- uses HTTP mode until a certificate exists, then switches to HTTPS automatically
+
+Common override:
+
+```bash
+PUBLIC_ROOT_DOMAIN=sinergy.example.com ./scripts/public-nginx.sh start
+```
+
+To request a Let's Encrypt certificate after DNS and port forwarding are ready:
+
+```bash
+LETSENCRYPT_EMAIL=you@example.com ./scripts/request-public-cert.sh
+```
+
+Notes:
+
+- on this machine Docker is running rootless, so the proxy listens locally on `8080` and `8443` by default
+- if the machine sits behind a router/NAT, forward:
+  - external `80` -> `192.168.1.14:8080`
+  - external `443` -> `192.168.1.14:8443`
+- wallets usually reject remote `http://` RPC URLs, so `https://rpc.<domain>` is the goal for MetaMask/Coinbase Wallet
+- `sslip.io` is convenient for testnet because `app.<PUBLIC_IP>.sslip.io` style hostnames resolve automatically
+- once HTTPS is live, update:
+  - [deployments/testnet.json](/home/sari/Sinergy-project/deployments/testnet.json)
+  - `apps/web/.env.testnet`
+  - `apps/bridge/.env.testnet`
+  - `services/matcher/.env.testnet`
+  to use the public subdomains instead of raw LAN ports
+
+### Cloudflare Tunnel Without Router Changes
+
+If you do not want to open ports in the router, you can expose the stack with Cloudflare Tunnel:
+
+```bash
+./scripts/cloudflare-tunnel.sh quick
+```
+
+This starts an account-less `trycloudflare.com` tunnel to the local Nginx layer and prints:
+
+- app root
+- `/api`
+- `/rpc`
+- `/rest`
+- `/tm`
+- `/indexer`
+- `/ws`
+
+Useful commands:
+
+```bash
+./scripts/cloudflare-tunnel.sh status
+./scripts/cloudflare-tunnel.sh stop
+```
+
+Notes:
+
+- quick tunnels are convenient for demos and hackathon testing
+- Cloudflare itself warns they do not have uptime guarantees
+- the frontend auto-detects `*.trycloudflare.com` and routes matcher/RPC/REST/TM calls through same-origin paths
+- for a stable production-style setup, prefer a named tunnel with your own Cloudflare zone:
+
+```bash
+CF_TUNNEL_TOKEN=... ./scripts/cloudflare-tunnel.sh named
+```
+you can bring everything up after a reboot with a single command:
+
+```bash
+./scripts/start-testnet-stack.sh
+```
+
+What it does:
+
+- starts the rollup service
+- starts the OPinit executor
+- ensures the relayer is running
+- starts the matcher
+- starts `web`
+- starts `bridge`
+
+Useful variants:
+
+```bash
+./scripts/start-testnet-stack.sh status
+START_FRONTENDS=0 ./scripts/start-testnet-stack.sh
+```
+
+Notes:
+
+- the script is idempotent, so rerunning it does not intentionally duplicate already-running services
+- runtime logs and pid files for app-level processes are stored under `.tmp/testnet-runtime/`
+- `rollup`, `executor`, and `relayer` are checked through their existing service/container managers, while `matcher`, `web`, and `bridge` are started only if their ports are not already listening
+
+### Testnet Deploy Wrapper
+
+Use the wrapper once your rollup endpoints are known:
+
+```bash
+./scripts/deploy-testnet.sh
+```
 
 ### 6. Add Crypto Assets to an Existing Deployment
 

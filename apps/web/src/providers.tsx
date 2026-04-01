@@ -8,8 +8,7 @@ import {
 import InterwovenKitStyles from "@initia/interwovenkit-react/styles.js";
 import { WagmiProvider, createConfig, http } from "wagmi";
 import { sepolia } from "wagmi/chains";
-import { SINERGY_LOCAL_CHAIN } from "@sinergy/shared";
-import { buildInterwovenCustomChain, SINERGY_ROLLUP_CHAIN_ID } from "./initia";
+import { buildInterwovenCustomChain, SINERGY_EVM_CHAIN, SINERGY_ROLLUP_CHAIN_ID } from "./initia";
 
 injectStyles(InterwovenKitStyles);
 
@@ -24,9 +23,9 @@ const interwovenKitProps = {
 } as const;
 
 const wagmiConfig = createConfig({
-  chains: [SINERGY_LOCAL_CHAIN, sepolia],
+  chains: [SINERGY_EVM_CHAIN, sepolia],
   transports: {
-    [SINERGY_LOCAL_CHAIN.id]: http(SINERGY_LOCAL_CHAIN.rpcUrls.default.http[0]),
+    [SINERGY_EVM_CHAIN.id]: http(SINERGY_EVM_CHAIN.rpcUrls.default.http[0]),
     [sepolia.id]: http(),
   },
 });

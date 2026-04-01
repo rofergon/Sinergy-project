@@ -95,7 +95,7 @@ El MVP ya implementa los componentes principales:
 ### Bridge onboarding
 
 - una app dedicada para iniciar la sesión de wallet;
-- flujo pensado para usuarios que llegan desde `Ethereum Sepolia`;
+- apertura del bridge oficial desde `InterwovenKit` con un source chain configurable;
 - transición clara desde bridge hacia el exchange.
 
 ## 6. Características diferenciales
@@ -123,6 +123,12 @@ El proyecto ya usa piezas nativas del ecosistema:
 - `InterwovenKit`
 - `Initia Connect`
 - `InitiaDEX` para ciertos mercados habilitados
+
+Importante para el demo:
+
+- la documentación oficial de Initia aclara que la UI pública del bridge no siempre resuelve appchains locales no registradas;
+- por eso, en entorno local conviene presentar el bridge como puerta de entrada al ecosistema y el depósito en `Sinergy-2` como paso posterior del flujo;
+- si el rollup llega a registrarse o se despliega en un entorno público soportado, ese salto puede verse como una experiencia más continua.
 
 ### Capa de oráculos y pricing
 
@@ -189,6 +195,11 @@ Sinergy tiene varios puntos fuertes para jurados:
 - **tiene arquitectura completa**, no sólo una pantalla o un contrato aislado;
 - **es demoable**: wallet, depósito, trade, router, retiro;
 - **tiene visión de roadmap**, sin vender humo sobre lo que aún no está implementado.
+
+Para mantener el pitch honesto:
+
+- en local, no conviene prometer que el bridge público siempre liste `Sinergy-2` como destino directo;
+- sí conviene mostrar que la experiencia ya está preparada para abrir el bridge oficial, recibir liquidez del ecosistema y continuar en el exchange.
 
 ## 10. Limitaciones actuales del MVP
 

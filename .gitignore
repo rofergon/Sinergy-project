@@ -7,6 +7,9 @@ dist
 .env
 .env.*
 !.env.example
+!apps/web/.env.testnet.example
+!apps/bridge/.env.testnet.example
+!services/matcher/.env.testnet.example
 .env.local
 .env.*.local
 coverage

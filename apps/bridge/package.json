@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json && vite build",
+    "build:testnet": "tsc -p tsconfig.json && vite build --mode testnet",
     "dev": "vite",
+    "dev:testnet": "vite --host 0.0.0.0 --mode testnet",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

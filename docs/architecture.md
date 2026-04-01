@@ -1,120 +1,120 @@
 # Sinergy Dark RWA Market
 
-## Objetivo
+## Objective
 
-Construir un mercado RWA sobre `Sinergy-2` donde compradores y vendedores puedan:
+Build an RWA market on `Sinergy-2` where buyers and sellers can:
 
-- depositar liquidez en una vault común;
-- negociar órdenes sin publicarlas on-chain;
-- ejecutar matching fuera de cadena;
-- retirar posiciones desde la vault mediante tickets firmados;
-- reducir la huella visible en cadena a depósitos, retiros y anclajes periódicos del estado.
+- deposit liquidity into a shared vault;
+- negotiate orders without publishing them on-chain;
+- execute matching off-chain;
+- withdraw positions from the vault via signed tickets;
+- reduce the on-chain visible footprint to deposits, withdrawals, and periodic state anchors.
 
-## Traducción de `ssl` a Initia
+## Translation of `ssl` to Initia
 
-El proyecto de referencia `furqaannabi/ssl` depende de tres piezas que no podemos usar directamente en `Sinergy-2`:
+The reference project `furqaannabi/ssl` relies on three pieces we cannot use directly in `Sinergy-2`:
 
-1. `Chainlink CRE` para matching confidencial en TEE.
-2. `Chainlink ACE / World ID` para enforcement de compliance.
-3. `Convergence Vault` para settlement privado ya resuelto por terceros.
+1. `Chainlink CRE` for confidential matching in TEE.
+2. `Chainlink ACE / World ID` for compliance enforcement.
+3. `Convergence Vault` for private settlement already solved by third parties.
 
-En este MVP las reemplazamos así:
+In this MVP we replace them as follows:
 
 | SSL | Sinergy MVP |
 |---|---|
-| CRE TEE | `matcher-service` propio |
-| Confidential HTTP / Chainlink oracle | `price service` propio con adaptadores mock/manual/http |
+| CRE TEE | own `matcher-service` |
+| Confidential HTTP / Chainlink oracle | own `price service` with mock/manual/http adapters |
 | Convergence vault | `DarkPoolVault` |
-| ACE / World ID | capa de compliance desacoplada en backend |
-| Shield settlement fuera de nuestro control | settlement interno off-chain + retiros firmados |
+| ACE / World ID | decoupled compliance layer in backend |
+| Shield settlement outside our control | internal off-chain settlement + signed withdrawals |
 
-## Componentes
+## Components
 
 ### 1. `DarkPoolVault` on-chain
 
-Contrato de custodia para `USDC` y tokens RWA.
+Custody contract for `USDC` and RWA tokens.
 
-- recibe depósitos ERC20;
-- emite eventos `Deposit` y `Withdraw`;
-- no expone libro de órdenes ni emparejamientos;
-- sólo permite retiros con permisos EIP-712 firmados por el backend autorizado.
+- receives ERC20 deposits;
+- emits `Deposit` and `Withdraw` events;
+- does not expose order book or matchings;
+- only allows withdrawals with EIP-712 signed permissions from the authorized backend.
 
-Esto hace que la actividad visible en cadena sea mínima:
+This makes on-chain visible activity minimal:
 
 - `approve + deposit`
 - `withdraw`
-- anclajes periódicos del estado del libro
+- periodic order book state anchors
 
 ### 2. `DarkPoolMarket` on-chain
 
-Contrato de control ligero que:
+Lightweight control contract that:
 
-- registra mercados listados;
-- guarda batches anclados por el matcher (`stateRoot`, `settlementRoot`);
-- permite auditar snapshots sin revelar cada orden.
+- registers listed markets;
+- stores batches anchored by the matcher (`stateRoot`, `settlementRoot`);
+- allows auditing snapshots without revealing each order.
 
 ### 3. `matcher-service`
 
-Backend TypeScript responsable de:
+TypeScript backend responsible for:
 
-- mantener balances internos por usuario y token;
-- sincronizar depósitos desde la vault;
-- validar saldos disponibles;
-- almacenar órdenes limitadas;
-- ejecutar matching precio-tiempo;
-- aplicar slippage guards con un precio de referencia;
-- firmar tickets de retiro para el frontend.
+- maintaining internal balances per user and token;
+- synchronizing deposits from the vault;
+- validating available balances;
+- storing limit orders;
+- executing price-time matching;
+- applying slippage guards with a reference price;
+- signing withdrawal tickets for the frontend.
 
 ### 4. `web`
 
-Frontend Vite + React + wagmi/viem para:
+Vite + React + wagmi/viem frontend for:
 
-- conectar una wallet EVM;
-- aprobar y depositar en la vault;
-- sincronizar balances internos;
-- enviar órdenes privadas al backend;
-- solicitar tickets de retiro y ejecutar `withdraw`.
+- connecting an EVM wallet;
+- approving and depositing into the vault;
+- synchronizing internal balances;
+- sending private orders to the backend;
+- requesting withdrawal tickets and executing `withdraw`.
 
-## Qué privacidad logramos en este primer corte
+## What privacy we achieve in this first cut
 
-### Sí
+### Yes
 
-- el libro y la intención de trading no viven on-chain;
-- otros participantes no ven órdenes abiertas;
-- los rebalanceos internos del matching no se publican on-chain;
-- el settlement visible se concentra en la vault y en hashes de batches.
+- the order book and trading intent do not live on-chain;
+- other participants do not see open orders;
+- internal matching rebalances are not published on-chain;
+- visible settlement is concentrated in the vault and batch hashes.
 
-### No todavía
+### Not yet
 
-- el operador del backend sí puede ver órdenes en claro;
-- no hay TEE ni zk para ocultar lógica al operador;
-- no hay compliance fuerte en contrato;
-- no hay stealth withdrawals completos todavía.
+- the backend operator can see orders in plaintext;
+- no TEE or zk to hide logic from the operator;
+- no strong compliance in contract;
+- no full stealth withdrawals yet.
 
-## Modelo de confianza
+## Trust model
 
-Este MVP prioriza velocidad de construcción sobre privacidad criptográfica total.
+This MVP prioritizes build speed over total cryptographic privacy.
 
-La confianza actual queda así:
+Current trust assumptions:
 
-1. El usuario confía en el `matcher-service` para mantener el libro interno.
-2. El usuario confía en el firmante del backend para autorizar retiros correctos.
-3. El contrato limita el daño porque sólo mueve fondos mediante depósitos explícitos y tickets firmados.
+1. The user trusts the `matcher-service` to maintain the internal order book.
+2. The user trusts the backend signer to authorize correct withdrawals.
+3. The contract limits damage because it only moves funds through explicit deposits and signed tickets.
 
-## Evolución recomendada
+## Recommended evolution
 
-### Fase 2
+### Phase 2
 
-- cifrado cliente -> backend con ECIES;
-- persistencia SQL + auditoría completa;
-- procesos separados para matcher, risk y oracle;
-- snapshot Merkle del ledger interno;
-- compliance por allowlists, KYC o attestations.
+- client -> backend encryption with ECIES;
+- SQL persistence + full auditing;
+- separate processes for matcher, risk, and oracle;
+- Merkle snapshot of the internal ledger;
+- compliance via allowlists, KYC, or attestations.
 
-### Fase 3
+### Phase 3
 
-- settlement privado con stealth addresses;
-- pruebas de balance por usuario;
-- ejecución del matcher en TEE o entorno confidencial;
-- pruebas zk para lotes de settlement.
+- private settlement with stealth addresses;
+- per-user balance proofs;
+- matcher execution in TEE or confidential environment;
+- zk proofs for settlement batches.
 

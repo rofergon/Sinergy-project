@@ -1,8 +1,8 @@
 import type { Address, Hex, PublicClient, WalletClient } from "viem";
 import { createPublicClient, createWalletClient, http, isAddressEqual, parseEventLogs } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import type { LocalDeployment } from "@sinergy/shared";
-import { SINERGY_LOCAL_CHAIN } from "@sinergy/shared";
+import type { SinergyDeployment } from "@sinergy/shared";
+import { createSinergyChain } from "@sinergy/shared";
 import type { PendingWithdrawal, ResolvedMarket, ResolvedToken } from "../types.js";
 import { StateStore } from "./state.js";
 import { darkPoolVaultAbi } from "./deployment.js";
@@ -32,18 +32,19 @@ function addAtomic(
   bucket[tokenKey] = next.toString();
 }
 
-export function createClients(privateKey: Hex, rpcUrl: string) {
+export function createClients(privateKey: Hex, deployment: Pick<SinergyDeployment, "network">) {
   const account = privateKeyToAccount(privateKey);
+  const chain = createSinergyChain(deployment);
 
   const publicClient = createPublicClient({
-    chain: SINERGY_LOCAL_CHAIN,
-    transport: http(rpcUrl)
+    chain,
+    transport: http(deployment.network.rpcUrl)
   });
 
   const walletClient = createWalletClient({
     account,
-    chain: SINERGY_LOCAL_CHAIN,
-    transport: http(rpcUrl)
+    chain,
+    transport: http(deployment.network.rpcUrl)
   });
 
   return { publicClient, walletClient, account };
@@ -54,7 +55,7 @@ export class VaultService {
     private readonly store: StateStore,
     private readonly publicClient: PublicClient,
     private readonly walletClient: WalletClient,
-    private readonly deployment: LocalDeployment,
+    private readonly deployment: SinergyDeployment,
     private readonly tokens: Map<string, ResolvedToken>,
     private readonly markets: ResolvedMarket[]
   ) {}

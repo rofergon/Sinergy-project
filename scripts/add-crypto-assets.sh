@@ -5,10 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONTRACTS_DIR="$ROOT_DIR/contracts"
 DEPLOYMENTS_DIR="$ROOT_DIR/deployments"
 TMP_DIR="$ROOT_DIR/.tmp/add-crypto"
-DEPLOYMENT_FILE="$DEPLOYMENTS_DIR/local.json"
+ENV_NAME="${ENV_NAME:-local}"
+DEPLOYMENT_FILE="${DEPLOYMENT_FILE:-$DEPLOYMENTS_DIR/${ENV_NAME}.json}"
 
-CHAIN_ID="${CHAIN_ID:-Sinergy-2}"
-NODE_URL="${NODE_URL:-http://127.0.0.1:26657}"
 FROM_KEY="${FROM_KEY:-gas-station}"
 KEYRING_BACKEND="${KEYRING_BACKEND:-test}"
 DEPLOY_GAS="${DEPLOY_GAS:-5000000}"
@@ -20,6 +19,9 @@ if [[ ! -f "$DEPLOYMENT_FILE" ]]; then
   echo "Missing deployment file: $DEPLOYMENT_FILE" >&2
   exit 1
 fi
+
+ROLLUP_CHAIN_ID="${ROLLUP_CHAIN_ID:-${CHAIN_ID:-$(jq -r '.network.rollupChainId' "$DEPLOYMENT_FILE")}}"
+TENDERMINT_RPC_URL="${TENDERMINT_RPC_URL:-${NODE_URL:-$(jq -r '.network.tendermintRpc' "$DEPLOYMENT_FILE")}}"
 
 GAS_STATION_BECH32="$(minitiad keys show "$FROM_KEY" -a --keyring-backend "$KEYRING_BACKEND")"
 GAS_STATION_HEX="$(
@@ -66,8 +68,8 @@ deploy_contract() {
       --input "$input" \
       --from "$FROM_KEY" \
       --keyring-backend "$KEYRING_BACKEND" \
-      --chain-id "$CHAIN_ID" \
-      --node "$NODE_URL" \
+      --chain-id "$ROLLUP_CHAIN_ID" \
+      --node "$TENDERMINT_RPC_URL" \
       --gas "$DEPLOY_GAS" \
       --broadcast-mode sync \
       --yes \
@@ -76,7 +78,7 @@ deploy_contract() {
 
   local tx_hash
   tx_hash="$(echo "$tx_json" | jq -r '.txhash // .tx_response.txhash')"
-  minitiad query tx "$tx_hash" --node "$NODE_URL" --output json |
+  minitiad query tx "$tx_hash" --node "$TENDERMINT_RPC_URL" --output json |
     jq -r '.events[] | select(.type=="contract_created") | .attributes[] | select(.key=="contract") | .value' |
     tail -n 1
 }
@@ -91,8 +93,8 @@ call_as_gas_station() {
   minitiad tx evm call "$to" "$calldata" \
     --from "$FROM_KEY" \
     --keyring-backend "$KEYRING_BACKEND" \
-    --chain-id "$CHAIN_ID" \
-    --node "$NODE_URL" \
+    --chain-id "$ROLLUP_CHAIN_ID" \
+    --node "$TENDERMINT_RPC_URL" \
     --gas "$CALL_GAS" \
     --broadcast-mode sync \
     --yes \
