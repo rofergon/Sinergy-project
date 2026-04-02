@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { MsgCallResponse } from "@initia/initia.proto/minievm/evm/v1/tx";
 import { useInterwovenKit } from "@initia/interwovenkit-react";
-import { encodeFunctionData, formatUnits, parseUnits } from "viem";
+import { encodeFunctionData, encodePacked, formatUnits, keccak256, parseUnits } from "viem";
 import type { Address, Hex } from "viem";
 import { useReadContract } from "wagmi";
-import { darkPoolVaultAbi, erc20Abi } from "@sinergy/shared";
+import { darkPoolVaultAbi, darkVaultV2Abi, erc20Abi } from "@sinergy/shared";
 import { api } from "../lib/api";
 import { SINERGY_ROLLUP_CHAIN_ID } from "../initia";
 
@@ -20,6 +20,7 @@ type Props = {
   address?: Address;
   initiaAddress?: string;
   vaultAddress: Address;
+  zkVaultAddress?: Address;
   tokens: Token[];
   onAfterMutation: () => Promise<void>;
 };
@@ -53,6 +54,7 @@ export function VaultPanel({
   address,
   initiaAddress,
   vaultAddress,
+  zkVaultAddress,
   tokens,
   onAfterMutation,
 }: Props) {
@@ -66,6 +68,10 @@ export function VaultPanel({
     () => tokens.find((t) => t.address === tokenAddress),
     [tokenAddress, tokens]
   );
+  const zkEnabled =
+    Boolean(zkVaultAddress) &&
+    zkVaultAddress !== "0x0000000000000000000000000000000000000000";
+  const activeVaultAddress = (zkEnabled ? zkVaultAddress : vaultAddress) as Address;
   const walletBalance = useReadContract({
     address: selectedToken?.address,
     abi: erc20Abi,
@@ -133,17 +139,25 @@ export function VaultPanel({
         encodeFunctionData({
           abi: erc20Abi,
           functionName: "approve",
-          args: [vaultAddress, amountAtomic],
+          args: [activeVaultAddress, amountAtomic],
         })
       );
 
-      setStatus(`Depositing ${selectedToken.symbol}…`);
+      setStatus(`${zkEnabled ? "Depositing into ZK vault" : `Depositing ${selectedToken.symbol}`}…`);
+      const receiverCommitment = keccak256(
+        encodePacked(
+          ["address", "address", "uint256"],
+          [address, selectedToken.address, amountAtomic]
+        )
+      );
       const depositTx = await submitMsgCall(
-        vaultAddress,
+        activeVaultAddress,
         encodeFunctionData({
-          abi: darkPoolVaultAbi,
+          abi: zkEnabled ? darkVaultV2Abi : darkPoolVaultAbi,
           functionName: "deposit",
-          args: [selectedToken.address, amountAtomic],
+          args: zkEnabled
+            ? [selectedToken.address, amountAtomic, receiverCommitment]
+            : [selectedToken.address, amountAtomic],
         })
       );
 
@@ -163,7 +177,7 @@ export function VaultPanel({
 
       await onAfterMutation();
       await walletBalance.refetch();
-      setStatus("Deposit synced ✓");
+      setStatus(zkEnabled ? "ZK deposit synced ✓" : "Deposit synced ✓");
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err));
     }
@@ -180,35 +194,77 @@ export function VaultPanel({
           signature: Hex;
         }
       | undefined;
+    let zkPackage:
+      | {
+          root: Hex;
+          nullifier: Hex;
+          recipient: Address;
+          token: Address;
+          amountAtomic: string;
+          proof: Hex;
+        }
+      | undefined;
     let broadcasted = false;
 
     try {
-      quote = await api<{ nonce: number; deadline: number; signature: Hex }>(
-        "/vault/withdrawal-quote",
-        {
+      const amountAtomic = parseUnits(amount, selectedToken.decimals);
+      if (zkEnabled) {
+        zkPackage = await api<{
+          root: Hex;
+          nullifier: Hex;
+          recipient: Address;
+          token: Address;
+          amountAtomic: string;
+          proof: Hex;
+        }>("/vault/zk-withdrawal-package", {
           method: "POST",
           body: JSON.stringify({
             userAddress: address,
             token: selectedToken.address,
-            amount,
-            decimals: selectedToken.decimals,
+            amountAtomic: amountAtomic.toString(),
           }),
-        }
-      );
+        });
+      } else {
+        quote = await api<{ nonce: number; deadline: number; signature: Hex }>(
+          "/vault/withdrawal-quote",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              userAddress: address,
+              token: selectedToken.address,
+              amount,
+              decimals: selectedToken.decimals,
+            }),
+          }
+        );
+      }
 
-      const amountAtomic = parseUnits(amount, selectedToken.decimals);
+      if (zkEnabled && !zkPackage) {
+        throw new Error("Missing ZK withdrawal package.");
+      }
+      const activeZkPackage = zkPackage;
+
       const withdrawTx = await submitMsgCall(
-        vaultAddress,
+        activeVaultAddress,
         encodeFunctionData({
-          abi: darkPoolVaultAbi,
+          abi: zkEnabled ? darkVaultV2Abi : darkPoolVaultAbi,
           functionName: "withdraw",
-          args: [
-            selectedToken.address,
-            amountAtomic,
-            BigInt(quote.nonce),
-            BigInt(quote.deadline),
-            quote.signature,
-          ],
+          args: zkEnabled
+            ? [
+                selectedToken.address,
+                amountAtomic,
+                address,
+                activeZkPackage!.root,
+                activeZkPackage!.nullifier,
+                activeZkPackage!.proof,
+              ]
+            : [
+                selectedToken.address,
+                amountAtomic,
+                BigInt((quote as { nonce: number }).nonce),
+                BigInt((quote as { deadline: number }).deadline),
+                (quote as { signature: Hex }).signature,
+              ],
         })
       );
       broadcasted = true;
@@ -228,16 +284,16 @@ export function VaultPanel({
       });
 
       await onAfterMutation();
-      setStatus("Withdrawal settled ✓");
+      setStatus(zkEnabled ? "ZK withdrawal settled ✓" : "Withdrawal settled ✓");
     } catch (err) {
-      if (!broadcasted && quote && selectedToken && address) {
+      if (!zkEnabled && !broadcasted && quote && selectedToken && address) {
         try {
           await api("/vault/cancel-withdrawal", {
             method: "POST",
             body: JSON.stringify({
               userAddress: address,
               token: selectedToken.address,
-              nonce: quote.nonce,
+              nonce: (quote as { nonce: number }).nonce,
             }),
           });
           await onAfterMutation();
@@ -252,7 +308,7 @@ export function VaultPanel({
   return (
     <div className="vault-compact">
       <div className="panel-head" style={{ padding: "0 0 10px", border: "none" }}>
-        <span className="panel-title">Dark Vault</span>
+        <span className="panel-title">{zkEnabled ? "Dark Vault ZK" : "Dark Vault"}</span>
       </div>
 
       <div className="vault-tabs">
@@ -305,20 +361,33 @@ export function VaultPanel({
         </div>
 
         {selectedToken && address ? (
-          <div
-            style={{
-              color: "var(--text-tertiary)",
-              fontSize: 12,
-              fontFamily: "var(--font-mono)",
-            }}
-          >
-            Wallet balance:{" "}
-            {walletBalance.data !== undefined
-              ? `${formatUnits(walletBalance.data, selectedToken.decimals)} ${selectedToken.symbol}`
-              : walletBalance.isLoading
-                ? "Loading..."
-                : "Unavailable"}
-          </div>
+          <>
+            <div
+              style={{
+                color: "var(--text-tertiary)",
+                fontSize: 12,
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              Wallet balance:{" "}
+              {walletBalance.data !== undefined
+                ? `${formatUnits(walletBalance.data, selectedToken.decimals)} ${selectedToken.symbol}`
+                : walletBalance.isLoading
+                  ? "Loading..."
+                  : "Unavailable"}
+            </div>
+            {zkEnabled ? (
+              <div
+                style={{
+                  color: "var(--text-tertiary)",
+                  fontSize: 12,
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
+                ZK mode enabled. Deposits and withdrawals route through `DarkVaultV2`.
+              </div>
+            ) : null}
+          </>
         ) : null}
 
         <div className="vault-actions">
