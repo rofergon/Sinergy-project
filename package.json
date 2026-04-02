@@ -17,6 +17,15 @@
     "dev:matcher": "npm run dev -w @sinergy/matcher",
     "dev:matcher:testnet": "npm run dev:testnet -w @sinergy/matcher",
     "lint": "npm run typecheck -w @sinergy/shared && npm run typecheck -w @sinergy/matcher && npm run typecheck -w @sinergy/web && npm run typecheck -w @sinergy/bridge",
-    "typecheck": "npm run typecheck -w @sinergy/shared && npm run typecheck -w @sinergy/matcher && npm run typecheck -w @sinergy/web && npm run typecheck -w @sinergy/bridge"
+    "typecheck": "npm run typecheck -w @sinergy/shared && npm run typecheck -w @sinergy/matcher && npm run typecheck -w @sinergy/web && npm run typecheck -w @sinergy/bridge",
+    "zk:compile:withdrawal": "bash scripts/zk/compile-withdrawal-circuit.sh",
+    "zk:setup:withdrawal": "bash scripts/zk/setup-withdrawal-groth16.sh",
+    "zk:prove:withdrawal": "bash scripts/zk/generate-withdrawal-proof.sh"
+  },
+  "devDependencies": {
+    "circom2": "^0.2.22",
+    "circomlib": "^2.0.5",
+    "circomlibjs": "^0.1.7",
+    "snarkjs": "^0.7.6"
   }
 }
