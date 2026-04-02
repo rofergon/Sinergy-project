@@ -102,6 +102,7 @@ function Dashboard() {
   const tokens: Token[] = useMemo(() => deployment?.tokens ?? [], [deployment]);
   const vaultAddress = (deployment?.contracts?.vault ??
     "0x0000000000000000000000000000000000000000") as Address;
+  const zkVaultAddress = deployment?.contracts?.zkVault as Address | undefined;
 
   const marketSnapshots = useMemo<MarketSnapshot[]>(() => {
     return markets.map((market) => {
@@ -267,6 +268,7 @@ function Dashboard() {
           address={userAddress}
           initiaAddress={initiaAddress}
           vaultAddress={vaultAddress}
+          zkVaultAddress={zkVaultAddress}
           tokens={tokens}
           balances={balances}
           orders={orders}
@@ -321,6 +323,7 @@ function Dashboard() {
               address={userAddress}
               initiaAddress={initiaAddress}
               vaultAddress={vaultAddress}
+              zkVaultAddress={zkVaultAddress}
               tokens={tokens}
               onAfterMutation={refreshUser}
             />
