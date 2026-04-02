@@ -22,7 +22,7 @@ The UI now exposes three route preferences:
 
 ## What Happens In A DEX-Routed Trade
 
-For a routeable market such as `cINIT/sUSDC`, the matcher follows this sequence:
+For a routeable market such as `cINIT/cUSDC`, the matcher follows this sequence:
 
 1. The user deposits assets into the vault on Sinergy.
 2. The user requests a quote from the private router.

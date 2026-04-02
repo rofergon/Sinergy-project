@@ -114,9 +114,6 @@ const bridgeClaimService = new BridgeClaimService({
   walletClient,
   deployment,
   tokens,
-  bridgedDenom: env.BRIDGED_INIT_DENOM,
-  bridgedSymbol: env.BRIDGED_INIT_SYMBOL,
-  bridgedSourceDecimals: env.BRIDGED_INIT_SOURCE_DECIMALS,
   rollupRestUrl: deployment.network.restUrl
 });
 const liquidityRouter = new LiquidityRouter({
@@ -177,10 +174,23 @@ app.get("/inventory", async () => ({
 
 app.get("/bridge/status", async () => await bridgeHealthService.getStatus());
 
+app.get("/bridge/assets", async () => ({
+  assets: bridgeClaimService.listAssets()
+}));
+
 app.get("/bridge/claimable/:initiaAddress", async (request) => {
   const { initiaAddress } = request.params as { initiaAddress: string };
   const { evmAddress } = request.query as { evmAddress?: Address };
-  return await bridgeClaimService.preview(initiaAddress, evmAddress);
+  return await bridgeClaimService.preview({ tokenSymbol: "cINIT", initiaAddress, evmAddress });
+});
+
+app.get("/bridge/claimable/:tokenSymbol/:initiaAddress", async (request) => {
+  const { tokenSymbol, initiaAddress } = request.params as {
+    tokenSymbol: string;
+    initiaAddress: string;
+  };
+  const { evmAddress } = request.query as { evmAddress?: Address };
+  return await bridgeClaimService.preview({ tokenSymbol, initiaAddress, evmAddress });
 });
 
 app.post("/bridge/claim-cinit", async (request) => {
@@ -190,6 +200,21 @@ app.post("/bridge/claim-cinit", async (request) => {
   };
 
   return await bridgeClaimService.claim({
+    tokenSymbol: "cINIT",
+    initiaAddress: body.initiaAddress,
+    evmAddress: body.evmAddress
+  });
+});
+
+app.post("/bridge/claim", async (request) => {
+  const body = request.body as {
+    tokenSymbol: string;
+    initiaAddress: string;
+    evmAddress: Address;
+  };
+
+  return await bridgeClaimService.claim({
+    tokenSymbol: body.tokenSymbol,
     initiaAddress: body.initiaAddress,
     evmAddress: body.evmAddress
   });
@@ -203,6 +228,23 @@ app.post("/bridge/redeem-cinit", async (request) => {
   };
 
   return await bridgeClaimService.redeem({
+    tokenSymbol: "cINIT",
+    initiaAddress: body.initiaAddress,
+    evmAddress: body.evmAddress,
+    amountAtomic: BigInt(body.amountAtomic)
+  });
+});
+
+app.post("/bridge/redeem", async (request) => {
+  const body = request.body as {
+    tokenSymbol: string;
+    initiaAddress: string;
+    evmAddress: Address;
+    amountAtomic: string;
+  };
+
+  return await bridgeClaimService.redeem({
+    tokenSymbol: body.tokenSymbol,
     initiaAddress: body.initiaAddress,
     evmAddress: body.evmAddress,
     amountAtomic: BigInt(body.amountAtomic)

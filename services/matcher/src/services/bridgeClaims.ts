@@ -26,58 +26,87 @@ type BridgeClaimDeps = {
   walletClient: WalletClient;
   deployment: SinergyDeployment;
   tokens: Map<string, ResolvedToken>;
-  bridgedDenom: string;
-  bridgedSymbol: string;
-  bridgedSourceDecimals: number;
   rollupRestUrl: string;
 };
 
 export class BridgeClaimService {
-  private readonly destinationToken: ResolvedToken;
+  private readonly bridgeTokens: Map<
+    string,
+    ResolvedToken & {
+      bridge: NonNullable<ResolvedToken["bridge"]>;
+    }
+  >;
 
   constructor(private readonly deps: BridgeClaimDeps) {
-    const token = Array.from(deps.tokens.values()).find(
-      (item) => keyOf(item.symbol) === keyOf(deps.bridgedSymbol)
+    this.bridgeTokens = new Map(
+      Array.from(deps.tokens.values())
+        .filter(
+          (item): item is ResolvedToken & { bridge: NonNullable<ResolvedToken["bridge"]> } =>
+            Boolean(item.bridge)
+        )
+        .map((item) => [keyOf(item.symbol), item])
     );
 
-    if (!token) {
-      throw new Error(`Bridge claim token ${deps.bridgedSymbol} is not configured in deployment`);
+    if (this.bridgeTokens.size === 0) {
+      throw new Error("No bridge-backed tokens are configured in deployment");
     }
-
-    this.destinationToken = token;
   }
 
-  async preview(initiaAddress: string, evmAddress?: Address) {
-    const observedBalanceAtomic = await this.queryBridgedBalance(initiaAddress);
-    const claimedAtomic = this.readClaimedAtomic(initiaAddress);
+  listAssets() {
+    return Array.from(this.bridgeTokens.values()).map((token) => ({
+      tokenSymbol: token.symbol,
+      tokenName: token.name,
+      tokenAddress: token.address,
+      tokenDecimals: token.decimals,
+      sourceChainId: token.bridge.sourceChainId ?? this.deps.deployment.network.l1ChainId,
+      sourceDenom: token.bridge.sourceDenom,
+      sourceSymbol: token.bridge.sourceSymbol,
+      sourceDecimals: token.bridge.sourceDecimals,
+      destinationDenom: token.bridge.destinationDenom
+    }));
+  }
+
+  async preview(input: { tokenSymbol?: string; initiaAddress: string; evmAddress?: Address }) {
+    const destinationToken = this.resolveBridgeToken(input.tokenSymbol);
+    const bridge = destinationToken.bridge;
+    const observedBalanceAtomic = await this.queryBridgedBalance(
+      input.initiaAddress,
+      bridge.destinationDenom
+    );
+    const claimedAtomic = this.readClaimedAtomic(input.initiaAddress, bridge.destinationDenom);
     const claimableAtomic =
       observedBalanceAtomic > claimedAtomic ? observedBalanceAtomic - claimedAtomic : 0n;
     const mintableAtomic = scaleAtomic(
       claimableAtomic,
-      this.deps.bridgedSourceDecimals,
-      this.destinationToken.decimals
+      bridge.sourceDecimals,
+      destinationToken.decimals
     );
     const claimedMintedAtomic = scaleAtomic(
       claimedAtomic,
-      this.deps.bridgedSourceDecimals,
-      this.destinationToken.decimals
+      bridge.sourceDecimals,
+      destinationToken.decimals
     );
-    const walletTokenBalanceAtomic = evmAddress
-      ? await this.queryDestinationTokenBalance(evmAddress)
+    const walletTokenBalanceAtomic = input.evmAddress
+      ? await this.queryDestinationTokenBalance(destinationToken.address, input.evmAddress)
       : 0n;
-    const redeemableAtomic = evmAddress
+    const redeemableAtomic = input.evmAddress
       ? walletTokenBalanceAtomic < claimedMintedAtomic
         ? walletTokenBalanceAtomic
         : claimedMintedAtomic
       : 0n;
 
     return {
-      initiaAddress,
-      evmAddress,
-      bridgeDenom: this.deps.bridgedDenom,
-      tokenSymbol: this.destinationToken.symbol,
-      tokenAddress: this.destinationToken.address,
-      tokenDecimals: this.destinationToken.decimals,
+      tokenSymbol: destinationToken.symbol,
+      tokenName: destinationToken.name,
+      tokenAddress: destinationToken.address,
+      tokenDecimals: destinationToken.decimals,
+      sourceChainId: bridge.sourceChainId ?? this.deps.deployment.network.l1ChainId,
+      sourceDenom: bridge.sourceDenom,
+      sourceSymbol: bridge.sourceSymbol,
+      sourceDecimals: bridge.sourceDecimals,
+      destinationDenom: bridge.destinationDenom,
+      initiaAddress: input.initiaAddress,
+      evmAddress: input.evmAddress,
       observedBalanceAtomic: observedBalanceAtomic.toString(),
       claimedAtomic: claimedAtomic.toString(),
       claimableAtomic: claimableAtomic.toString(),
@@ -88,19 +117,19 @@ export class BridgeClaimService {
     };
   }
 
-  async claim(input: { initiaAddress: string; evmAddress: Address }) {
-    const preview = await this.preview(input.initiaAddress, input.evmAddress);
+  async claim(input: { tokenSymbol?: string; initiaAddress: string; evmAddress: Address }) {
+    const preview = await this.preview(input);
     const claimableAtomic = BigInt(preview.claimableAtomic);
     if (claimableAtomic <= 0n) {
-      throw new Error("No bridged INIT is available to claim as cINIT");
+      throw new Error(`No bridged ${preview.sourceSymbol} is available to claim as ${preview.tokenSymbol}`);
     }
 
     const mintableAtomic = BigInt(preview.mintableAtomic);
     if (mintableAtomic <= 0n) {
-      throw new Error("Claimable bridged INIT rounds down to zero cINIT");
+      throw new Error(`Claimable bridged ${preview.sourceSymbol} rounds down to zero ${preview.tokenSymbol}`);
     }
 
-    const matcherAccount = await this.assertMatcherCanMint();
+    const matcherAccount = await this.assertMatcherCanMint(preview.tokenAddress, preview.tokenSymbol);
 
     const data = encodeFunctionData({
       abi: erc20Abi,
@@ -112,7 +141,7 @@ export class BridgeClaimService {
     });
     const gas = await this.deps.publicClient.estimateGas({
       account: matcherAccount.address,
-      to: this.destinationToken.address,
+      to: preview.tokenAddress,
       data,
     });
     const gasPrice = await this.deps.publicClient.getGasPrice();
@@ -123,7 +152,7 @@ export class BridgeClaimService {
     const serializedTransaction = await matcherAccount.signTransaction({
       chainId: this.deps.deployment.network.chainId,
       type: "legacy",
-      to: this.destinationToken.address,
+      to: preview.tokenAddress,
       data,
       nonce,
       gas,
@@ -139,8 +168,8 @@ export class BridgeClaimService {
     this.deps.store.mutate((state) => {
       const addressKey = keyOf(input.initiaAddress);
       state.bridgeClaims[addressKey] ??= {};
-      const currentClaimed = BigInt(state.bridgeClaims[addressKey][this.deps.bridgedDenom] ?? "0");
-      state.bridgeClaims[addressKey][this.deps.bridgedDenom] = (
+      const currentClaimed = BigInt(state.bridgeClaims[addressKey][preview.destinationDenom] ?? "0");
+      state.bridgeClaims[addressKey][preview.destinationDenom] = (
         currentClaimed + claimableAtomic
       ).toString();
     });
@@ -153,6 +182,7 @@ export class BridgeClaimService {
   }
 
   async redeem(input: {
+    tokenSymbol?: string;
     initiaAddress: string;
     evmAddress: Address;
     amountAtomic: bigint;
@@ -161,32 +191,34 @@ export class BridgeClaimService {
       throw new Error("Redeem amount must be positive");
     }
 
-    const precisionFactor = 10n ** BigInt(this.destinationToken.decimals - this.deps.bridgedSourceDecimals);
+    const preview = await this.preview(input);
+    const precisionFactor = 10n ** BigInt(preview.tokenDecimals - preview.sourceDecimals);
     if (input.amountAtomic % precisionFactor !== 0n) {
       throw new Error(
-        `Redeem amount must align to ${this.deps.bridgedSourceDecimals} decimals of bridged INIT`
+        `Redeem amount must align to ${preview.sourceDecimals} decimals of bridged ${preview.sourceSymbol}`
       );
     }
 
-    const preview = await this.preview(input.initiaAddress, input.evmAddress);
     const redeemableAtomic = BigInt(preview.redeemableAtomic);
     if (input.amountAtomic > redeemableAtomic) {
       throw new Error(
-        `Redeem amount exceeds the wallet-backed claimed ${this.destinationToken.symbol} available to unwrap`
+        `Redeem amount exceeds the wallet-backed claimed ${preview.tokenSymbol} available to unwrap`
       );
     }
 
     const releaseAtomic = scaleAtomic(
       input.amountAtomic,
-      this.destinationToken.decimals,
-      this.deps.bridgedSourceDecimals
+      preview.tokenDecimals,
+      preview.sourceDecimals
     );
     const claimedAtomic = BigInt(preview.claimedAtomic);
     if (releaseAtomic > claimedAtomic) {
-      throw new Error("Redeem amount exceeds the claimed bridged INIT tracked for this address");
+      throw new Error(
+        `Redeem amount exceeds the claimed bridged ${preview.sourceSymbol} tracked for this address`
+      );
     }
 
-    const matcherAccount = await this.assertMatcherCanMint();
+    const matcherAccount = await this.assertMatcherCanMint(preview.tokenAddress, preview.tokenSymbol);
     const data = encodeFunctionData({
       abi: erc20Abi,
       functionName: "burn",
@@ -197,7 +229,7 @@ export class BridgeClaimService {
     });
     const gas = await this.deps.publicClient.estimateGas({
       account: matcherAccount.address,
-      to: this.destinationToken.address,
+      to: preview.tokenAddress,
       data
     });
     const gasPrice = await this.deps.publicClient.getGasPrice();
@@ -208,7 +240,7 @@ export class BridgeClaimService {
     const serializedTransaction = await matcherAccount.signTransaction({
       chainId: this.deps.deployment.network.chainId,
       type: "legacy",
-      to: this.destinationToken.address,
+      to: preview.tokenAddress,
       data,
       nonce,
       gas,
@@ -224,13 +256,13 @@ export class BridgeClaimService {
     this.deps.store.mutate((state) => {
       const addressKey = keyOf(input.initiaAddress);
       state.bridgeClaims[addressKey] ??= {};
-      const currentClaimed = BigInt(state.bridgeClaims[addressKey][this.deps.bridgedDenom] ?? "0");
-      state.bridgeClaims[addressKey][this.deps.bridgedDenom] = (
+      const currentClaimed = BigInt(state.bridgeClaims[addressKey][preview.destinationDenom] ?? "0");
+      state.bridgeClaims[addressKey][preview.destinationDenom] = (
         currentClaimed - releaseAtomic
       ).toString();
     });
 
-    const nextPreview = await this.preview(input.initiaAddress, input.evmAddress);
+    const nextPreview = await this.preview(input);
 
     return {
       ...nextPreview,
@@ -241,7 +273,7 @@ export class BridgeClaimService {
     };
   }
 
-  private async assertMatcherCanMint(): Promise<Account> {
+  private async assertMatcherCanMint(tokenAddress: Address, tokenSymbol: string): Promise<Account> {
     const matcherAccount = this.deps.walletClient.account;
     const matcherAddress = matcherAccount?.address;
     if (!matcherAddress || !matcherAccount) {
@@ -249,36 +281,36 @@ export class BridgeClaimService {
     }
 
     const owner = await this.deps.publicClient.readContract({
-      address: this.destinationToken.address,
+      address: tokenAddress,
       abi: erc20Abi,
       functionName: "owner",
     });
 
     if (!isAddressEqual(owner, matcherAddress)) {
       throw new Error(
-        `Matcher is not the owner of ${this.destinationToken.symbol}. Current owner: ${owner}`
+        `Matcher is not the owner of ${tokenSymbol}. Current owner: ${owner}`
       );
     }
 
     return matcherAccount as Account;
   }
 
-  private readClaimedAtomic(initiaAddress: string) {
+  private readClaimedAtomic(initiaAddress: string, destinationDenom: string) {
     const claims = this.deps.store.get().bridgeClaims;
-    return BigInt(claims[keyOf(initiaAddress)]?.[this.deps.bridgedDenom] ?? "0");
+    return BigInt(claims[keyOf(initiaAddress)]?.[destinationDenom] ?? "0");
   }
 
-  private async queryDestinationTokenBalance(evmAddress: Address) {
+  private async queryDestinationTokenBalance(tokenAddress: Address, evmAddress: Address) {
     return await this.deps.publicClient.readContract({
-      address: this.destinationToken.address,
+      address: tokenAddress,
       abi: erc20Abi,
       functionName: "balanceOf",
       args: [evmAddress]
     });
   }
 
-  private async queryBridgedBalance(initiaAddress: string) {
-    const byDenomUrl = `${this.deps.rollupRestUrl}/cosmos/bank/v1beta1/balances/${initiaAddress}/by_denom?denom=${encodeURIComponent(this.deps.bridgedDenom)}`;
+  private async queryBridgedBalance(initiaAddress: string, destinationDenom: string) {
+    const byDenomUrl = `${this.deps.rollupRestUrl}/cosmos/bank/v1beta1/balances/${initiaAddress}/by_denom?denom=${encodeURIComponent(destinationDenom)}`;
     const response = await fetch(byDenomUrl);
 
     if (response.ok) {
@@ -316,9 +348,20 @@ export class BridgeClaimService {
       }>;
     };
     const match = allBalancesPayload.balances?.find(
-      (item) => item.denom?.toLowerCase() === this.deps.bridgedDenom.toLowerCase()
+      (item) => item.denom?.toLowerCase() === destinationDenom.toLowerCase()
     );
 
     return BigInt(match?.amount ?? "0");
+  }
+
+  private resolveBridgeToken(tokenSymbol?: string) {
+    const resolved = tokenSymbol
+      ? this.bridgeTokens.get(keyOf(tokenSymbol))
+      : Array.from(this.bridgeTokens.values())[0];
+    if (!resolved) {
+      throw new Error(`Bridge-backed token ${tokenSymbol ?? "(default)"} is not configured`);
+    }
+
+    return resolved;
   }
 }

@@ -23,7 +23,7 @@
   "contracts": {
     "vault": "0x3fF37bE2C8B8179cBfd97CB1e75fEd91e5e38B19",
     "market": "0xe1d9c4EcC2ba58274733C61Fb25919F0eA902575",
-    "quoteToken": "0xA0cf839E30789cBB13292B80727103105D971872"
+    "quoteToken": "0x6Ef1eB5AE5C6824F8B6ECA81E2DB193966D95967"
   },
   "tokens": [
     {
@@ -41,11 +41,32 @@
       "kind": "crypto"
     },
     {
+      "symbol": "cUSDC",
+      "name": "Connected USD Coin",
+      "address": "0x6Ef1eB5AE5C6824F8B6ECA81E2DB193966D95967",
+      "decimals": 6,
+      "kind": "quote",
+      "bridge": {
+        "sourceChainId": "initiation-2",
+        "sourceDenom": "uusdc",
+        "sourceSymbol": "USDC",
+        "sourceDecimals": 6,
+        "destinationDenom": "l2/57a38da2740f206b92f5d853951f2072982ee11aa8aeeefdab63aa6550a51bb2"
+      }
+    },
+    {
       "symbol": "cINIT",
       "name": "Connected Initia",
       "address": "0x308B830b96998E9080616C504C7562473E2d85df",
       "decimals": 18,
-      "kind": "crypto"
+      "kind": "crypto",
+      "bridge": {
+        "sourceChainId": "initiation-2",
+        "sourceDenom": "uinit",
+        "sourceSymbol": "INIT",
+        "sourceDecimals": 6,
+        "destinationDenom": "l2/7835b9ce5f65720a12cd653306cfe00afb93dcf1b73e69eb5eeddc568fc455cf"
+      }
     },
     {
       "symbol": "cSOL",
@@ -53,13 +74,6 @@
       "address": "0x84cE03F22F07E5F8813b0629c110E06D9BBBA142",
       "decimals": 18,
       "kind": "crypto"
-    },
-    {
-      "symbol": "sUSDC",
-      "name": "Sinergy Mock USD",
-      "address": "0xA0cf839E30789cBB13292B80727103105D971872",
-      "decimals": 6,
-      "kind": "quote"
     },
     {
       "symbol": "tAAPL",

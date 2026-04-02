@@ -27,6 +27,13 @@ export type DeploymentToken = {
   address: `0x${string}`;
   decimals: number;
   kind: "quote" | "rwa" | "crypto";
+  bridge?: {
+    sourceChainId?: string;
+    sourceDenom: string;
+    sourceSymbol: string;
+    sourceDecimals: number;
+    destinationDenom: string;
+  };
 };
 
 export type SinergyDeployment = {

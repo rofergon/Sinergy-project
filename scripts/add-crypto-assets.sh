@@ -31,7 +31,8 @@ GAS_STATION_HEX="$(
 
 VAULT_ADDRESS="$(jq -r '.contracts.vault' "$DEPLOYMENT_FILE")"
 MARKET_ADDRESS="$(jq -r '.contracts.market' "$DEPLOYMENT_FILE")"
-USDC_ADDRESS="$(jq -r '.contracts.quoteToken' "$DEPLOYMENT_FILE")"
+QUOTE_TOKEN_ADDRESS="$(jq -r '.contracts.quoteToken' "$DEPLOYMENT_FILE")"
+QUOTE_TOKEN_SYMBOL="$(jq -r '.tokens[] | select(.kind=="quote") | .symbol' "$DEPLOYMENT_FILE")"
 MATCHER_ADDRESS="$(jq -r '.operator.matcherAddress' "$DEPLOYMENT_FILE")"
 
 if [[ ! -d "$CONTRACTS_DIR/lib/openzeppelin-contracts" ]]; then
@@ -117,10 +118,10 @@ for token in "$CBTC_ADDRESS" "$CETH_ADDRESS" "$CSOL_ADDRESS" "$CINIT_ADDRESS"; d
   call_as_gas_station "$VAULT_ADDRESS" "setSupportedToken(address,bool)" "$token" true
 done
 
-call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cBTC/sUSDC" "$CBTC_ADDRESS" "$USDC_ADDRESS"
-call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cETH/sUSDC" "$CETH_ADDRESS" "$USDC_ADDRESS"
-call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cSOL/sUSDC" "$CSOL_ADDRESS" "$USDC_ADDRESS"
-call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cINIT/sUSDC" "$CINIT_ADDRESS" "$USDC_ADDRESS"
+call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cBTC/${QUOTE_TOKEN_SYMBOL}" "$CBTC_ADDRESS" "$QUOTE_TOKEN_ADDRESS"
+call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cETH/${QUOTE_TOKEN_SYMBOL}" "$CETH_ADDRESS" "$QUOTE_TOKEN_ADDRESS"
+call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cSOL/${QUOTE_TOKEN_SYMBOL}" "$CSOL_ADDRESS" "$QUOTE_TOKEN_ADDRESS"
+call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cINIT/${QUOTE_TOKEN_SYMBOL}" "$CINIT_ADDRESS" "$QUOTE_TOKEN_ADDRESS"
 call_as_gas_station "$CBTC_ADDRESS" "transferOwnership(address)" "$MATCHER_ADDRESS"
 call_as_gas_station "$CETH_ADDRESS" "transferOwnership(address)" "$MATCHER_ADDRESS"
 call_as_gas_station "$CSOL_ADDRESS" "transferOwnership(address)" "$MATCHER_ADDRESS"
@@ -137,7 +138,20 @@ jq \
     { symbol: "cBTC", name: "Connected Bitcoin", address: $cbtc, decimals: 18, kind: "crypto" },
     { symbol: "cETH", name: "Connected Ether", address: $ceth, decimals: 18, kind: "crypto" },
     { symbol: "cSOL", name: "Connected Solana", address: $csol, decimals: 18, kind: "crypto" },
-    { symbol: "cINIT", name: "Connected Initia", address: $cinit, decimals: 18, kind: "crypto" }
+    {
+      symbol: "cINIT",
+      name: "Connected Initia",
+      address: $cinit,
+      decimals: 18,
+      kind: "crypto",
+      bridge: {
+        sourceChainId: .network.l1ChainId,
+        sourceDenom: "uinit",
+        sourceSymbol: "INIT",
+        sourceDecimals: 6,
+        destinationDenom: "l2/7835b9ce5f65720a12cd653306cfe00afb93dcf1b73e69eb5eeddc568fc455cf"
+      }
+    }
   ]
   | .tokens |= unique_by(.symbol)
   ' "$DEPLOYMENT_FILE" > "$TMP_JSON"

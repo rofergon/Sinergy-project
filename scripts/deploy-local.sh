@@ -28,6 +28,14 @@ MATCHER_PRIVATE_KEY="${MATCHER_PRIVATE_KEY:-0x59c6995e998f97a5a0044966f0945382d7
 DEPLOY_GAS="${DEPLOY_GAS:-5000000}"
 CALL_GAS="${CALL_GAS:-800000}"
 MATCHER_ENV_FILE="${MATCHER_ENV_FILE:-$ROOT_DIR/services/matcher/.env}"
+QUOTE_TOKEN_NAME="${QUOTE_TOKEN_NAME:-Connected USD Coin}"
+QUOTE_TOKEN_SYMBOL="${QUOTE_TOKEN_SYMBOL:-cUSDC}"
+QUOTE_TOKEN_DECIMALS="${QUOTE_TOKEN_DECIMALS:-6}"
+QUOTE_TOKEN_INITIAL_SUPPLY="${QUOTE_TOKEN_INITIAL_SUPPLY:-10000000000000}"
+QUOTE_TOKEN_L1_SYMBOL="${QUOTE_TOKEN_L1_SYMBOL:-USDC}"
+QUOTE_TOKEN_BRIDGE_DENOM="${QUOTE_TOKEN_BRIDGE_DENOM:-uusdc}"
+QUOTE_TOKEN_BRIDGE_SOURCE_DECIMALS="${QUOTE_TOKEN_BRIDGE_SOURCE_DECIMALS:-6}"
+QUOTE_TOKEN_BRIDGE_DESTINATION_DENOM="${QUOTE_TOKEN_BRIDGE_DESTINATION_DENOM:-}"
 
 mkdir -p "$TMP_DIR" "$DEPLOYMENTS_DIR" "$(dirname "$DEPLOYMENT_FILE")"
 
@@ -131,7 +139,7 @@ call_as_gas_station() {
     --output json >/dev/null
 }
 
-USDC_ADDRESS="$(deploy_contract MockUSDC '(address)' "$GAS_STATION_HEX")"
+USDC_ADDRESS="$(deploy_contract ConnectedQuoteToken '(string,string,address,uint256)' "$QUOTE_TOKEN_NAME" "$QUOTE_TOKEN_SYMBOL" "$GAS_STATION_HEX" "$QUOTE_TOKEN_INITIAL_SUPPLY")"
 TAAPL_ADDRESS="$(deploy_contract RwaShareToken '(string,string,address,uint256)' "Tokenized Apple" "tAAPL" "$GAS_STATION_HEX" "1000000000000000000000000")"
 TBOND_ADDRESS="$(deploy_contract RwaShareToken '(string,string,address,uint256)' "Tokenized Treasury Bond" "tBOND" "$GAS_STATION_HEX" "1000000000000000000000000")"
 TNVDA_ADDRESS="$(deploy_contract RwaShareToken '(string,string,address,uint256)' "Tokenized Nvidia" "tNVDA" "$GAS_STATION_HEX" "1000000000000000000000000")"
@@ -152,13 +160,14 @@ call_as_gas_station "$VAULT_ADDRESS" "setSupportedToken(address,bool)" "$CETH_AD
 call_as_gas_station "$VAULT_ADDRESS" "setSupportedToken(address,bool)" "$CSOL_ADDRESS" true
 call_as_gas_station "$VAULT_ADDRESS" "setSupportedToken(address,bool)" "$CINIT_ADDRESS" true
 
-call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "tAAPL/sUSDC" "$TAAPL_ADDRESS" "$USDC_ADDRESS"
-call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "tBOND/sUSDC" "$TBOND_ADDRESS" "$USDC_ADDRESS"
-call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "tNVDA/sUSDC" "$TNVDA_ADDRESS" "$USDC_ADDRESS"
-call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cBTC/sUSDC" "$CBTC_ADDRESS" "$USDC_ADDRESS"
-call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cETH/sUSDC" "$CETH_ADDRESS" "$USDC_ADDRESS"
-call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cSOL/sUSDC" "$CSOL_ADDRESS" "$USDC_ADDRESS"
-call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cINIT/sUSDC" "$CINIT_ADDRESS" "$USDC_ADDRESS"
+call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "tAAPL/${QUOTE_TOKEN_SYMBOL}" "$TAAPL_ADDRESS" "$USDC_ADDRESS"
+call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "tBOND/${QUOTE_TOKEN_SYMBOL}" "$TBOND_ADDRESS" "$USDC_ADDRESS"
+call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "tNVDA/${QUOTE_TOKEN_SYMBOL}" "$TNVDA_ADDRESS" "$USDC_ADDRESS"
+call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cBTC/${QUOTE_TOKEN_SYMBOL}" "$CBTC_ADDRESS" "$USDC_ADDRESS"
+call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cETH/${QUOTE_TOKEN_SYMBOL}" "$CETH_ADDRESS" "$USDC_ADDRESS"
+call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cSOL/${QUOTE_TOKEN_SYMBOL}" "$CSOL_ADDRESS" "$USDC_ADDRESS"
+call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cINIT/${QUOTE_TOKEN_SYMBOL}" "$CINIT_ADDRESS" "$USDC_ADDRESS"
+call_as_gas_station "$USDC_ADDRESS" "transferOwnership(address)" "$MATCHER_ADDRESS"
 call_as_gas_station "$CBTC_ADDRESS" "transferOwnership(address)" "$MATCHER_ADDRESS"
 call_as_gas_station "$CETH_ADDRESS" "transferOwnership(address)" "$MATCHER_ADDRESS"
 call_as_gas_station "$CSOL_ADDRESS" "transferOwnership(address)" "$MATCHER_ADDRESS"
@@ -187,6 +196,13 @@ jq -n \
   --arg ceth "$CETH_ADDRESS" \
   --arg csol "$CSOL_ADDRESS" \
   --arg cinit "$CINIT_ADDRESS" \
+  --arg quoteSymbol "$QUOTE_TOKEN_SYMBOL" \
+  --arg quoteName "$QUOTE_TOKEN_NAME" \
+  --arg quoteL1Symbol "$QUOTE_TOKEN_L1_SYMBOL" \
+  --arg quoteBridgeDenom "$QUOTE_TOKEN_BRIDGE_DENOM" \
+  --arg quoteBridgeDest "$QUOTE_TOKEN_BRIDGE_DESTINATION_DENOM" \
+  --argjson quoteDecimals "$QUOTE_TOKEN_DECIMALS" \
+  --argjson quoteBridgeSourceDecimals "$QUOTE_TOKEN_BRIDGE_SOURCE_DECIMALS" \
   --argjson chainId "$EVM_CHAIN_ID" \
   --argjson nativeCurrencyDecimals "$NATIVE_CURRENCY_DECIMALS" \
   --arg chainIdHex "$EVM_CHAIN_ID_HEX" \
@@ -218,13 +234,21 @@ jq -n \
       quoteToken: $quote
     },
     tokens: [
-      {
-        symbol: "sUSDC",
-        name: "Sinergy Mock USD",
+      ({
+        symbol: $quoteSymbol,
+        name: $quoteName,
         address: $quote,
-        decimals: 6,
+        decimals: $quoteDecimals,
         kind: "quote"
-      },
+      } + (if $quoteBridgeDest != "" then {
+        bridge: {
+          sourceChainId: $l1ChainId,
+          sourceDenom: $quoteBridgeDenom,
+          sourceSymbol: $quoteL1Symbol,
+          sourceDecimals: $quoteBridgeSourceDecimals,
+          destinationDenom: $quoteBridgeDest
+        }
+      } else {} end)),
       {
         symbol: "tAAPL",
         name: "Tokenized Apple",
@@ -272,7 +296,14 @@ jq -n \
         name: "Connected Initia",
         address: $cinit,
         decimals: 18,
-        kind: "crypto"
+        kind: "crypto",
+        bridge: {
+          sourceChainId: $l1ChainId,
+          sourceDenom: "uinit",
+          sourceSymbol: "INIT",
+          sourceDecimals: 6,
+          destinationDenom: "l2/7835b9ce5f65720a12cd653306cfe00afb93dcf1b73e69eb5eeddc568fc455cf"
+        }
       }
     ]
   }' > "$DEPLOYMENT_FILE"

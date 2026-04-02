@@ -21,7 +21,7 @@ function makeToken(symbol: string, address: Address, decimals = 6): ResolvedToke
     name: symbol,
     address,
     decimals,
-    kind: symbol === "sUSDC" ? "quote" : "crypto"
+    kind: symbol === "cUSDC" ? "quote" : "crypto"
   };
 }
 
@@ -33,10 +33,10 @@ function makeHarness(options?: {
   const root = mkdtempSync(join(tmpdir(), "sinergy-router-test-"));
   const store = new StateStore(join(root, "state.json"));
   const base = makeToken("cINIT", "0x00000000000000000000000000000000000000a1");
-  const quote = makeToken("sUSDC", "0x00000000000000000000000000000000000000b2");
+  const quote = makeToken("cUSDC", "0x00000000000000000000000000000000000000b2");
   const market: ResolvedMarket = {
     id: "0x0000000000000000000000000000000000000000000000000000000000000111",
-    symbol: "cINIT/sUSDC",
+    symbol: "cINIT/cUSDC",
     baseToken: base,
     quoteToken: quote,
     routeable: false,
@@ -56,8 +56,8 @@ function makeHarness(options?: {
       targetInventoryAtomic: "10000000",
       maxInventoryAtomic: "20000000"
     });
-    canonicalAssets.set("susdc", {
-      localSymbol: "sUSDC",
+    canonicalAssets.set("cusdc", {
+      localSymbol: "cUSDC",
       l1Symbol: "USDC",
       bridgeDenom: "uusdc",
       l1Decimals: 6,
@@ -65,11 +65,11 @@ function makeHarness(options?: {
       targetInventoryAtomic: "10000000",
       maxInventoryAtomic: "20000000"
     });
-    routerMarkets.set("cinit/susdc", {
+    routerMarkets.set("cinit/cusdc", {
       pairDenom: "move/33",
       pairObjectId: "0x33",
       baseSymbol: "cINIT",
-      quoteSymbol: "sUSDC"
+      quoteSymbol: "cUSDC"
     });
   }
 
@@ -82,7 +82,7 @@ function makeHarness(options?: {
     markets: [market],
     canonicalAssets,
     routerMarkets,
-    bootstrapInventory: options?.bootstrapInventory ?? { cINIT: "20000000", sUSDC: "20000000" }
+    bootstrapInventory: options?.bootstrapInventory ?? { cINIT: "20000000", cUSDC: "20000000" }
   });
   const routedMarket = { ...market, ...inventoryService.getMarketPolicy(market) };
   const bridge: BridgeHealth = {
