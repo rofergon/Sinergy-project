@@ -109,7 +109,7 @@ Take `Sinergy` from a local environment on `Sinergy-2` to an **operable testnet*
 
 ### Changes per file
 
-#### [scripts/deploy-local.sh](/home/sari/Sinergy-project/scripts/deploy-local.sh)
+#### [scripts/deploy-local.sh](../scripts/deploy-local.sh)
 
 1. stop always writing to `deployments/local.json`
 2. extract parameters:
@@ -126,13 +126,13 @@ Take `Sinergy` from a local environment on `Sinergy-2` to an **operable testnet*
    - option A: convert to `scripts/deploy-rollup.sh`
    - option B: keep `deploy-local.sh` and create `deploy-testnet.sh`
 
-#### [scripts/add-crypto-assets.sh](/home/sari/Sinergy-project/scripts/add-crypto-assets.sh)
+#### [scripts/add-crypto-assets.sh](../scripts/add-crypto-assets.sh)
 
 1. stop assuming `deployments/local.json`
 2. accept `DEPLOYMENT_FILE`
 3. accept real rollup endpoints
 
-#### [deployments/local.json](/home/sari/Sinergy-project/deployments/local.json)
+#### [deployments/local.json](../deployments/local.json)
 
 1. keep it only for local development
 
@@ -145,7 +145,7 @@ Take `Sinergy` from a local environment on `Sinergy-2` to an **operable testnet*
    - token catalog
    - operator
 
-#### [packages/shared/src/chain.ts](/home/sari/Sinergy-project/packages/shared/src/chain.ts)
+#### [packages/shared/src/chain.ts](../packages/shared/src/chain.ts)
 
 1. stop exporting a single hardcoded local chain
 2. move to a factory or two exports:
@@ -177,16 +177,16 @@ Take `Sinergy` from a local environment on `Sinergy-2` to an **operable testnet*
 
 ### Changes per file
 
-#### [contracts/src/DarkPoolVault.sol](/home/sari/Sinergy-project/contracts/src/DarkPoolVault.sol)
+#### [contracts/src/DarkPoolVault.sol](../contracts/src/DarkPoolVault.sol)
 
 1. check if the current matcher signer will remain the production testnet signer
 2. keep constructor compatible with parameterized deployment
 
-#### [contracts/src/DarkPoolMarket.sol](/home/sari/Sinergy-project/contracts/src/DarkPoolMarket.sol)
+#### [contracts/src/DarkPoolMarket.sol](../contracts/src/DarkPoolMarket.sol)
 
 1. validate matcher role for remote operation
 
-#### [scripts/export-abis.mjs](/home/sari/Sinergy-project/scripts/export-abis.mjs)
+#### [scripts/export-abis.mjs](../scripts/export-abis.mjs)
 
 1. use it as a fixed step after deploy if contracts change
 
@@ -205,30 +205,30 @@ Take `Sinergy` from a local environment on `Sinergy-2` to an **operable testnet*
 
 ### Changes per file
 
-#### [services/matcher/.env.example](/home/sari/Sinergy-project/services/matcher/.env.example)
+#### [services/matcher/.env.example](../services/matcher/.env.example)
 
 1. keep it as a neutral example
 2. create real variants:
    - `.env.local`
    - `.env.testnet`
 
-#### [services/matcher/src/config/env.ts](/home/sari/Sinergy-project/services/matcher/src/config/env.ts)
+#### [services/matcher/src/config/env.ts](../services/matcher/src/config/env.ts)
 
 1. make sure all critical URLs can come via env
 2. check if it's worth hardening required variables for testnet
 
-#### [services/matcher/src/index.ts](/home/sari/Sinergy-project/services/matcher/src/index.ts)
+#### [services/matcher/src/index.ts](../services/matcher/src/index.ts)
 
 1. run with `DEPLOYMENT_FILE=../../deployments/testnet.json`
 2. validate that `BridgeHealthService` uses real health URLs
 3. validate that `L_ROUTER_HOME` and key config don't depend on a specific local machine
 
-#### [services/matcher/src/services/bridgeHealth.ts](/home/sari/Sinergy-project/services/matcher/src/services/bridgeHealth.ts)
+#### [services/matcher/src/services/bridgeHealth.ts](../services/matcher/src/services/bridgeHealth.ts)
 
 1. keep autodiscovery as fallback
 2. prioritize explicit URLs on testnet
 
-#### [services/matcher/src/services/initiaDex.ts](/home/sari/Sinergy-project/services/matcher/src/services/initiaDex.ts)
+#### [services/matcher/src/services/initiaDex.ts](../services/matcher/src/services/initiaDex.ts)
 
 1. test the real L1 signer
 2. check signer funding for swaps and rebalances
@@ -249,7 +249,7 @@ Take `Sinergy` from a local environment on `Sinergy-2` to an **operable testnet*
 
 ### Changes per file
 
-#### [apps/web/src/initia.ts](/home/sari/Sinergy-project/apps/web/src/initia.ts)
+#### [apps/web/src/initia.ts](../apps/web/src/initia.ts)
 
 1. already supports env overrides
 2. need to populate:
@@ -260,17 +260,17 @@ Take `Sinergy` from a local environment on `Sinergy-2` to an **operable testnet*
    - `VITE_EVM_WS_URL`
 3. check if `deployment.network.name` should reflect testnet name, not "Sinergy Local"
 
-#### [apps/bridge/src/initia.ts](/home/sari/Sinergy-project/apps/bridge/src/initia.ts)
+#### [apps/bridge/src/initia.ts](../apps/bridge/src/initia.ts)
 
 1. same adaptation as `apps/web`
 2. keep `openBridge` with source defaults, not with promise of official destination
 
-#### [apps/web/src/App.tsx](/home/sari/Sinergy-project/apps/web/src/App.tsx)
+#### [apps/web/src/App.tsx](../apps/web/src/App.tsx)
 
 1. validate `bridge degraded` banners
 2. confirm copy and states reflect real testnet
 
-#### [apps/bridge/src/App.tsx](/home/sari/Sinergy-project/apps/bridge/src/App.tsx)
+#### [apps/bridge/src/App.tsx](../apps/bridge/src/App.tsx)
 
 1. review final bridge copy for testnet
 2. if real source isn't `uinit`, change env and onboarding message
@@ -353,7 +353,7 @@ The migration to **operable testnet** is considered complete when:
 ## Recommended Next Iteration in Code
 
 1. create `deployments/testnet.json`
-2. refactor [scripts/deploy-local.sh](/home/sari/Sinergy-project/scripts/deploy-local.sh) to a deploy parametrizable by environment
-3. refactor [packages/shared/src/chain.ts](/home/sari/Sinergy-project/packages/shared/src/chain.ts) to support local and testnet
+2. refactor [scripts/deploy-local.sh](../scripts/deploy-local.sh) to a deploy parametrizable by environment
+3. refactor [packages/shared/src/chain.ts](../packages/shared/src/chain.ts) to support local and testnet
 4. create `.env.testnet` for matcher and frontends
 5. document the real commands for `weave`, `opinit`, and relayer in an operational runbook

@@ -24,17 +24,17 @@ The repo is now ready for multiple bridge-backed assets, not only `cINIT`.
 
 Main changes:
 
-- [packages/shared/src/chain.ts](/home/sari/Sinergy-project/packages/shared/src/chain.ts)
+- [packages/shared/src/chain.ts](../packages/shared/src/chain.ts)
   `DeploymentToken` now supports `bridge` metadata.
-- [services/matcher/src/services/bridgeClaims.ts](/home/sari/Sinergy-project/services/matcher/src/services/bridgeClaims.ts)
+- [services/matcher/src/services/bridgeClaims.ts](../services/matcher/src/services/bridgeClaims.ts)
   Claim and redeem logic is generic and can support future bridge-backed tokens such as `cUSDC`.
-- [services/matcher/src/index.ts](/home/sari/Sinergy-project/services/matcher/src/index.ts)
+- [services/matcher/src/index.ts](../services/matcher/src/index.ts)
   Added generic bridge endpoints:
   - `GET /bridge/assets`
   - `GET /bridge/claimable/:tokenSymbol/:initiaAddress`
   - `POST /bridge/claim`
   - `POST /bridge/redeem`
-- [apps/web/src/components/BridgeLanding.tsx](/home/sari/Sinergy-project/apps/web/src/components/BridgeLanding.tsx)
+- [apps/web/src/components/BridgeLanding.tsx](../apps/web/src/components/BridgeLanding.tsx)
   The bridge UI is now structured to support multiple bridge-backed assets.
 
 ## Local Deployment Defaults For The Next Deployment
@@ -46,8 +46,8 @@ The next local deployment now defaults to:
 
 Relevant scripts:
 
-- [scripts/deploy-local.sh](/home/sari/Sinergy-project/scripts/deploy-local.sh)
-- [scripts/add-crypto-assets.sh](/home/sari/Sinergy-project/scripts/add-crypto-assets.sh)
+- [scripts/deploy-local.sh](../scripts/deploy-local.sh)
+- [scripts/add-crypto-assets.sh](../scripts/add-crypto-assets.sh)
 
 That means the next fresh local deployment will list markets like:
 
@@ -69,7 +69,7 @@ Completed live steps:
 2. Added `cUSDC` to the vault supported token set
 3. Listed `*/cUSDC` markets on-chain
 4. Transferred `cUSDC` ownership to the matcher signer
-5. Discovered the bridged `USDC` denom on Sinergy and added it to [deployments/testnet.json](/home/sari/Sinergy-project/deployments/testnet.json)
+5. Discovered the bridged `USDC` denom on Sinergy and added it to [deployments/testnet.json](../deployments/testnet.json)
 6. Switched matcher runtime config to `cUSDC`
 7. Migrated matcher state from legacy `sUSDC` balances to `cUSDC`
 

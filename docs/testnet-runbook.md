@@ -6,7 +6,7 @@ Run `Sinergy` against an operable testnet rollup without affecting the local wor
 
 ## 1. Prepare Base Files
 
-1. complete [deployments/testnet.json](/home/sari/Sinergy-project/deployments/testnet.json)
+1. complete [deployments/testnet.json](../deployments/testnet.json)
 2. copy the templates:
    - `cp apps/web/.env.testnet.example apps/web/.env.testnet`
    - `cp apps/bridge/.env.testnet.example apps/bridge/.env.testnet`
@@ -39,7 +39,7 @@ MATCHER_PRIVATE_KEY="0x..."
 
 This updates:
 
-1. [deployments/testnet.json](/home/sari/Sinergy-project/deployments/testnet.json)
+1. [deployments/testnet.json](../deployments/testnet.json)
 2. `services/matcher/.env.testnet`
 
 ## 3. Start Services In Testnet

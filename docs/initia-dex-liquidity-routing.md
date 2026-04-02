@@ -39,11 +39,11 @@ From the user's point of view, the trade still starts and ends on Sinergy. The e
 
 Main files:
 
-- [SwapPanel.tsx](/home/sari/Sinergy-project/apps/web/src/components/SwapPanel.tsx)
-- [router.ts](/home/sari/Sinergy-project/services/matcher/src/services/router.ts)
-- [rebalanceWorker.ts](/home/sari/Sinergy-project/services/matcher/src/services/rebalanceWorker.ts)
-- [initiaDex.ts](/home/sari/Sinergy-project/services/matcher/src/services/initiaDex.ts)
-- [inventory.ts](/home/sari/Sinergy-project/services/matcher/src/services/inventory.ts)
+- [SwapPanel.tsx](../apps/web/src/components/SwapPanel.tsx)
+- [router.ts](../services/matcher/src/services/router.ts)
+- [rebalanceWorker.ts](../services/matcher/src/services/rebalanceWorker.ts)
+- [initiaDex.ts](../services/matcher/src/services/initiaDex.ts)
+- [inventory.ts](../services/matcher/src/services/inventory.ts)
 
 Responsibilities:
 
