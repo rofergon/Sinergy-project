@@ -1,18 +1,18 @@
 # cUSDC Migration
 
-## En pocas palabras
+## In Simple Terms
 
-Este documento explica por que el proyecto deja atras `sUSDC` y pasa a `cUSDC`. El cambio no es solo de nombre: busca que el activo quote se entienda mejor, se alinee con el modelo de activos conectados y prepare mejor el puente con el ecosistema Initia.
+This document explains why the project is moving away from `sUSDC` and switching to `cUSDC`. The change is not only about naming: it makes the quote asset easier to understand, aligns it with the connected-asset model, and better prepares the bridge path with the Initia ecosystem.
 
-## Cuando leer este documento
+## When To Read This Document
 
-Leelo si estas revisando activos, mercados, configuracion del matcher o despliegues donde el cambio de `sUSDC` a `cUSDC` pueda afectar contratos, UI o inventarios.
+Read this if you are reviewing assets, markets, matcher configuration, or deployments where the move from `sUSDC` to `cUSDC` could affect contracts, UI, or inventory.
 
-## Que debes recordar
+## What To Remember
 
-- `cUSDC` expresa mejor el modelo de activo conectado que `sUSDC`.
-- La migracion afecta nombre, configuracion, mercados y balances internos.
-- Este cambio ya se refleja en la testnet activa del proyecto.
+- `cUSDC` expresses the connected-asset model better than `sUSDC`.
+- The migration affects naming, configuration, markets, and internal balances.
+- This change is already reflected in the active project testnet.
 
 This document tracks the migration away from the legacy local quote token `sUSDC` toward a bridge-backed quote token model based on `cUSDC`.
 

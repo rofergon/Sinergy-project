@@ -1,18 +1,18 @@
 # Sinergy Dark RWA Market
 
-## En pocas palabras
+## In Simple Terms
 
-Este documento explica la forma mas simple de entender `Sinergy`: los fondos viven en contratos, pero las ordenes y el matching no se publican en cadena. Eso permite una experiencia mas privada que un DEX totalmente publico sin perder control sobre depositos y retiros.
+This document explains the simplest way to understand `Sinergy`: funds live in contracts, but orders and matching are not published on-chain. That creates a more private experience than a fully public DEX without losing control over deposits and withdrawals.
 
-## Cuando leer este documento
+## When To Read This Document
 
-Leelo si quieres una vista general del sistema antes de entrar en detalles de privacidad, testnet o ZK.
+Read this if you want a system-level overview before getting into privacy, testnet, or ZK details.
 
-## Que debes recordar
+## What To Remember
 
-- `Sinergy` no pone el libro de ordenes en cadena.
-- Los contratos guardan fondos y validan salidas; el backend opera la logica de mercado.
-- La privacidad actual viene sobre todo de separar ejecucion privada y settlement publico.
+- `Sinergy` does not put the order book on-chain.
+- Contracts hold funds and validate exits; the backend runs the market logic.
+- Current privacy comes mainly from separating private execution from public settlement.
 
 ## Objective
 

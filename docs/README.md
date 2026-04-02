@@ -1,42 +1,42 @@
-# Documentacion de Sinergy
+# Sinergy Documentation
 
-Esta carpeta explica el proyecto desde varios angulos. La idea de esta guia es que no tengas que abrir todos los archivos para entender por donde empezar.
+This folder explains the project from several angles. The goal of this guide is to help you know where to start without opening every file first.
 
-## Si quieres entender el proyecto rapido
+## If you want a quick understanding of the project
 
-- Lee [onboarding-hackathon.md](/home/sari/Sinergy-project/docs/onboarding-hackathon.md). Es la mejor vista general de producto, problema y propuesta de valor.
-- Luego lee [architecture.md](/home/sari/Sinergy-project/docs/architecture.md). Resume como se conectan contratos, backend y frontend.
+- Read [onboarding-hackathon.md](/home/sari/Sinergy-project/docs/onboarding-hackathon.md). It is the best high-level overview of the product, problem, and value proposition.
+- Then read [architecture.md](/home/sari/Sinergy-project/docs/architecture.md). It summarizes how the contracts, backend, and frontend fit together.
 
-## Si quieres entender la parte de privacidad
+## If you want to understand the privacy side
 
-- Lee [privacy-architecture.md](/home/sari/Sinergy-project/docs/privacy-architecture.md) para entender que privacidad existe hoy y cual es el objetivo.
-- Lee [privacy-engine-design.md](/home/sari/Sinergy-project/docs/privacy-engine-design.md) si necesitas ver la version mas tecnica de esa evolucion.
-- Lee [zk-withdrawal-runbook.md](/home/sari/Sinergy-project/docs/zk-withdrawal-runbook.md) si vas a ejecutar pruebas reales de retiros con pruebas ZK.
+- Read [privacy-architecture.md](/home/sari/Sinergy-project/docs/privacy-architecture.md) to understand what privacy exists today and what the target is.
+- Read [privacy-engine-design.md](/home/sari/Sinergy-project/docs/privacy-engine-design.md) if you need the more technical version of that evolution.
+- Read [zk-withdrawal-runbook.md](/home/sari/Sinergy-project/docs/zk-withdrawal-runbook.md) if you are going to run real ZK withdrawal tests.
 
-## Si quieres operar la red o el entorno testnet
+## If you want to operate the network or the testnet environment
 
-- Lee [implementation-plan.md](/home/sari/Sinergy-project/docs/implementation-plan.md) para ver el plan general de trabajo.
-- Lee [testnet-runbook.md](/home/sari/Sinergy-project/docs/testnet-runbook.md) para levantar el stack en testnet.
-- Lee [network-startup.md](/home/sari/Sinergy-project/docs/network-startup.md) para el arranque operativo del dia a dia.
+- Read [implementation-plan.md](/home/sari/Sinergy-project/docs/implementation-plan.md) for the overall work plan.
+- Read [testnet-runbook.md](/home/sari/Sinergy-project/docs/testnet-runbook.md) to bring the stack up on testnet.
+- Read [network-startup.md](/home/sari/Sinergy-project/docs/network-startup.md) for day-to-day operational startup.
 
-## Si quieres entender integraciones o cambios puntuales
+## If you want to understand integrations or specific changes
 
-- Lee [initia-dex-liquidity-routing.md](/home/sari/Sinergy-project/docs/initia-dex-liquidity-routing.md) para entender cuando una operacion usa liquidez local y cuando sale a Initia DEX.
-- Lee [cusdc-migration.md](/home/sari/Sinergy-project/docs/cusdc-migration.md) para entender la migracion de `sUSDC` a `cUSDC`.
+- Read [initia-dex-liquidity-routing.md](/home/sari/Sinergy-project/docs/initia-dex-liquidity-routing.md) to understand when an operation uses local liquidity and when it routes to Initia DEX.
+- Read [cusdc-migration.md](/home/sari/Sinergy-project/docs/cusdc-migration.md) to understand the migration from `sUSDC` to `cUSDC`.
 
-## Lectura recomendada segun el perfil
+## Recommended reading by profile
 
-- Producto o demo: [onboarding-hackathon.md](/home/sari/Sinergy-project/docs/onboarding-hackathon.md), [architecture.md](/home/sari/Sinergy-project/docs/architecture.md)
-- Backend o smart contracts: [architecture.md](/home/sari/Sinergy-project/docs/architecture.md), [privacy-architecture.md](/home/sari/Sinergy-project/docs/privacy-architecture.md), [privacy-engine-design.md](/home/sari/Sinergy-project/docs/privacy-engine-design.md)
-- DevOps o testnet: [implementation-plan.md](/home/sari/Sinergy-project/docs/implementation-plan.md), [testnet-runbook.md](/home/sari/Sinergy-project/docs/testnet-runbook.md), [network-startup.md](/home/sari/Sinergy-project/docs/network-startup.md)
+- Product or demo: [onboarding-hackathon.md](/home/sari/Sinergy-project/docs/onboarding-hackathon.md), [architecture.md](/home/sari/Sinergy-project/docs/architecture.md)
+- Backend or smart contracts: [architecture.md](/home/sari/Sinergy-project/docs/architecture.md), [privacy-architecture.md](/home/sari/Sinergy-project/docs/privacy-architecture.md), [privacy-engine-design.md](/home/sari/Sinergy-project/docs/privacy-engine-design.md)
+- DevOps or testnet: [implementation-plan.md](/home/sari/Sinergy-project/docs/implementation-plan.md), [testnet-runbook.md](/home/sari/Sinergy-project/docs/testnet-runbook.md), [network-startup.md](/home/sari/Sinergy-project/docs/network-startup.md)
 
-## Idea general del proyecto en lenguaje simple
+## Project idea in simple language
 
-Sinergy busca que el trading de cripto y activos tokenizados no exponga demasiada informacion en cadena. Para eso:
+Sinergy aims to make trading crypto and tokenized assets less publicly exposed on-chain. To do that:
 
-- los fondos se custodian on-chain;
-- las ordenes y el matching viven fuera de cadena;
-- la interfaz web conecta al usuario con ese flujo;
-- `Initia L1` aporta liquidez externa cuando el inventario local no alcanza.
+- funds are held on-chain;
+- orders and matching live off-chain;
+- the web interface connects the user to that flow;
+- `Initia L1` provides external liquidity when local inventory is not enough.
 
-En otras palabras: la cadena se usa para lo que necesita ser verificable, y el resto se mantiene lo mas privado y practico posible.
+In other words, the chain is used for what must be verifiable, and the rest is kept as private and practical as possible.

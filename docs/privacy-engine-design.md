@@ -1,18 +1,18 @@
 # Sinergy Privacy Engine Design
 
-## En pocas palabras
+## In Simple Terms
 
-Este documento describe hacia donde quiere evolucionar `Sinergy` para depender menos de la confianza en el backend y apoyar retiros y settlement con pruebas verificables. Es mas tecnico que otros docs porque funciona como guia de diseno.
+This document describes where `Sinergy` wants to evolve so it depends less on backend trust and can support withdrawals and settlement with verifiable proofs. It is more technical than the other docs because it serves as a design guide.
 
-## Cuando leer este documento
+## When To Read This Document
 
-Leelo cuando ya entiendas la arquitectura general y quieras revisar la version objetivo del motor de privacidad, sus componentes y sus trade-offs.
+Read this once you already understand the general architecture and want to review the target version of the privacy engine, its components, and its trade-offs.
 
-## Que debes recordar
+## What To Remember
 
-- Este doc habla del estado objetivo, no solo del sistema actual.
-- La meta es que el backend deje de ser la unica fuente de verdad para balances y retiros.
-- `Initia L1` sigue siendo la fuente de liquidez externa, no el lugar donde vive la privacidad.
+- This document describes the target state, not only the current system.
+- The goal is for the backend to stop being the only source of truth for balances and withdrawals.
+- `Initia L1` remains the external liquidity source, not the place where privacy lives.
 
 ## Objective
 

@@ -1,18 +1,18 @@
 # Implementation Plan
 
-## En pocas palabras
+## In Simple Terms
 
-Este plan explica como pasar de un entorno local a una testnet operable sin romper el flujo de desarrollo actual. La idea no es "tener todo resuelto", sino llegar a una version que se pueda desplegar, probar y operar de forma realista.
+This plan explains how to move from a local environment to an operable testnet without breaking the current development workflow. The goal is not to have everything solved, but to reach a version that can be deployed, tested, and operated realistically.
 
-## Cuando leer este documento
+## When To Read This Document
 
-Leelo si necesitas ver el roadmap operativo completo, entender el orden recomendado de ejecucion o repartir trabajo por fases.
+Read this if you need the full operational roadmap, the recommended execution order, or a way to divide work by phase.
 
-## Que debes recordar
+## What To Remember
 
-- El objetivo es llegar a una testnet operable, no cerrar toda la vision final del proyecto.
-- El entorno local sigue siendo importante y no debe romperse durante la migracion.
-- Las fases estan pensadas para bajar riesgo operativo y separar responsabilidades.
+- The goal is to reach an operable testnet, not to complete the entire long-term vision of the project.
+- The local environment remains important and should not break during the migration.
+- The phases are designed to reduce operational risk and separate responsibilities.
 
 ## Objective
 

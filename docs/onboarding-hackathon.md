@@ -1,183 +1,183 @@
-# Sinergy: Onboarding para Hackathon
+# Sinergy: Hackathon Onboarding
 
-## Resumen rapido
+## Quick Summary
 
-Este documento es la mejor puerta de entrada para entender `Sinergy` sin meterse primero en detalles tecnicos. Si alguien nuevo en el proyecto necesita captar la idea, el problema y la propuesta de valor, deberia empezar aqui.
+This document is the best entry point for understanding `Sinergy` without jumping into technical details first. If someone is new to the project and needs to quickly grasp the idea, the problem, and the value proposition, they should start here.
 
-## Qué debes recordar antes de leerlo
+## What To Remember Before Reading
 
-- `Sinergy` mezcla privacidad practica, UX de appchain y trading de RWAs/cripto.
-- El MVP ya funciona con una arquitectura hibrida entre contratos, matcher y frontend.
-- Para una demo o pitch, este documento es mas util que los docs de arquitectura profunda.
+- `Sinergy` combines practical privacy, appchain UX, and RWA/crypto trading.
+- The MVP already works with a hybrid architecture across contracts, matcher, and frontend.
+- For a demo or pitch, this document is more useful than the deeper architecture docs.
 
-## 1. Qué es Sinergy
+## 1. What Sinergy Is
 
-**Sinergy** es un mercado privado de activos tokenizados y cripto construido sobre la appchain `Sinergy-2` de Initia.
+**Sinergy** is a private market for tokenized assets and crypto built on Initia's `Sinergy-2` appchain.
 
-El proyecto combina:
+The project combines:
 
-- una **vault on-chain** para custodiar fondos;
-- un **matcher off-chain** para mantener órdenes privadas y ejecutar matching;
-- una **interfaz web** para depositar, tradear y retirar;
-- un **router híbrido** que usa inventario local y, cuando aplica, liquidez conectada a `InitiaDEX`.
+- an **on-chain vault** to custody funds;
+- an **off-chain matcher** to maintain private orders and execute matching;
+- a **web interface** for deposits, trading, and withdrawals;
+- a **hybrid router** that uses local inventory and, when needed, liquidity connected to `InitiaDEX`.
 
-En pocas palabras: **Sinergy permite tradear activos tokenizados y cripto con menos exposición on-chain, mejor experiencia de usuario y una arquitectura lista para evolucionar hacia mayor privacidad.**
+In short: **Sinergy lets users trade tokenized assets and crypto with less on-chain exposure, a better user experience, and an architecture ready to evolve toward stronger privacy.**
 
-## 2. Problema que resuelve
+## 2. The Problem It Solves
 
-Hoy, muchos mercados on-chain tienen tres fricciones fuertes:
+Today, many on-chain markets suffer from three major frictions:
 
-1. **Las órdenes quedan expuestas públicamente**, lo que revela intención de trading, tamaño y precio.
-2. **Los activos del mundo real tokenizados y la liquidez cripto suelen vivir en flujos separados**, lo que fragmenta la experiencia.
-3. **Entrar a una appchain y mover fondos entre capas sigue siendo complejo**, especialmente para usuarios que vienen desde EVM.
+1. **Orders are publicly exposed**, which reveals trading intent, size, and price.
+2. **Tokenized real-world assets and crypto liquidity usually live in separate flows**, which fragments the user experience.
+3. **Getting into an appchain and moving funds across layers is still complex**, especially for users coming from EVM.
 
-Sinergy resuelve esto con un enfoque MVP muy claro:
+Sinergy addresses this with a very clear MVP approach:
 
-- las órdenes se manejan **fuera de cadena**;
-- la cadena sólo ve **depósitos, retiros y anclajes de estado**;
-- el sistema soporta tanto **RWAs** como **cripto**;
-- el onboarding usa **InterwovenKit** y un flujo de bridge dedicado para reducir fricción.
+- orders are handled **off-chain**;
+- the chain only sees **deposits, withdrawals, and state anchors**;
+- the system supports both **RWAs** and **crypto**;
+- onboarding uses **InterwovenKit** and a dedicated bridge flow to reduce friction.
 
-## 3. A quién ayuda
+## 3. Who It Helps
 
 ### Traders
 
-- obtienen más privacidad que en un DEX completamente público;
-- pueden operar sin exponer todas sus intenciones al mercado;
-- tienen una experiencia unificada para cripto y activos tokenizados.
+- they get more privacy than in a fully public DEX;
+- they can trade without exposing all their intentions to the market;
+- they get a unified experience for crypto and tokenized assets.
 
-### Equipos que tokenizan activos reales
+### Teams tokenizing real-world assets
 
-- consiguen una base de mercado más parecida a un venue privado;
-- pueden listar activos tokenizados sin depender de un order book totalmente público;
-- tienen una arquitectura compatible con futuras capas de compliance.
+- they get a market base that looks more like a private venue;
+- they can list tokenized assets without depending on a fully public order book;
+- they get an architecture compatible with future compliance layers.
 
-### Ecosistema Initia
+### The Initia ecosystem
 
-- demuestra un caso de uso real para `MiniEVM`, `InterwovenKit` y conectividad con `InitiaDEX`;
-- aporta una pieza de infraestructura orientada a mercados privados y RWAs;
-- crea un puente entre UX de appchain, trading y liquidez híbrida.
+- it demonstrates a real use case for `MiniEVM`, `InterwovenKit`, and connectivity with `InitiaDEX`;
+- it adds infrastructure focused on private markets and RWAs;
+- it creates a bridge between appchain UX, trading, and hybrid liquidity.
 
-## 4. Propuesta de valor
+## 4. Value Proposition
 
-La propuesta de valor de Sinergy para el hackathon es:
+Sinergy's value proposition for the hackathon is:
 
-**“Un mercado privado de RWAs y cripto sobre Initia, donde el settlement crítico vive on-chain, pero la intención de trading y el matching permanecen fuera de cadena.”**
+**"A private market for RWAs and crypto on Initia, where critical settlement lives on-chain, while trading intent and matching stay off-chain."**
 
-Esto lo hace atractivo porque mezcla:
+This is compelling because it combines:
 
-- **utilidad real**: trading y settlement;
-- **mejor UX**: onboarding con wallet + bridge;
-- **arquitectura defendible**: vault, matcher y market separados;
-- **visión de producto**: empieza como MVP funcional y escala hacia privacidad y compliance más robustos.
+- **real utility**: trading and settlement;
+- **better UX**: wallet + bridge onboarding;
+- **defensible architecture**: separate vault, matcher, and market layers;
+- **product vision**: it starts as a functional MVP and scales toward stronger privacy and compliance.
 
-## 5. Qué incluye el MVP actual
+## 5. What The Current MVP Includes
 
-El MVP ya implementa los componentes principales:
+The MVP already implements the main components:
 
 ### Smart contracts
 
-- `DarkPoolVault`: custodia depósitos y permite retiros con tickets firmados `EIP-712`.
-- `DarkPoolMarket`: registra mercados y ancla batches (`stateRoot`, `settlementRoot`).
-- `MockUSDC`: stablecoin mock para el entorno local.
-- `RwaShareToken`: token base para representar activos listados.
+- `DarkPoolVault`: holds deposits and allows withdrawals with `EIP-712` signed tickets.
+- `DarkPoolMarket`: registers markets and anchors batches (`stateRoot`, `settlementRoot`).
+- `MockUSDC`: mock stablecoin for the local environment.
+- `RwaShareToken`: base token used to represent listed assets.
 
 ### Backend
 
-- ledger interno por usuario y token;
-- sincronización de depósitos desde la vault;
-- order book privado;
-- matching precio-tiempo;
-- validaciones por bandas de precio;
-- firma de tickets de retiro;
-- pricing híbrido para RWA y cripto con oráculos de Initia y adaptadores custom;
-- router privado con fills locales y rebalanceo asíncrono cuando se necesita liquidez externa.
+- internal ledger by user and token;
+- deposit synchronization from the vault;
+- private order book;
+- price-time matching;
+- price-band validations;
+- withdrawal ticket signing;
+- hybrid pricing for RWAs and crypto with Initia oracles and custom adapters;
+- private router with local fills and asynchronous rebalance when external liquidity is needed.
 
 ### Frontend
 
-- conexión de wallet con `InterwovenKit`;
-- depósitos y retiros;
-- visualización de mercado y precios;
-- envío de órdenes privadas;
-- panel para rutas tipo `Private Router`;
-- separación entre mercados `Router-enabled` y `Dark-pool only`.
+- wallet connection with `InterwovenKit`;
+- deposits and withdrawals;
+- market and price visualization;
+- private order submission;
+- panel for `Private Router`-style routes;
+- separation between `Router-enabled` and `Dark-pool only` markets.
 
 ### Bridge onboarding
 
-- una app dedicada para iniciar la sesión de wallet;
-- apertura del bridge oficial desde `InterwovenKit` con un source chain configurable;
-- transición clara desde bridge hacia el exchange.
+- a dedicated app to start the wallet session;
+- opening the official bridge from `InterwovenKit` with a configurable source chain;
+- a clear transition from the bridge into the exchange.
 
-## 6. Características diferenciales
+## 6. Differentiating Features
 
-### Privacidad práctica desde el MVP
+### Practical privacy from the MVP
 
-Sinergy no publica el libro de órdenes on-chain. Eso reduce visibilidad para observadores externos y protege mejor la intención de trading.
+Sinergy does not publish the order book on-chain. That reduces visibility for outside observers and better protects trading intent.
 
-### Arquitectura híbrida
+### Hybrid architecture
 
-No intenta poner toda la lógica en contrato. Usa on-chain para custodia y retiro seguro, y off-chain para matching y operación rápida.
+It does not try to put all logic into contracts. It uses on-chain components for custody and safe withdrawal, and off-chain components for matching and fast operation.
 
-### Mezcla de RWAs y cripto
+### Mix of RWAs and crypto
 
-El sistema ya contempla ambos mundos:
+The system already supports both worlds:
 
-- RWAs como `tAAPL`, `tBOND`, `tNVDA`;
-- cripto como `cBTC`, `cETH`, `cSOL`, `cINIT`.
+- RWAs such as `tAAPL`, `tBOND`, `tNVDA`;
+- crypto such as `cBTC`, `cETH`, `cSOL`, `cINIT`.
 
-### Integración real con Initia
+### Real integration with Initia
 
-El proyecto ya usa piezas nativas del ecosistema:
+The project already uses native ecosystem pieces:
 
 - `MiniEVM`
 - `InterwovenKit`
 - `Initia Connect`
-- `InitiaDEX` para ciertos mercados habilitados
+- `InitiaDEX` for selected enabled markets
 
-Importante para el demo:
+Important for the demo:
 
-- la documentación oficial de Initia aclara que la UI pública del bridge no siempre resuelve appchains locales no registradas;
-- por eso, en entorno local conviene presentar el bridge como puerta de entrada al ecosistema y el depósito en `Sinergy-2` como paso posterior del flujo;
-- si el rollup llega a registrarse o se despliega en un entorno público soportado, ese salto puede verse como una experiencia más continua.
+- Initia's official documentation makes clear that the public bridge UI does not always handle unregistered local appchains;
+- because of that, in a local environment it is better to present the bridge as the entry point into the ecosystem and the deposit into `Sinergy-2` as the next step in the flow;
+- if the rollup becomes registered or is deployed in a supported public environment, that jump can look like a more continuous experience.
 
-### Capa de oráculos y pricing
+### Oracle and pricing layer
 
-Sinergy combina infraestructura del ecosistema Initia con una capa propia de pricing en el matcher.
+Sinergy combines Initia ecosystem infrastructure with its own pricing layer inside the matcher.
 
-Para cripto, usa **`Initia Connect Oracle`** como fuente de precio en vivo para:
+For crypto, it uses **`Initia Connect Oracle`** as the live price source for:
 
 - `cBTC -> BTC/USD`
 - `cETH -> ETH/USD`
 - `cSOL -> SOL/USD`
 - `cINIT -> INIT/USD`
 
-Además, el proyecto implementa un **price service custom** que:
+In addition, the project implements a **custom price service** that:
 
-- unifica las fuentes de datos para que el matcher trabaje con una sola interfaz;
-- usa `Twelve Data` para RWAs como `tAAPL`, `tNVDA` y `tBOND`;
-- usa `CoinGecko` para bootstrap histórico de cripto;
-- guarda histórico y fallback en `SQLite` para resiliencia operativa;
-- permite seguir operando incluso si una fuente externa falla temporalmente.
+- unifies data sources so the matcher works with a single interface;
+- uses `Twelve Data` for RWAs such as `tAAPL`, `tNVDA`, and `tBOND`;
+- uses `CoinGecko` for historical crypto bootstrap data;
+- stores history and fallback data in `SQLite` for operational resilience;
+- allows the system to keep operating even if one external source temporarily fails.
 
-Esto es importante para el hackathon porque demuestra no sólo integración con Initia, sino también capacidad de construir infraestructura de mercado más robusta alrededor de esa base.
+This matters for the hackathon because it shows not only integration with Initia, but also the ability to build stronger market infrastructure around that base.
 
-### Camino claro de evolución
+### Clear evolution path
 
-El diseño ya deja abierta la siguiente etapa:
+The design already leaves room for the next stage:
 
-- cifrado de órdenes;
-- snapshots Merkle;
-- compliance desacoplado;
-- TEE o zk para settlement más confidencial.
+- order encryption;
+- Merkle snapshots;
+- decoupled compliance;
+- TEE or ZK for more confidential settlement.
 
-## 7. Mercados soportados en el estado actual
+## 7. Markets Supported In The Current State
 
-### Mercados con ruta conectada a `InitiaDEX`
+### Markets with routing connected to `InitiaDEX`
 
 - `cINIT/cUSDC`
 - `cETH/cUSDC`
 
-### Mercados dark-pool only
+### Dark-pool-only markets
 
 - `cBTC/cUSDC`
 - `cSOL/cUSDC`
@@ -185,71 +185,71 @@ El diseño ya deja abierta la siguiente etapa:
 - `tBOND/cUSDC`
 - `tNVDA/cUSDC`
 
-## 8. Cómo funciona el flujo del usuario
+## 8. How The User Flow Works
 
-1. El usuario conecta su wallet con `InterwovenKit`.
-2. Si necesita fondos, pasa por el flujo de bridge.
-3. Deposita activos en `DarkPoolVault`.
-4. El frontend sincroniza el estado con el `matcher-service`.
-5. El usuario envía órdenes privadas.
-6. El matcher ejecuta matching off-chain.
-7. El usuario puede retirar con un ticket firmado por el backend.
-8. El protocolo puede anclar batches en `DarkPoolMarket`.
+1. The user connects their wallet with `InterwovenKit`.
+2. If they need funds, they go through the bridge flow.
+3. They deposit assets into `DarkPoolVault`.
+4. The frontend synchronizes state with the `matcher-service`.
+5. The user submits private orders.
+6. The matcher executes matching off-chain.
+7. The user can withdraw with a backend-signed ticket.
+8. The protocol can anchor batches in `DarkPoolMarket`.
 
-## 9. Por qué este proyecto puede competir bien en un hackathon
+## 9. Why This Project Can Compete Well In A Hackathon
 
-Sinergy tiene varios puntos fuertes para jurados:
+Sinergy has several strong points for judges:
 
-- **resuelve un problema real**: privacidad y UX en mercados de activos tokenizados;
-- **muestra integración técnica con el ecosistema Initia**;
-- **tiene arquitectura completa**, no sólo una pantalla o un contrato aislado;
-- **es demoable**: wallet, depósito, trade, router, retiro;
-- **tiene visión de roadmap**, sin vender humo sobre lo que aún no está implementado.
+- **it solves a real problem**: privacy and UX in tokenized-asset markets;
+- **it shows technical integration with the Initia ecosystem**;
+- **it has full architecture**, not just a screen or an isolated contract;
+- **it is demoable**: wallet, deposit, trade, router, withdrawal;
+- **it has roadmap vision**, without overselling what is not implemented yet.
 
-Para mantener el pitch honesto:
+To keep the pitch honest:
 
-- en local, no conviene prometer que el bridge público siempre liste `Sinergy-2` como destino directo;
-- sí conviene mostrar que la experiencia ya está preparada para abrir el bridge oficial, recibir liquidez del ecosistema y continuar en el exchange.
+- in local environments, it is better not to promise that the public bridge will always list `Sinergy-2` as a direct destination;
+- it does make sense to show that the experience is already prepared to open the official bridge, receive liquidity from the ecosystem, and continue into the exchange.
 
-## 10. Limitaciones actuales del MVP
+## 10. Current MVP Limitations
 
-Es importante presentarlo con honestidad:
+It is important to present it honestly:
 
-- el operador del backend todavía puede ver las órdenes;
-- no hay TEE ni zk en esta versión;
-- el compliance fuerte aún no está on-chain;
-- parte del pricing sigue dependiendo de proveedores y adaptadores externos aunque ya exista una capa propia de agregación.
+- the backend operator can still see the orders;
+- there is no TEE or ZK in this version;
+- strong compliance is not on-chain yet;
+- part of pricing still depends on external providers and adapters even though there is already an internal aggregation layer.
 
-Esto no debilita el proyecto; al contrario, muestra una estrategia sensata de construcción:
+This does not weaken the project; on the contrary, it shows a sensible build strategy:
 
-**primero funcionalidad y adopción, luego privacidad criptográfica más profunda.**
+**functionality and adoption first, then deeper cryptographic privacy.**
 
-## 11. Mensaje corto para presentar el proyecto
+## 11. Short Project Intro
 
-> Sinergy es un mercado privado de RWAs y cripto construido sobre Initia. Usamos una vault on-chain para custodia y retiros seguros, mientras el order book y el matching viven off-chain para reducir exposición pública. El MVP ya permite onboarding con wallet, depósitos, órdenes privadas, pricing híbrido con `Initia Connect Oracle` y un servicio de precios custom, además de retiros firmados y una evolución clara hacia mayor privacidad, compliance y settlement confidencial.
+> Sinergy is a private market for RWAs and crypto built on Initia. We use an on-chain vault for custody and safe withdrawals, while the order book and matching live off-chain to reduce public exposure. The MVP already supports wallet onboarding, deposits, private orders, hybrid pricing with `Initia Connect Oracle` and a custom price service, signed withdrawals, and a clear path toward stronger privacy, compliance, and confidential settlement.
 
-## 12. Pitch de 30 segundos
+## 12. 30-Second Pitch
 
-**Sinergy convierte Initia en una base para mercados privados de activos tokenizados. En lugar de exponer cada orden on-chain, movemos el matching fuera de cadena y dejamos en la appchain sólo la custodia, los retiros y el anclaje de estado. Combinamos `Initia Connect Oracle` para cripto con una capa propia de pricing para RWAs e histórico, lo que mejora privacidad, da resiliencia operativa y habilita un flujo real para RWAs y cripto dentro del ecosistema Initia.**
+**Sinergy turns Initia into a base layer for private markets in tokenized assets. Instead of exposing every order on-chain, we move matching off-chain and leave only custody, withdrawals, and state anchoring on the appchain. We combine `Initia Connect Oracle` for crypto with our own pricing layer for RWAs and historical data, which improves privacy, adds operational resilience, and enables a real flow for RWAs and crypto inside the Initia ecosystem.**
 
-## 13. Stack del proyecto
+## 13. Project Stack
 
-- `Foundry` para contratos EVM
-- `Vite + React` para frontend
-- `InterwovenKit` para wallet UX
-- `Fastify + TypeScript` para backend matcher
-- `viem` para utilidades EVM
-- `MiniEVM` / `minitiad` para despliegue local
+- `Foundry` for EVM contracts
+- `Vite + React` for the frontend
+- `InterwovenKit` for wallet UX
+- `Fastify + TypeScript` for the backend matcher
+- `viem` for EVM utilities
+- `MiniEVM` / `minitiad` for local deployment
 
-## 14. Cómo leer el repo
+## 14. How To Read The Repo
 
-- `contracts/`: contratos del protocolo
-- `apps/web/`: interfaz principal de trading
-- `apps/bridge/`: onboarding y bridge
-- `services/matcher/`: matching, precios y tickets de retiro
-- `packages/shared/`: ABIs, configuración de chain y tipos compartidos
-- `docs/`: arquitectura, plan e información de producto
+- `contracts/`: protocol contracts
+- `apps/web/`: main trading interface
+- `apps/bridge/`: onboarding and bridge
+- `services/matcher/`: matching, pricing, and withdrawal tickets
+- `packages/shared/`: ABIs, chain configuration, and shared types
+- `docs/`: architecture, planning, and product information
 
-## 15. Conclusión
+## 15. Conclusion
 
-Sinergy no es sólo una idea de hackathon: ya tiene una base funcional, una narrativa clara y una necesidad concreta de mercado. Su valor está en conectar **privacidad práctica**, **activos tokenizados**, **liquidez híbrida** y **UX sobre Initia** en una sola experiencia.
+Sinergy is not only a hackathon idea: it already has a functional base, a clear narrative, and a concrete market need. Its value comes from connecting **practical privacy**, **tokenized assets**, **hybrid liquidity**, and **UX on Initia** into a single experience.

@@ -1,18 +1,18 @@
 # ZK Withdrawal Runbook
 
-## En pocas palabras
+## In Simple Terms
 
-Este runbook muestra el paso a paso para generar una prueba `Groth16` de retiro y convertirla en un paquete que el contrato pueda verificar. Es tecnico, pero la idea base es simple: demostrar que un retiro es valido sin publicar toda la informacion privada de la nota.
+This runbook shows the step-by-step process to generate a `Groth16` withdrawal proof and turn it into a package the contract can verify. It is technical, but the basic idea is simple: prove that a withdrawal is valid without publishing all the private note data.
 
-## Cuando leer este documento
+## When To Read This Document
 
-Leelo solo si vas a trabajar con el flujo ZK de retiros o si necesitas validar que el pipeline de pruebas ya funciona de punta a punta.
+Read this only if you are working with the ZK withdrawal flow or if you need to validate that the proof pipeline already works end to end.
 
-## Que debes recordar
+## What To Remember
 
-- El flujo tiene una secuencia fija: compilar circuito, preparar setup, armar witness, generar prueba y exportar paquete.
-- El contrato verifica datos publicos minimos; la nota privada no se publica.
-- Este runbook ya sirve para pruebas reales dentro del repo, no solo como idea futura.
+- The flow has a fixed sequence: compile the circuit, prepare the setup, build the witness, generate the proof, and export the package.
+- The contract verifies minimal public data; the private note is not published.
+- This runbook is already usable for real tests inside the repo, not just as a future idea.
 
 ## Objective
 
