@@ -157,6 +157,46 @@ test("router prefers instant local fill when bridge is healthy and inventory is 
   }
 });
 
+test("router can force dex routing even when local inventory is available", async () => {
+  const harness = makeHarness();
+
+  try {
+    const result = await harness.router.quote({
+      userAddress: harness.userAddress,
+      marketId: harness.market.id,
+      fromToken: harness.quote.address,
+      amount: "10",
+      routePreference: "dex"
+    });
+
+    assert.equal(result.mode, "async_rebalance_required");
+    assert.equal(result.requestedRoute, "dex");
+    assert.equal(result.executionPath, "dex");
+  } finally {
+    harness.cleanup();
+  }
+});
+
+test("router marks forced local as unavailable when local fill cannot be satisfied", async () => {
+  const harness = makeHarness({ bridgeReady: false });
+
+  try {
+    const result = await harness.router.quote({
+      userAddress: harness.userAddress,
+      marketId: harness.market.id,
+      fromToken: harness.quote.address,
+      amount: "10",
+      routePreference: "local"
+    });
+
+    assert.equal(result.mode, "async_rebalance_required");
+    assert.equal(result.requestedRoute, "local");
+    assert.equal(result.executionPath, "unavailable");
+  } finally {
+    harness.cleanup();
+  }
+});
+
 test("router marks non-canonical markets as unsupported", async () => {
   const harness = makeHarness({ routeable: false });
 

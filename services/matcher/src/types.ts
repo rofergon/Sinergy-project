@@ -4,6 +4,7 @@ export type RouteMode =
   | "instant_local"
   | "async_rebalance_required"
   | "unsupported_asset";
+export type RoutePreference = "auto" | "local" | "dex";
 export type RebalanceJobState =
   | "queued"
   | "bridging_out"
@@ -74,6 +75,8 @@ export type RouterInventoryPosition = {
 
 export type SwapQuote = {
   mode: RouteMode;
+  requestedRoute: RoutePreference;
+  executionPath: "local" | "dex" | "unavailable";
   expiry: string;
   routeable: boolean;
   quotedOutAtomic: string;

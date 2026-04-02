@@ -4,6 +4,7 @@ import type {
   ResolvedMarket,
   ResolvedToken,
   RouteMode,
+  RoutePreference,
   SwapQuote
 } from "../types.js";
 import { PriceService } from "./priceService.js";
@@ -34,6 +35,7 @@ export class LiquidityRouter {
     marketId: `0x${string}`;
     fromToken: `0x${string}`;
     amount: string;
+    routePreference?: RoutePreference;
   }): Promise<SwapQuote> {
     const market = this.mustFindMarket(input.marketId);
     const fromToken = this.mustResolveToken(market, input.fromToken);
@@ -42,10 +44,13 @@ export class LiquidityRouter {
     const routeable = Boolean(routeConfig);
     const bridge = await this.deps.bridgeHealthService.getStatus();
     const expiry = new Date(Date.now() + 30_000).toISOString();
+    const requestedRoute = input.routePreference ?? "auto";
 
     if (!routeable || !routeConfig) {
       return {
         mode: "unsupported_asset",
+        requestedRoute,
+        executionPath: "unavailable",
         expiry,
         routeable: false,
         quotedOutAtomic: "0",
@@ -74,14 +79,30 @@ export class LiquidityRouter {
         ? configuredInventoryAtomic
         : onchainInventoryAtomic;
     const withinNotional = this.withinMaxLocalFill(market, fromToken, amountAtomic);
+    const canInstantLocal =
+      bridge.ready && localInventoryAtomic >= spreadAdjusted && withinNotional;
 
     let mode: RouteMode = "async_rebalance_required";
-    if (bridge.ready && localInventoryAtomic >= spreadAdjusted && withinNotional) {
+    let executionPath: SwapQuote["executionPath"] = "dex";
+    if (requestedRoute === "local") {
+      if (canInstantLocal) {
+        mode = "instant_local";
+        executionPath = "local";
+      } else {
+        executionPath = "unavailable";
+      }
+    } else if (requestedRoute === "dex") {
+      mode = "async_rebalance_required";
+      executionPath = "dex";
+    } else if (canInstantLocal) {
       mode = "instant_local";
+      executionPath = "local";
     }
 
     return {
       mode,
+      requestedRoute,
+      executionPath,
       expiry,
       routeable: true,
       quotedOutAtomic: l1DexAtomic.toString(),
@@ -103,6 +124,7 @@ export class LiquidityRouter {
     marketId: `0x${string}`;
     fromToken: `0x${string}`;
     amount: string;
+    routePreference?: RoutePreference;
   }) {
     const market = this.mustFindMarket(input.marketId);
     const fromToken = this.mustResolveToken(market, input.fromToken);
@@ -117,6 +139,10 @@ export class LiquidityRouter {
 
     if (quote.mode === "unsupported_asset") {
       throw new Error("This market is dark-pool only");
+    }
+
+    if (input.routePreference === "local" && quote.executionPath === "unavailable") {
+      throw new Error("Local liquidity is unavailable for this trade size. Switch to Auto or DEX-routed.");
     }
 
     if (quote.mode === "instant_local") {

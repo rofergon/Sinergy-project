@@ -16,7 +16,11 @@ import { BridgeHealthService } from "./services/bridgeHealth.js";
 import { LiquidityRouter } from "./services/router.js";
 import { RebalanceWorker } from "./services/rebalanceWorker.js";
 import { BridgeClaimService } from "./services/bridgeClaims.js";
-import type { CanonicalAssetConfig, RouterMarketConfig } from "./types.js";
+import type {
+  CanonicalAssetConfig,
+  RoutePreference,
+  RouterMarketConfig
+} from "./types.js";
 
 const deployment = loadDeployment(env.DEPLOYMENT_FILE);
 const tokens = resolveTokens(deployment);
@@ -238,6 +242,7 @@ app.post("/swap/quote", async (request) => {
     marketId: Hex;
     fromToken: Address;
     amount: string;
+    routePreference?: RoutePreference;
   };
 
   return {
@@ -251,6 +256,7 @@ app.post("/swap/execute", async (request) => {
     marketId: Hex;
     fromToken: Address;
     amount: string;
+    routePreference?: RoutePreference;
   };
 
   return await liquidityRouter.execute(body);

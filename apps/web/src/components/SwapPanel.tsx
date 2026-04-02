@@ -3,6 +3,8 @@ import { formatUnits } from "viem";
 import type { Address, Hex } from "viem";
 import { api } from "../lib/api";
 
+type RoutePreference = "auto" | "local" | "dex";
+
 type Token = {
   symbol: string;
   decimals: number;
@@ -38,6 +40,8 @@ type InventoryPosition = {
 
 type QuoteResponse = {
   mode: "instant_local" | "async_rebalance_required" | "unsupported_asset";
+  requestedRoute: RoutePreference;
+  executionPath: "local" | "dex" | "unavailable";
   expiry: string;
   routeable: boolean;
   quotedOutAtomic: string;
@@ -106,6 +110,7 @@ export function SwapPanel({
   const [jobId, setJobId] = useState<string | null>(null);
   const [isQuoting, setIsQuoting] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [routePreference, setRoutePreference] = useState<RoutePreference>("auto");
 
   useEffect(() => {
     setFromToken(selectedMarket?.quoteToken.address);
@@ -113,7 +118,15 @@ export function SwapPanel({
     setStatus("quoted");
     setMessage("");
     setJobId(null);
+    setRoutePreference("auto");
   }, [selectedMarket?.id]);
+
+  useEffect(() => {
+    setQuote(null);
+    setJobId(null);
+    setStatus("quoted");
+    setMessage("");
+  }, [routePreference]);
 
   useEffect(() => {
     if (!jobId) return;
@@ -178,17 +191,20 @@ export function SwapPanel({
           userAddress: address,
           marketId: selectedMarket.id,
           fromToken,
-          amount
+          amount,
+          routePreference
         })
       });
       setQuote(result.quote);
-      setMessage(
-        result.quote.mode === "instant_local"
-          ? "Quote ready for instant local fill."
-          : result.quote.mode === "async_rebalance_required"
-            ? "Quote ready, but settlement will route through async rebalance."
-            : "This market is dark-pool only for now."
-      );
+      if (result.quote.mode === "unsupported_asset") {
+        setMessage("This market is dark-pool only for now.");
+      } else if (result.quote.executionPath === "unavailable") {
+        setMessage("Local-only routing is unavailable for this trade size. Try Auto or DEX-routed.");
+      } else if (result.quote.executionPath === "local") {
+        setMessage("Quote ready for instant local fill.");
+      } else {
+        setMessage("Quote ready, settlement will route through InitiaDEX liquidity.");
+      }
     } catch (error) {
       setJobId(null);
       setStatus("failed");
@@ -217,7 +233,8 @@ export function SwapPanel({
           userAddress: address,
           marketId: selectedMarket.id,
           fromToken,
-          amount
+          amount,
+          routePreference
         })
       });
 
@@ -227,7 +244,7 @@ export function SwapPanel({
       setMessage(
         result.status === "completed"
           ? "Swap completed with local liquidity."
-          : "Swap queued for rebalance across L1 liquidity."
+          : "Swap queued for rebalance across InitiaDEX liquidity."
       );
       await onAfterMutation();
     } catch (error) {
@@ -238,6 +255,16 @@ export function SwapPanel({
       setIsExecuting(false);
     }
   }
+
+  const executeDisabled =
+    !connected ||
+    !address ||
+    !selectedMarket ||
+    !quote ||
+    isQuoting ||
+    isExecuting ||
+    status === "rebalancing" ||
+    quote.executionPath === "unavailable";
 
   return (
     <div className="swap-panel">
@@ -252,6 +279,33 @@ export function SwapPanel({
         <div className="swap-status-row">
           <span>Flow</span>
           <strong>{status}</strong>
+        </div>
+
+        <div className="tt-field">
+          <span className="tt-field-label">Route source</span>
+          <div className="route-toggle" role="group" aria-label="Route source">
+            <button
+              type="button"
+              className={`route-toggle-btn ${routePreference === "auto" ? "active" : ""}`}
+              onClick={() => setRoutePreference("auto")}
+            >
+              Auto
+            </button>
+            <button
+              type="button"
+              className={`route-toggle-btn ${routePreference === "local" ? "active" : ""}`}
+              onClick={() => setRoutePreference("local")}
+            >
+              Local
+            </button>
+            <button
+              type="button"
+              className={`route-toggle-btn ${routePreference === "dex" ? "active" : ""}`}
+              onClick={() => setRoutePreference("dex")}
+            >
+              DEX-routed
+            </button>
+          </div>
         </div>
 
         <div className="tt-field">
@@ -304,15 +358,7 @@ export function SwapPanel({
           </button>
           <button
             className="swap-btn primary"
-            disabled={
-              !connected ||
-              !address ||
-              !selectedMarket ||
-              !quote ||
-              isQuoting ||
-              isExecuting ||
-              status === "rebalancing"
-            }
+            disabled={executeDisabled}
             onClick={executeSwap}
           >
             Execute
@@ -341,6 +387,14 @@ export function SwapPanel({
                 ? `${formatAtomic(outputInventory.amountAtomic, outputToken?.decimals ?? 18)} ${outputInventory.symbol}`
                 : "--"}
             </strong>
+          </div>
+          <div className="swap-status-row">
+            <span>Route pref</span>
+            <strong>{quote?.requestedRoute ?? routePreference}</strong>
+          </div>
+          <div className="swap-status-row">
+            <span>Execution path</span>
+            <strong>{quote?.executionPath ?? "--"}</strong>
           </div>
           <div className="swap-status-row">
             <span>Route mode</span>
