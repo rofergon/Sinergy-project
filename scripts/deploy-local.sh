@@ -318,6 +318,7 @@ PRICE_DB_FILE=./data/prices.sqlite
 PRICE_POLL_INTERVAL_MS=60000
 T_BOND_PROXY_SYMBOL=TLT
 INITIA_CONNECT_REST_URL=https://rest.testnet.initia.xyz
+ZK_WITHDRAWAL_PACKAGE_FILE=$ROOT_DIR/.tmp/zk/withdrawal/proof-package.json
 EOF
 
 echo "Deployment complete."
