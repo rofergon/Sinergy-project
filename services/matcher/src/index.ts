@@ -16,6 +16,7 @@ import { BridgeHealthService } from "./services/bridgeHealth.js";
 import { LiquidityRouter } from "./services/router.js";
 import { RebalanceWorker } from "./services/rebalanceWorker.js";
 import { BridgeClaimService } from "./services/bridgeClaims.js";
+import { ZkProofService } from "./services/zkProofs.js";
 import type {
   CanonicalAssetConfig,
   RoutePreference,
@@ -135,6 +136,7 @@ const rebalanceWorker = new RebalanceWorker({
   markets
 });
 rebalanceWorker.start();
+const zkProofService = new ZkProofService(env.ZK_WITHDRAWAL_PACKAGE_FILE);
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
@@ -340,6 +342,25 @@ app.post("/vault/withdrawal-quote", async (request) => {
     userAddress,
     token,
     amountAtomic: parseUnits(amount, decimals)
+  });
+});
+
+app.post("/vault/zk-withdrawal-package", async (request) => {
+  const { userAddress, token, amountAtomic } = request.body as {
+    userAddress: Address;
+    token: Address;
+    amountAtomic: string;
+  };
+
+  const requestedAmountAtomic = BigInt(amountAtomic);
+  if (vaultService.getAvailableBalance(userAddress, token) < requestedAmountAtomic) {
+    throw new Error("Insufficient internal balance");
+  }
+
+  return zkProofService.loadWithdrawalPackage({
+    recipient: userAddress,
+    token,
+    amountAtomic: requestedAmountAtomic
   });
 });
 
