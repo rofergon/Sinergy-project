@@ -125,6 +125,7 @@ export type RebalanceJob = {
   linkedSwapJobId?: string;
   error?: string;
   l1TxHash?: string;
+  actualAmountOutAtomic?: string;
 };
 
 export type AppState = {

@@ -98,6 +98,7 @@ export class RebalanceWorker {
         const result = await this.deps.initiaDexClient.executeSwap({
           market: routeConfig.market,
           offerAsset,
+          returnAsset,
           offerAmountAtomic: scaleAtomic(
             BigInt(next.amountInAtomic),
             inputToken.decimals,
@@ -109,10 +110,14 @@ export class RebalanceWorker {
             returnAsset.l1Decimals
           )
         });
+        const actualAmountOutAtomic = result.returnAmountAtomic
+          ? scaleAtomic(result.returnAmountAtomic, returnAsset.l1Decimals, outputToken.decimals)
+          : BigInt(next.minAmountOutAtomic);
 
         this.deps.inventoryService.updateRebalanceJob(next.id, (job) => {
           job.state = "settling_back";
           job.l1TxHash = result.txHash;
+          job.actualAmountOutAtomic = actualAmountOutAtomic.toString();
         });
         if (next.linkedSwapJobId) {
           this.deps.inventoryService.markSwapState(next.linkedSwapJobId, "settling_back");
@@ -132,7 +137,7 @@ export class RebalanceWorker {
       if (next.linkedSwapJobId) {
         this.deps.inventoryService.settleAsyncSwap(
           next.linkedSwapJobId,
-          BigInt(next.minAmountOutAtomic)
+          BigInt(next.actualAmountOutAtomic ?? next.minAmountOutAtomic)
         );
       }
     }

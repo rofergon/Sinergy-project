@@ -252,7 +252,11 @@ export class InventoryService {
       if (!job) return;
 
       addInventoryAtomic(state.routerInventory, job.inputSymbol, -BigInt(job.amountInAtomic));
-      addInventoryAtomic(state.routerInventory, job.outputSymbol, BigInt(job.minAmountOutAtomic));
+      addInventoryAtomic(
+        state.routerInventory,
+        job.outputSymbol,
+        BigInt(job.actualAmountOutAtomic ?? job.minAmountOutAtomic)
+      );
       job.state = "completed";
       job.updatedAt = nowIso();
     });

@@ -1,5 +1,6 @@
 import { promisify } from "node:util";
 import { execFile as execFileCallback } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
 import { RESTClient, bcs, MnemonicKey, MsgExecute, Wallet } from "@initia/initia.js";
 import type { CanonicalAssetConfig, RouterMarketConfig } from "../types.js";
 
@@ -26,6 +27,7 @@ type SimulateSwapInput = {
 type ExecuteSwapInput = {
   market: RouterMarketConfig;
   offerAsset: CanonicalAssetConfig;
+  returnAsset: CanonicalAssetConfig;
   offerAmountAtomic: bigint;
   minOutAtomic: bigint;
 };
@@ -81,7 +83,9 @@ export class InitiaDexClient {
     return this.parseViewAmount(response.data);
   }
 
-  async executeSwap(input: ExecuteSwapInput): Promise<{ txHash: string }> {
+  async executeSwap(
+    input: ExecuteSwapInput
+  ): Promise<{ txHash: string; returnAmountAtomic?: bigint }> {
     if (this.wallet) {
       const pairObjectId = this.resolvePairObjectId(input.market);
       const metadataObjectId = await this.resolveMetadataObjectId(input.offerAsset);
@@ -97,14 +101,16 @@ export class InitiaDexClient {
             bcs.object().serialize(pairObjectId),
             bcs.object().serialize(metadataObjectId),
             bcs.u64().serialize(input.offerAmountAtomic),
-            bcs.option(bcs.u64()).serialize(input.minOutAtomic)
+            // `Some(min_out)` currently aborts on the live Initia DEX path for this pool.
+            // We use `None` and read the actual filled amount from `SwapEvent`.
+            bcs.option(bcs.u64()).serialize(undefined)
           ].map((value) => value.toBase64())
         )
       ];
 
       const signedTx = await this.wallet.createAndSignTx({ msgs });
       const result = await this.restClient.tx.broadcastSync(signedTx);
-      return { txHash: result.txhash };
+      return this.enrichSwapResult(result.txhash);
     }
 
     if (!this.cliSigner) {
@@ -119,10 +125,12 @@ export class InitiaDexClient {
       input.offerAsset.l1Symbol
     );
     const args = JSON.stringify([
-      `raw_base64:${bcs.object().serialize(pairObjectId).toBase64()}`,
-      `raw_base64:${bcs.object().serialize(metadataObjectId).toBase64()}`,
-      `raw_base64:${bcs.u64().serialize(input.offerAmountAtomic).toBase64()}`,
-      `raw_base64:${bcs.option(bcs.u64()).serialize(input.minOutAtomic).toBase64()}`
+      `object:${pairObjectId}`,
+      `object:${metadataObjectId}`,
+      `u64:${input.offerAmountAtomic.toString()}`,
+      // The CLI path accepts typed args here, while `raw_base64` aborts for this pool.
+      // `Some(min_out)` also aborts on-chain, so we use `None` and read `SwapEvent`.
+      "option<u64>:null"
     ]);
 
     try {
@@ -166,7 +174,7 @@ export class InitiaDexClient {
         );
       }
 
-      return { txHash };
+      return this.enrichSwapResult(txHash);
     } catch (error) {
       const stderr =
         error && typeof error === "object" && "stderr" in error
@@ -181,6 +189,56 @@ export class InitiaDexClient {
         details ? `initiad swap execution failed: ${details}` : "initiad swap execution failed"
       );
     }
+  }
+
+  private async enrichSwapResult(txHash: string) {
+    const returnAmountAtomic = await this.waitForSwapReturnAmount(txHash);
+    return { txHash, returnAmountAtomic };
+  }
+
+  private async waitForSwapReturnAmount(txHash: string) {
+    const normalizedHash = txHash.toUpperCase();
+    const baseUrl = this.deps.restUrl.replace(/\/+$/, "");
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        const response = await fetch(`${baseUrl}/cosmos/tx/v1beta1/txs/${normalizedHash}`);
+        if (response.ok) {
+          const parsed = (await response.json()) as {
+            tx_response?: {
+              code?: number;
+              raw_log?: string;
+              events?: Array<{
+                type?: string;
+                attributes?: Array<{ key?: string; value?: string }>;
+              }>;
+            };
+          };
+
+          const code = parsed.tx_response?.code ?? 0;
+          if (code !== 0) {
+            throw new Error(parsed.tx_response?.raw_log || `Swap tx failed with code ${code}`);
+          }
+
+          const returnAmount = parsed.tx_response?.events
+            ?.filter((event) => event.type === "move")
+            .flatMap((event) => event.attributes ?? [])
+            .find((attribute) => attribute.key === "return_amount")?.value;
+
+          if (returnAmount) {
+            return BigInt(returnAmount);
+          }
+
+          return undefined;
+        }
+      } catch {
+        // The tx index can lag behind broadcast sync for a few seconds.
+      }
+
+      await delay(1_000);
+    }
+
+    return undefined;
   }
 
   private async assertCliSignerHasBalance(
