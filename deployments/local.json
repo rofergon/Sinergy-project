@@ -45,7 +45,14 @@
       "name": "Connected Initia",
       "address": "0x308B830b96998E9080616C504C7562473E2d85df",
       "decimals": 18,
-      "kind": "crypto"
+      "kind": "crypto",
+      "bridge": {
+        "sourceChainId": "initiation-2",
+        "sourceDenom": "uinit",
+        "sourceSymbol": "INIT",
+        "sourceDecimals": 6,
+        "destinationDenom": "l2/7835b9ce5f65720a12cd653306cfe00afb93dcf1b73e69eb5eeddc568fc455cf"
+      }
     },
     {
       "symbol": "cSOL",
