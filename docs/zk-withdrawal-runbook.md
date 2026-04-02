@@ -9,7 +9,7 @@ This runbook assumes:
 - [DarkVaultV2.sol](/home/sari/Sinergy-project/contracts/src/DarkVaultV2.sol) is deployed
 - [DarkStateAnchor.sol](/home/sari/Sinergy-project/contracts/src/DarkStateAnchor.sol) is deployed
 - [Groth16WithdrawalVerifier.sol](/home/sari/Sinergy-project/contracts/src/Groth16WithdrawalVerifier.sol) is deployed
-- the withdrawal circuit source exists at [withdrawal.circom](/home/sari/Sinergy-project/circuits/withdrawal.circom)
+- the withdrawal circuit source exists at [circuits/withdrawal.circom](/home/sari/Sinergy-project/circuits/withdrawal.circom)
 
 ## Public Inputs
 
