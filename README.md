@@ -32,7 +32,7 @@ scripts/           Deployment and export utilities
 
 ## Included Contracts
 
-- `MockUSDC`
+- `ConnectedQuoteToken` (`cUSDC`, bridge-backed quote token on the live testnet)
 - `RwaShareToken`
 - `DarkPoolVault`
 - `DarkPoolMarket`
@@ -44,7 +44,7 @@ Current deployment on `Sinergy-2`:
 - `Matcher signer`: `0x6eC8AcC95Da5f752eCeAB1c214C1b62080023283`
 - `DarkPoolVault`: `0x3fF37bE2C8B8179cBfd97CB1e75fEd91e5e38B19`
 - `DarkPoolMarket`: `0xe1d9c4EcC2ba58274733C61Fb25919F0eA902575`
-- `sUSDC`: `0xA0cf839E30789cBB13292B80727103105D971872`
+- `cUSDC`: `0x6Ef1eB5AE5C6824F8B6ECA81E2DB193966D95967`
 - `tAAPL`: `0xc7bcA502bCeBb25b1CFf139aeD86DE2639a922D7`
 - `tBOND`: `0x910a546A1763C38dcf352cfdB6e752b3DBDAb029`
 - `tNVDA`: `0xCBA194D6576379CfebA944cB696Be34F20e8a987`
@@ -52,6 +52,7 @@ Current deployment on `Sinergy-2`:
 Runtime source of truth:
 
 - [deployments/local.json](/home/sari/Sinergy-project/deployments/local.json)
+- Quote-token migration notes: [cusdc-migration.md](/home/sari/Sinergy-project/docs/cusdc-migration.md)
 
 ## MVP Flow
 
@@ -81,16 +82,22 @@ It also now exposes a `Private Router` path for crypto swaps:
 
 Current `InitiaDEX`-backed router-enabled markets in this repo:
 
-- `cINIT/sUSDC` -> mapped to the live `INIT/USDC` testnet pool
-- `cETH/sUSDC` -> mapped to the live `ETH/USDC` testnet pool
+- `cINIT/cUSDC` -> mapped to the live `INIT/USDC` testnet pool
+- `cETH/cUSDC` -> mapped to the live `ETH/USDC` testnet pool
+
+Quote-token note:
+
+- the live testnet now uses bridge-backed `cUSDC`
+- `sUSDC` remains legacy-only context for older snapshots and migration notes
+- see [cusdc-migration.md](/home/sari/Sinergy-project/docs/cusdc-migration.md)
 
 Current dark-pool-only markets:
 
-- `cBTC/sUSDC`
-- `cSOL/sUSDC`
-- `tAAPL/sUSDC`
-- `tBOND/sUSDC`
-- `tNVDA/sUSDC`
+- `cBTC/cUSDC`
+- `cSOL/cUSDC`
+- `tAAPL/cUSDC`
+- `tBOND/cUSDC`
+- `tNVDA/cUSDC`
 
 Mapped crypto feeds:
 
@@ -164,8 +171,8 @@ Relevant variables:
 
 The checked-in `.env.example` already includes a working local/testnet starter mapping for:
 
-- `cINIT/sUSDC`
-- `cETH/sUSDC`
+- `cINIT/cUSDC`
+- `cETH/cUSDC`
 
 Fallback behavior:
 
@@ -465,7 +472,7 @@ and updates [deployments/local.json](/home/sari/Sinergy-project/deployments/loca
 - Crypto assets connected to Initia Oracle build local history from the moment the matcher starts sampling them; `Connect` is not being used here as a historical backfill provider.
 - Wallet connection is handled through `InterwovenKit` on the local chain `Sinergy-2`.
 - For `MsgCall` transactions on MiniEVM, the frontend uses the Initia `bech32` address as `sender`, and the EVM hex address for contracts and balances.
-- The private router quotes against live InitiaDEX testnet pools for `cINIT/sUSDC` and `cETH/sUSDC`, but instant fills still come from local protocol inventory first.
+- The private router quotes against live InitiaDEX testnet pools for `cINIT/cUSDC` and `cETH/cUSDC`, but instant fills still come from local protocol inventory first.
 - Router math scales between local `18`-decimal MiniEVM assets (`cINIT`, `cETH`) and `6`-decimal Initia L1 denoms (`uinit`, `ueth`, `uusdc`) before quoting or rebalancing.
 - If you update `deployments/local.json`, restart both backend and frontend so the addresses reload.
 - If you update `services/matcher/.env`, restart the matcher so router market mappings and inventory bootstrap are reloaded.
