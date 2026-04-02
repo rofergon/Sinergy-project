@@ -31,6 +31,7 @@ type Props = {
   address?: `0x${string}`;
   initiaAddress?: string;
   vaultAddress: `0x${string}`;
+  zkVaultAddress?: `0x${string}`;
   tokens: Token[];
   balances: {
     available: Record<string, string>;
@@ -60,6 +61,7 @@ export function PortfolioView({
   address,
   initiaAddress,
   vaultAddress,
+  zkVaultAddress,
   tokens,
   balances,
   orders,
@@ -219,6 +221,7 @@ export function PortfolioView({
               address={address}
               initiaAddress={initiaAddress}
               vaultAddress={vaultAddress}
+              zkVaultAddress={zkVaultAddress}
               tokens={tokens}
               onAfterMutation={onAfterMutation}
             />
