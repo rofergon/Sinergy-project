@@ -61,6 +61,10 @@ Examples:
 - `cUSDC -> cETH`
 - `cINIT -> cUSDC`
 
+### General Flow Diagram
+
+![Sinergy general flow](docs/Sinergy_general_flow.png)
+
 ## Standout Components
 
 ### 1. `Bridge to Sinergy`
@@ -108,6 +112,10 @@ This is the most hackathon-worthy mechanism in the repo:
 In simple terms:
 
 `user -> Sinergy -> matcher -> InitiaDEX L1 -> matcher -> Sinergy`
+
+## Private Engine Flow
+
+![Sinergy private engine flow](docs/Sinergy_private_engine_flow.png)
 
 ## Main Architecture
 
