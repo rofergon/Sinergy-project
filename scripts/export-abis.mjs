@@ -4,7 +4,15 @@ import { resolve } from "node:path";
 const sourceDir = resolve("contracts/out");
 const targetDir = resolve("packages/shared/abi");
 
-const contracts = ["DarkPoolVault", "DarkPoolMarket", "MockUSDC", "RwaShareToken"];
+const contracts = [
+  "DarkPoolVault",
+  "DarkVaultV2",
+  "DarkPoolMarket",
+  "DarkStateAnchor",
+  "Groth16WithdrawalVerifier",
+  "MockUSDC",
+  "RwaShareToken"
+];
 
 await mkdir(targetDir, { recursive: true });
 
@@ -19,4 +27,3 @@ for (const name of contracts) {
 }
 
 console.log(`Exported ${contracts.length} ABI files to ${targetDir}`);
-
