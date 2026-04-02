@@ -32,6 +32,7 @@ GAS_STATION_HEX="$(
 VAULT_ADDRESS="$(jq -r '.contracts.vault' "$DEPLOYMENT_FILE")"
 MARKET_ADDRESS="$(jq -r '.contracts.market' "$DEPLOYMENT_FILE")"
 USDC_ADDRESS="$(jq -r '.contracts.quoteToken' "$DEPLOYMENT_FILE")"
+MATCHER_ADDRESS="$(jq -r '.operator.matcherAddress' "$DEPLOYMENT_FILE")"
 
 if [[ ! -d "$CONTRACTS_DIR/lib/openzeppelin-contracts" ]]; then
   (
@@ -120,6 +121,10 @@ call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cBTC
 call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cETH/sUSDC" "$CETH_ADDRESS" "$USDC_ADDRESS"
 call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cSOL/sUSDC" "$CSOL_ADDRESS" "$USDC_ADDRESS"
 call_as_gas_station "$MARKET_ADDRESS" "listMarket(string,address,address)" "cINIT/sUSDC" "$CINIT_ADDRESS" "$USDC_ADDRESS"
+call_as_gas_station "$CBTC_ADDRESS" "transferOwnership(address)" "$MATCHER_ADDRESS"
+call_as_gas_station "$CETH_ADDRESS" "transferOwnership(address)" "$MATCHER_ADDRESS"
+call_as_gas_station "$CSOL_ADDRESS" "transferOwnership(address)" "$MATCHER_ADDRESS"
+call_as_gas_station "$CINIT_ADDRESS" "transferOwnership(address)" "$MATCHER_ADDRESS"
 
 TMP_JSON="$TMP_DIR/local.updated.json"
 jq \

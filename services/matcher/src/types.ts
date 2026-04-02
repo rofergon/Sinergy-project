@@ -130,6 +130,7 @@ export type RebalanceJob = {
 export type AppState = {
   balances: Record<string, Record<string, string>>;
   locked: Record<string, Record<string, string>>;
+  bridgeClaims: Record<string, Record<string, string>>;
   orders: StoredOrder[];
   processedDeposits: string[];
   processedWithdrawals: string[];

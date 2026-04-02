@@ -25,6 +25,11 @@ const envSchema = z.object({
   RELAYER_HEALTH_URL: z.string().optional(),
   OPINIT_HEALTH_URL: z.string().optional(),
   OPINIT_BRIDGE_ID: z.string().optional(),
+  BRIDGED_INIT_DENOM: z
+    .string()
+    .default("l2/7835b9ce5f65720a12cd653306cfe00afb93dcf1b73e69eb5eeddc568fc455cf"),
+  BRIDGED_INIT_SYMBOL: z.string().default("cINIT"),
+  BRIDGED_INIT_SOURCE_DECIMALS: z.coerce.number().int().nonnegative().default(6),
   ROUTER_QUOTE_SPREAD_BPS: z.coerce.number().int().nonnegative().default(35),
   ROUTER_MAX_LOCAL_FILL_USD: z.coerce.number().positive().default(25_000),
   ROUTER_REBALANCE_INTERVAL_MS: z.coerce.number().int().positive().default(15_000),

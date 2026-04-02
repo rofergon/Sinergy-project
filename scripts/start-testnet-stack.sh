@@ -58,6 +58,30 @@ is_port_listening() {
   ss -ltn "( sport = :$port )" | grep -q ":$port"
 }
 
+ensure_matcher_service() {
+  local unit_dir="${HOME}/.config/systemd/user"
+  local unit_file="${unit_dir}/sinergy-matcher.service"
+  mkdir -p "$unit_dir"
+
+  cat >"$unit_file" <<EOF
+[Unit]
+Description=Sinergy matcher
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=$ROOT_DIR/services/matcher
+ExecStart=/bin/bash -lc 'set -a && if [ -f ./.env.testnet ]; then . ./.env.testnet; fi && set +a && exec node --import tsx src/index.ts'
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+EOF
+
+  systemctl --user daemon-reload
+}
+
 start_rollup() {
   if systemctl --user is-active --quiet minitiad.service; then
     log "rollup service already active"
@@ -118,15 +142,19 @@ start_background_process() {
   fi
 
   log "starting $name"
-  nohup bash -lc "$command" >"$log_file" 2>&1 &
+  nohup bash -lc "$command" </dev/null >"$log_file" 2>&1 &
   echo "$!" >"$pid_file"
 }
 
 start_matcher() {
-  start_background_process \
-    "matcher" \
-    "8787" \
-    "cd '$ROOT_DIR/services/matcher' && bash -lc 'set -a; if [ -f ./.env.testnet ]; then . ./.env.testnet; fi; set +a; ../../node_modules/.bin/tsx src/index.ts'"
+  ensure_matcher_service
+
+  if systemctl --user is-active --quiet sinergy-matcher.service; then
+    log "matcher service already active"
+  else
+    log "starting matcher service"
+    systemctl --user restart sinergy-matcher.service
+  fi
 
   wait_for_http "$MATCHER_HEALTH_URL" "matcher health"
 }
@@ -154,7 +182,7 @@ print_status() {
   printf '  rollup:   %s\n' "$(systemctl --user is-active minitiad.service 2>/dev/null || echo inactive)"
   printf '  executor: %s\n' "$(systemctl --user is-active opinitd.executor.service 2>/dev/null || echo inactive)"
   printf '  relayer:  %s\n' "$(docker ps --format '{{.Names}}' | has_exact_line 'weave-relayer' && echo active || echo inactive)"
-  printf '  matcher:  %s\n' "$(is_http_ready "$MATCHER_HEALTH_URL" && echo ready || echo unavailable)"
+  printf '  matcher:  %s\n' "$(systemctl --user is-active sinergy-matcher.service 2>/dev/null || echo inactive) / $(is_http_ready "$MATCHER_HEALTH_URL" && echo ready || echo unavailable)"
   printf '  web:      %s\n' "$(is_http_ready "$WEB_URL" && echo ready || echo unavailable)"
   printf '  bridge:   %s\n' "$(is_http_ready "$BRIDGE_URL" && echo ready || echo unavailable)"
 }

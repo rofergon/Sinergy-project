@@ -1435,6 +1435,16 @@ a { color: inherit; text-decoration: none; }
   font-weight: 700;
 }
 
+.bridge-primary-btn:disabled,
+.bridge-secondary-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.bridge-direct-btn {
+  background: linear-gradient(135deg, #4bd69c, #7fe9f8);
+}
+
 .bridge-secondary-btn {
   background: rgba(255, 255, 255, 0.06);
   color: var(--text-primary);
@@ -1451,6 +1461,120 @@ a { color: inherit; text-decoration: none; }
   margin-top: 14px;
   color: var(--text-tertiary);
   font-size: 13px;
+}
+
+.bridge-direct-card {
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid rgba(75, 214, 156, 0.22);
+  border-radius: 20px;
+  background: rgba(75, 214, 156, 0.08);
+  display: grid;
+  gap: 14px;
+}
+
+.bridge-direct-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bridge-direct-head strong {
+  font-size: 18px;
+}
+
+.bridge-direct-head span,
+.bridge-direct-meta span,
+.bridge-direct-status,
+.bridge-direct-hash {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.bridge-direct-copy {
+  color: var(--text-secondary);
+}
+
+.bridge-direct-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.bridge-direct-field {
+  display: grid;
+  gap: 8px;
+}
+
+.bridge-direct-field span {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.bridge-direct-input-wrap,
+.bridge-direct-address {
+  min-height: 48px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(8, 11, 18, 0.55);
+}
+
+.bridge-direct-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+}
+
+.bridge-direct-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  min-width: 0;
+}
+
+.bridge-direct-input::-webkit-outer-spin-button,
+.bridge-direct-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.bridge-direct-input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.bridge-direct-address {
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.bridge-direct-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  color: var(--text-tertiary);
+}
+
+.bridge-direct-status {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(8, 11, 18, 0.55);
+  color: #c9f7df;
+}
+
+.bridge-direct-hash {
+  color: var(--text-secondary);
+  word-break: break-all;
 }
 
 .bridge-visual-card {
@@ -1912,6 +2036,7 @@ a { color: inherit; text-decoration: none; }
   .portfolio-hero { flex-direction: column; }
   .bridge-hero { grid-template-columns: 1fr; }
   .bridge-steps-grid { grid-template-columns: 1fr; }
+  .bridge-direct-grid { grid-template-columns: 1fr; }
 
   .tv-chart-wrapper { min-height: 350px; }
   .bottom-panel { flex: 0 0 180px; }

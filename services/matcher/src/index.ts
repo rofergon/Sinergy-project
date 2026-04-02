@@ -15,6 +15,7 @@ import { InitiaDexClient } from "./services/initiaDex.js";
 import { BridgeHealthService } from "./services/bridgeHealth.js";
 import { LiquidityRouter } from "./services/router.js";
 import { RebalanceWorker } from "./services/rebalanceWorker.js";
+import { BridgeClaimService } from "./services/bridgeClaims.js";
 import type { CanonicalAssetConfig, RouterMarketConfig } from "./types.js";
 
 const deployment = loadDeployment(env.DEPLOYMENT_FILE);
@@ -103,6 +104,17 @@ const bridgeHealthService = new BridgeHealthService({
   relayerHealthUrl: env.RELAYER_HEALTH_URL,
   opinitHealthUrl: env.OPINIT_HEALTH_URL
 });
+const bridgeClaimService = new BridgeClaimService({
+  store,
+  publicClient,
+  walletClient,
+  deployment,
+  tokens,
+  bridgedDenom: env.BRIDGED_INIT_DENOM,
+  bridgedSymbol: env.BRIDGED_INIT_SYMBOL,
+  bridgedSourceDecimals: env.BRIDGED_INIT_SOURCE_DECIMALS,
+  rollupRestUrl: deployment.network.restUrl
+});
 const liquidityRouter = new LiquidityRouter({
   store,
   markets,
@@ -110,6 +122,7 @@ const liquidityRouter = new LiquidityRouter({
   inventoryService,
   initiaDexClient,
   bridgeHealthService,
+  vaultService,
   quoteSpreadBps: env.ROUTER_QUOTE_SPREAD_BPS,
   maxLocalFillUsd: env.ROUTER_MAX_LOCAL_FILL_USD
 });
@@ -159,6 +172,38 @@ app.get("/inventory", async () => ({
 }));
 
 app.get("/bridge/status", async () => await bridgeHealthService.getStatus());
+
+app.get("/bridge/claimable/:initiaAddress", async (request) => {
+  const { initiaAddress } = request.params as { initiaAddress: string };
+  const { evmAddress } = request.query as { evmAddress?: Address };
+  return await bridgeClaimService.preview(initiaAddress, evmAddress);
+});
+
+app.post("/bridge/claim-cinit", async (request) => {
+  const body = request.body as {
+    initiaAddress: string;
+    evmAddress: Address;
+  };
+
+  return await bridgeClaimService.claim({
+    initiaAddress: body.initiaAddress,
+    evmAddress: body.evmAddress
+  });
+});
+
+app.post("/bridge/redeem-cinit", async (request) => {
+  const body = request.body as {
+    initiaAddress: string;
+    evmAddress: Address;
+    amountAtomic: string;
+  };
+
+  return await bridgeClaimService.redeem({
+    initiaAddress: body.initiaAddress,
+    evmAddress: body.evmAddress,
+    amountAtomic: BigInt(body.amountAtomic)
+  });
+});
 
 app.get("/prices/:symbol/candles", async (request) => {
   const { symbol } = request.params as { symbol: string };
@@ -257,6 +302,20 @@ app.post("/vault/sync-withdrawal", async (request) => {
     logs?: Array<{ address: Address; topics: Hex[]; data: Hex }>;
   };
   return await vaultService.syncWithdrawal(txHash, userAddress, logs);
+});
+
+app.post("/vault/cancel-withdrawal", async (request) => {
+  const { userAddress, token, nonce } = request.body as {
+    userAddress: Address;
+    token: Address;
+    nonce: number;
+  };
+
+  return vaultService.cancelPendingWithdrawal({
+    userAddress,
+    token,
+    nonce
+  });
 });
 
 app.post("/orders", async (request) => {

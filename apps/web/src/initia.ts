@@ -90,6 +90,10 @@ export const SINERGY_BRIDGE_SOURCE_CHAIN_ID =
   import.meta.env.VITE_BRIDGE_SRC_CHAIN_ID ?? "initiation-2";
 export const SINERGY_BRIDGE_SOURCE_DENOM =
   import.meta.env.VITE_BRIDGE_SRC_DENOM ?? "uinit";
+export const SINERGY_BRIDGE_ID = BigInt(import.meta.env.VITE_SINERGY_BRIDGE_ID ?? "1735");
+export const SINERGY_BRIDGE_DESTINATION_DENOM =
+  import.meta.env.VITE_SINERGY_BRIDGE_DST_DENOM ??
+  "l2/7835b9ce5f65720a12cd653306cfe00afb93dcf1b73e69eb5eeddc568fc455cf";
 
 export function buildBridgeDefaults() {
   return {
@@ -143,4 +147,8 @@ export function buildInterwovenCustomChain() {
       },
     },
   };
+}
+
+export function resolveRollupRestUrl() {
+  return import.meta.env.VITE_REST_URL ?? runtimeHttpUrl(1317, "rest");
 }

@@ -244,6 +244,7 @@ function Dashboard() {
       {activeView === "bridge" ? (
         <BridgeLanding
           connected={isConnected}
+          address={userAddress}
           initiaAddress={initiaAddress}
           onConnect={() => {
             setError("");

@@ -1,27 +1,27 @@
 # Testnet Runbook
 
-## Objetivo
+## Goal
 
-Levantar `Sinergy` contra un rollup testnet operable sin tocar el flujo local.
+Run `Sinergy` against an operable testnet rollup without affecting the local workflow.
 
-## 1. Preparar archivos base
+## 1. Prepare Base Files
 
-1. completar [deployments/testnet.json](/home/sari/Sinergy-project/deployments/testnet.json)
-2. copiar templates:
+1. complete [deployments/testnet.json](/home/sari/Sinergy-project/deployments/testnet.json)
+2. copy the templates:
    - `cp apps/web/.env.testnet.example apps/web/.env.testnet`
    - `cp apps/bridge/.env.testnet.example apps/bridge/.env.testnet`
    - `cp services/matcher/.env.testnet.example services/matcher/.env.testnet`
-3. reemplazar todos los `TODO_*`
+3. replace all `TODO_*` values
 
-## 2. Desplegar contratos en el rollup testnet
+## 2. Deploy Contracts To The Testnet Rollup
 
-Usar el wrapper:
+Use the wrapper:
 
 ```bash
 ./scripts/deploy-testnet.sh
 ```
 
-Variables mínimas que deberías sobreescribir:
+Minimum variables you should override:
 
 ```bash
 NETWORK_NAME="Sinergy Testnet"
@@ -37,12 +37,12 @@ MATCHER_PRIVATE_KEY="0x..."
 ./scripts/deploy-testnet.sh
 ```
 
-Esto actualiza:
+This updates:
 
 1. [deployments/testnet.json](/home/sari/Sinergy-project/deployments/testnet.json)
 2. `services/matcher/.env.testnet`
 
-## 3. Arrancar servicios en testnet
+## 3. Start Services In Testnet
 
 ### Matcher
 
@@ -62,43 +62,43 @@ npm run dev:web:testnet
 npm run dev:bridge:testnet
 ```
 
-## 4. Exponer la stack por internet
+## 4. Expose The Stack To The Internet
 
-1. arrancar la stack base:
+1. start the base stack:
 
 ```bash
 ./scripts/start-testnet-stack.sh
 ```
 
-2. arrancar el proxy Nginx en Docker:
+2. start the Nginx proxy in Docker:
 
 ```bash
 ./scripts/public-nginx.sh start
 ```
 
-Ese script:
+That script:
 
-1. compila `web` y `bridge` en modo `testnet`
-2. sirve esos builds estáticos desde Nginx
-3. hace reverse proxy a `matcher`, `rpc`, `ws`, `rest` y `tm`
+1. builds `web` and `bridge` in `testnet` mode
+2. serves those static builds from Nginx
+3. reverse-proxies `matcher`, `rpc`, `ws`, `rest`, and `tm`
 
-3. ver los hosts calculados:
+3. inspect the computed hosts:
 
 ```bash
 ./scripts/public-nginx.sh print-env
 ```
 
-4. si la máquina está detrás de router/NAT, redirigir:
+4. if the machine is behind a router/NAT, forward:
    - `80 -> 192.168.1.14:8080`
    - `443 -> 192.168.1.14:8443`
 
-5. pedir certificado cuando el DNS ya resuelva a tu IP pública:
+5. request a certificate once DNS resolves to your public IP:
 
 ```bash
 LETSENCRYPT_EMAIL=you@example.com ./scripts/request-public-cert.sh
 ```
 
-6. actualizar tus envs de testnet para usar:
+6. update your testnet env files to use:
    - `https://app.<root>`
    - `https://bridge.<root>`
    - `https://api.<root>`
@@ -108,52 +108,52 @@ LETSENCRYPT_EMAIL=you@example.com ./scripts/request-public-cert.sh
    - `https://tm.<root>`
    - `https://indexer.<root>`
 
-## 5. Exponer sin abrir puertos en el router
+## 5. Expose Without Opening Router Ports
 
-Si no quieres tocar el router, usa Cloudflare Tunnel:
+If you do not want to touch the router, use Cloudflare Tunnel:
 
 ```bash
 ./scripts/cloudflare-tunnel.sh quick
 ```
 
-Eso crea una URL `https://<random>.trycloudflare.com` y publica:
+This creates a `https://<random>.trycloudflare.com` URL and publishes:
 
-1. app en `/`
-2. matcher en `/api`
-3. JSON-RPC EVM en `/rpc`
-4. REST Cosmos en `/rest`
-5. Tendermint RPC en `/tm`
-6. indexer path en `/indexer`
-7. websocket EVM en `/ws`
+1. app at `/`
+2. matcher at `/api`
+3. EVM JSON-RPC at `/rpc`
+4. Cosmos REST at `/rest`
+5. Tendermint RPC at `/tm`
+6. indexer path at `/indexer`
+7. EVM websocket at `/ws`
 
-Comandos útiles:
+Useful commands:
 
 ```bash
 ./scripts/cloudflare-tunnel.sh status
 ./scripts/cloudflare-tunnel.sh stop
 ```
 
-Si luego quieres dominio propio y hostnames estables en Cloudflare:
+If you later want your own domain and stable hostnames in Cloudflare:
 
 ```bash
 CF_TUNNEL_TOKEN=... ./scripts/cloudflare-tunnel.sh named
 ```
 
-## 6. Verificaciones mínimas
+## 6. Minimum Verification
 
-1. el matcher arranca con `DEPLOYMENT_FILE=../../deployments/testnet.json`
-2. `GET /health` responde
-3. `GET /bridge/status` refleja OPinit/relayer reales
-4. `web` conecta wallet y resuelve el `customChain`
-5. `bridge` abre el flujo oficial con los defaults configurados
+1. matcher starts with `DEPLOYMENT_FILE=../../deployments/testnet.json`
+2. `GET /health` responds
+3. `GET /bridge/status` reflects real OPinit/relayer health
+4. `web` connects the wallet and resolves the `customChain`
+5. `bridge` opens the official flow with the configured defaults
 
-## 7. Criterio de salida
+## 7. Exit Criteria
 
-La testnet queda “operable” cuando:
+Testnet is considered “operable” when:
 
-1. puedes conectar wallet
-2. puedes depositar en `DarkPoolVault`
-3. puedes enviar órdenes o swaps
-4. el matcher puede firmar retiros
-5. el frontend ya no depende de `localhost`
-6. MetaMask o Coinbase Wallet aceptan `https://rpc.<root>`
+1. you can connect a wallet
+2. you can deposit into `DarkPoolVault`
+3. you can submit orders or swaps
+4. matcher can sign withdrawals
+5. the frontend no longer depends on `localhost`
+6. MetaMask or Coinbase Wallet accept `https://rpc.<root>`

@@ -97,6 +97,16 @@ button {
   font-weight: 700;
 }
 
+.primary-btn:disabled,
+.secondary-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.direct-btn {
+  background: linear-gradient(135deg, var(--accent), #7fe9f8);
+}
+
 .bridge-main {
   display: grid;
   gap: 22px;
@@ -143,6 +153,120 @@ button {
 
 .helper-copy {
   max-width: 58ch;
+}
+
+.direct-card {
+  margin-top: 18px;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(75, 214, 156, 0.22);
+  background: rgba(75, 214, 156, 0.08);
+  display: grid;
+  gap: 14px;
+}
+
+.direct-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.direct-head strong {
+  font-size: 18px;
+}
+
+.direct-head span,
+.direct-meta span,
+.direct-status,
+.direct-hash {
+  font-family: "Roboto Mono", monospace;
+  font-size: 12px;
+}
+
+.direct-copy {
+  margin: 0;
+  color: var(--text-soft);
+}
+
+.direct-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.direct-field {
+  display: grid;
+  gap: 8px;
+}
+
+.direct-field span {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+.direct-input-wrap,
+.direct-address {
+  min-height: 48px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.direct-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+}
+
+.direct-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+
+.direct-input::-webkit-outer-spin-button,
+.direct-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.direct-input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.direct-address {
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  word-break: break-all;
+}
+
+.direct-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  color: var(--text-soft);
+}
+
+.direct-status {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #c9f7df;
+}
+
+.direct-hash {
+  color: var(--text-soft);
+  word-break: break-all;
 }
 
 .route-card {
@@ -248,6 +372,10 @@ button {
   .hero-card,
   .steps-grid,
   .diagnostic-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .direct-grid {
     grid-template-columns: 1fr;
   }
 }

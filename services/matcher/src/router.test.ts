@@ -115,6 +115,10 @@ function makeHarness(options?: {
     bridgeHealthService: {
       getStatus: async () => bridge
     } as any,
+    vaultService: {
+      settleInstantLocalSwap: async () => undefined,
+      getMatcherWalletBalance: async () => 20_000_000n
+    } as any,
     quoteSpreadBps: 50,
     maxLocalFillUsd: 100_000
   });

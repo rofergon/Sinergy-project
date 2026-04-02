@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { MsgCallResponse } from "@initia/initia.proto/minievm/evm/v1/tx";
 import { useInterwovenKit } from "@initia/interwovenkit-react";
-import { encodeFunctionData, parseUnits } from "viem";
+import { encodeFunctionData, formatUnits, parseUnits } from "viem";
 import type { Address, Hex } from "viem";
+import { useReadContract } from "wagmi";
 import { darkPoolVaultAbi, erc20Abi } from "@sinergy/shared";
 import { api } from "../lib/api";
 import { SINERGY_ROLLUP_CHAIN_ID } from "../initia";
@@ -65,6 +66,16 @@ export function VaultPanel({
     () => tokens.find((t) => t.address === tokenAddress),
     [tokenAddress, tokens]
   );
+  const walletBalance = useReadContract({
+    address: selectedToken?.address,
+    abi: erc20Abi,
+    functionName: "balanceOf",
+    args: address ? [address] : undefined,
+    query: {
+      enabled: Boolean(address && selectedToken),
+      refetchInterval: 10_000,
+    },
+  });
 
   const disabled = !connected || !address || !initiaAddress || !selectedToken;
 
@@ -73,7 +84,7 @@ export function VaultPanel({
       throw new Error("Connect your Initia wallet first.");
     }
 
-    return requestTxBlock({
+    const result = await requestTxBlock({
       chainId: SINERGY_ROLLUP_CHAIN_ID,
       messages: [
         {
@@ -89,6 +100,12 @@ export function VaultPanel({
         },
       ],
     });
+
+    if (result.code !== 0) {
+      throw new Error(result.rawLog || "Transaction reverted on Sinergy.");
+    }
+
+    return result;
   }
 
   async function handleDeposit() {
@@ -97,6 +114,19 @@ export function VaultPanel({
 
     try {
       const amountAtomic = parseUnits(amount, selectedToken.decimals);
+      if (amountAtomic <= 0n) {
+        throw new Error("Enter a positive amount to deposit.");
+      }
+
+      const availableWalletBalance = walletBalance.data ?? 0n;
+      if (amountAtomic > availableWalletBalance) {
+        throw new Error(
+          `Insufficient ${selectedToken.symbol} wallet balance. You have ${formatUnits(
+            availableWalletBalance,
+            selectedToken.decimals
+          )} ${selectedToken.symbol} available.`
+        );
+      }
 
       await submitMsgCall(
         selectedToken.address,
@@ -132,6 +162,7 @@ export function VaultPanel({
       });
 
       await onAfterMutation();
+      await walletBalance.refetch();
       setStatus("Deposit synced ✓");
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err));
@@ -142,8 +173,17 @@ export function VaultPanel({
     if (!selectedToken || !address || !initiaAddress) return;
     setStatus("Requesting withdrawal…");
 
+    let quote:
+      | {
+          nonce: number;
+          deadline: number;
+          signature: Hex;
+        }
+      | undefined;
+    let broadcasted = false;
+
     try {
-      const quote = await api<{ nonce: number; deadline: number; signature: Hex }>(
+      quote = await api<{ nonce: number; deadline: number; signature: Hex }>(
         "/vault/withdrawal-quote",
         {
           method: "POST",
@@ -171,6 +211,7 @@ export function VaultPanel({
           ],
         })
       );
+      broadcasted = true;
 
       const logs = decodeMsgCallLogs(withdrawTx.msgResponses);
       if (logs.length === 0) {
@@ -189,6 +230,21 @@ export function VaultPanel({
       await onAfterMutation();
       setStatus("Withdrawal settled ✓");
     } catch (err) {
+      if (!broadcasted && quote && selectedToken && address) {
+        try {
+          await api("/vault/cancel-withdrawal", {
+            method: "POST",
+            body: JSON.stringify({
+              userAddress: address,
+              token: selectedToken.address,
+              nonce: quote.nonce,
+            }),
+          });
+          await onAfterMutation();
+        } catch {
+          // Preserve the original error and avoid masking the failed withdrawal reason.
+        }
+      }
       setStatus(err instanceof Error ? err.message : String(err));
     }
   }
@@ -247,6 +303,23 @@ export function VaultPanel({
           />
           <span className="tt-input-suffix">{selectedToken?.symbol ?? "TOKEN"}</span>
         </div>
+
+        {selectedToken && address ? (
+          <div
+            style={{
+              color: "var(--text-tertiary)",
+              fontSize: 12,
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            Wallet balance:{" "}
+            {walletBalance.data !== undefined
+              ? `${formatUnits(walletBalance.data, selectedToken.decimals)} ${selectedToken.symbol}`
+              : walletBalance.isLoading
+                ? "Loading..."
+                : "Unavailable"}
+          </div>
+        ) : null}
 
         <div className="vault-actions">
           {mode === "deposit" ? (

@@ -12,6 +12,7 @@ import { InitiaDexClient } from "./initiaDex.js";
 import { BridgeHealthService } from "./bridgeHealth.js";
 import { StateStore } from "./state.js";
 import { addAtomic, getAtomic, keyOf, nowIso, scaleAtomic } from "./routerUtils.js";
+import { VaultService } from "./vault.js";
 
 type RouterDeps = {
   store: StateStore;
@@ -20,6 +21,7 @@ type RouterDeps = {
   inventoryService: InventoryService;
   initiaDexClient: InitiaDexClient;
   bridgeHealthService: BridgeHealthService;
+  vaultService: VaultService;
   quoteSpreadBps: number;
   maxLocalFillUsd: number;
 };
@@ -63,7 +65,14 @@ export class LiquidityRouter {
     const amountAtomic = parseUnits(input.amount, fromToken.decimals);
     const l1DexAtomic = await this.simulateOnL1(routeConfig, fromToken, toToken, amountAtomic);
     const spreadAdjusted = (l1DexAtomic * BigInt(10_000 - this.deps.quoteSpreadBps)) / 10_000n;
-    const localInventoryAtomic = this.deps.inventoryService.getLocalCapacity(toToken.symbol);
+    const [configuredInventoryAtomic, onchainInventoryAtomic] = await Promise.all([
+      Promise.resolve(this.deps.inventoryService.getLocalCapacity(toToken.symbol)),
+      this.deps.vaultService.getMatcherWalletBalance(toToken.address)
+    ]);
+    const localInventoryAtomic =
+      configuredInventoryAtomic < onchainInventoryAtomic
+        ? configuredInventoryAtomic
+        : onchainInventoryAtomic;
     const withinNotional = this.withinMaxLocalFill(market, fromToken, amountAtomic);
 
     let mode: RouteMode = "async_rebalance_required";
@@ -111,6 +120,13 @@ export class LiquidityRouter {
     }
 
     if (quote.mode === "instant_local") {
+      await this.deps.vaultService.settleInstantLocalSwap({
+        inputToken: fromToken.address,
+        outputToken: toToken.address,
+        inputAmountAtomic: amountAtomic,
+        outputAmountAtomic: BigInt(quote.minOutAtomic)
+      });
+
       this.deps.store.mutate((state) => {
         addAtomic(state.balances, input.userAddress, fromToken.address, -amountAtomic);
         addAtomic(state.balances, input.userAddress, toToken.address, BigInt(quote.minOutAtomic));

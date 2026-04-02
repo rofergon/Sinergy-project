@@ -5,6 +5,7 @@ import type { AppState } from "../types.js";
 const EMPTY_STATE: AppState = {
   balances: {},
   locked: {},
+  bridgeClaims: {},
   orders: [],
   processedDeposits: [],
   processedWithdrawals: [],
