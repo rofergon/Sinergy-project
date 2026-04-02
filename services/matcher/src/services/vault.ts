@@ -9,7 +9,7 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { SinergyDeployment } from "@sinergy/shared";
-import { createSinergyChain, erc20Abi } from "@sinergy/shared";
+import { createSinergyChain, darkVaultV2Abi, erc20Abi } from "@sinergy/shared";
 import type { PendingWithdrawal, ResolvedMarket, ResolvedToken } from "../types.js";
 import { StateStore } from "./state.js";
 import { darkPoolVaultAbi } from "./deployment.js";
@@ -66,6 +66,10 @@ export class VaultService {
     private readonly tokens: Map<string, ResolvedToken>,
     private readonly markets: ResolvedMarket[]
   ) {}
+
+  getAvailableBalance(userAddress: Address, token: Address) {
+    return BigInt(readBucket(this.store.get().balances, userAddress)[keyOf(token)] ?? "0");
+  }
 
   private async sendMatcherTransaction(to: Address, data: Hex) {
     const matcherAccount = this.walletClient.account as Account | undefined;
@@ -250,29 +254,38 @@ export class VaultService {
       }
 
       const executionLogs = await this.resolveExecutionLogs(txHash, logs);
-      const parsedLogs = parseEventLogs({
+      const parsedLegacyLogs = parseEventLogs({
         abi: darkPoolVaultAbi,
         eventName: "Deposit",
         logs: executionLogs as any
       });
+      const parsedZkLogs = parseEventLogs({
+        abi: darkVaultV2Abi,
+        eventName: "Deposit",
+        logs: executionLogs as any
+      });
 
-      const depositLog = parsedLogs.find((log) => isAddressEqual(log.args.user!, userAddress));
-      if (!depositLog) {
+      const legacyDepositLog = parsedLegacyLogs.find((log) =>
+        isAddressEqual(log.args.user!, userAddress)
+      );
+      const zkDepositLog = parsedZkLogs.find((log) =>
+        isAddressEqual(log.args.depositor!, userAddress)
+      );
+      const token = legacyDepositLog?.args.token ?? zkDepositLog?.args.token;
+      const amount = legacyDepositLog?.args.amount ?? zkDepositLog?.args.amount;
+
+      if (!token || amount === undefined) {
         throw new Error("No vault deposit event found for this user");
       }
 
-      addAtomic(
-        state.balances,
-        userAddress,
-        depositLog.args.token!,
-        BigInt(depositLog.args.amount!.toString())
-      );
+      addAtomic(state.balances, userAddress, token, BigInt(amount.toString()));
       state.processedDeposits.push(txKey);
 
       return {
         alreadyProcessed: false,
-        token: this.tokens.get(depositLog.args.token!.toLowerCase())?.symbol ?? depositLog.args.token,
-        amountAtomic: depositLog.args.amount!.toString()
+        token: this.tokens.get(token.toLowerCase())?.symbol ?? token,
+        amountAtomic: amount.toString(),
+        mode: zkDepositLog ? "zk" : "legacy"
       };
     });
   }
@@ -383,34 +396,64 @@ export class VaultService {
       }
 
       const executionLogs = await this.resolveExecutionLogs(txHash, logs);
-      const parsedLogs = parseEventLogs({
+      const parsedLegacyLogs = parseEventLogs({
         abi: darkPoolVaultAbi,
         eventName: "Withdraw",
         logs: executionLogs as any
       });
+      const parsedZkLogs = parseEventLogs({
+        abi: darkVaultV2Abi,
+        eventName: "Withdraw",
+        logs: executionLogs as any
+      });
 
-      const withdrawLog = parsedLogs.find((log) => isAddressEqual(log.args.recipient!, userAddress));
-      if (!withdrawLog) {
+      const legacyWithdrawLog = parsedLegacyLogs.find((log) =>
+        isAddressEqual(log.args.recipient!, userAddress)
+      );
+      const zkWithdrawLog = parsedZkLogs.find((log) =>
+        isAddressEqual(log.args.recipient!, userAddress)
+      );
+
+      if (!legacyWithdrawLog && !zkWithdrawLog) {
         throw new Error("No vault withdrawal event found for this user");
       }
 
-      const nonce = Number(withdrawLog.args.nonce);
-      const pendingIndex = state.pendingWithdrawals.findIndex(
-        (item) =>
-          item.userAddress.toLowerCase() === userAddress.toLowerCase() &&
-          item.nonce === nonce
-      );
+      let nonce: number | undefined;
+      let nullifier: Hex | undefined;
 
-      if (pendingIndex >= 0) {
-        const pending = state.pendingWithdrawals[pendingIndex];
-        addAtomic(state.locked, pending.userAddress, pending.token, -BigInt(pending.amountAtomic));
-        state.pendingWithdrawals.splice(pendingIndex, 1);
+      if (legacyWithdrawLog) {
+        nonce = Number(legacyWithdrawLog.args.nonce);
+        const pendingIndex = state.pendingWithdrawals.findIndex(
+          (item) =>
+            item.userAddress.toLowerCase() === userAddress.toLowerCase() &&
+            item.nonce === nonce
+        );
+
+        if (pendingIndex >= 0) {
+          const pending = state.pendingWithdrawals[pendingIndex];
+          addAtomic(state.locked, pending.userAddress, pending.token, -BigInt(pending.amountAtomic));
+          state.pendingWithdrawals.splice(pendingIndex, 1);
+        }
+      }
+
+      if (zkWithdrawLog) {
+        const amount = BigInt(zkWithdrawLog.args.amount!.toString());
+        const token = zkWithdrawLog.args.token!;
+        const available = BigInt(readBucket(state.balances, userAddress)[keyOf(token)] ?? "0");
+        if (available < amount) {
+          throw new Error("Insufficient internal balance to sync ZK withdrawal");
+        }
+
+        addAtomic(state.balances, userAddress, token, -amount);
+        nullifier = zkWithdrawLog.args.nullifier!;
       }
 
       state.processedWithdrawals.push(txKey);
       return {
         alreadyProcessed: false,
-        nonce
+        nonce,
+        nullifier,
+        mode: zkWithdrawLog ? "zk" : "legacy"
       };
     });
   }
