@@ -86,13 +86,32 @@ function runtimeWsUrl(port: number, subdomain?: string) {
 }
 
 export const SINERGY_ROLLUP_CHAIN_ID = deployment.network.rollupChainId;
-export const SINERGY_BRIDGE_SOURCE_CHAIN_ID =
-  import.meta.env.VITE_BRIDGE_SRC_CHAIN_ID ?? "initiation-2";
-export const SINERGY_BRIDGE_SOURCE_DENOM =
-  import.meta.env.VITE_BRIDGE_SRC_DENOM ?? "uinit";
 export const SINERGY_BRIDGE_ID = BigInt(import.meta.env.VITE_SINERGY_BRIDGE_ID ?? "1735");
+export const SINERGY_BRIDGE_ASSETS = deployment.tokens
+  .filter((token) => token.bridge)
+  .map((token) => ({
+    tokenSymbol: token.symbol,
+    tokenName: token.name,
+    sourceChainId:
+      token.bridge?.sourceChainId ??
+      import.meta.env.VITE_BRIDGE_SRC_CHAIN_ID ??
+      deployment.network.l1ChainId,
+    sourceDenom: token.bridge?.sourceDenom ?? import.meta.env.VITE_BRIDGE_SRC_DENOM ?? "uinit",
+    sourceSymbol: token.bridge?.sourceSymbol ?? token.symbol,
+    sourceDecimals: token.bridge?.sourceDecimals ?? 6,
+    destinationDenom:
+      token.bridge?.destinationDenom ??
+      import.meta.env.VITE_SINERGY_BRIDGE_DST_DENOM ??
+      "l2/7835b9ce5f65720a12cd653306cfe00afb93dcf1b73e69eb5eeddc568fc455cf",
+  }));
+export const DEFAULT_SINERGY_BRIDGE_ASSET =
+  SINERGY_BRIDGE_ASSETS.find((asset) => asset.tokenSymbol === "cINIT") ?? SINERGY_BRIDGE_ASSETS[0];
+export const SINERGY_BRIDGE_SOURCE_CHAIN_ID =
+  DEFAULT_SINERGY_BRIDGE_ASSET?.sourceChainId ?? deployment.network.l1ChainId;
+export const SINERGY_BRIDGE_SOURCE_DENOM =
+  DEFAULT_SINERGY_BRIDGE_ASSET?.sourceDenom ?? "uinit";
 export const SINERGY_BRIDGE_DESTINATION_DENOM =
-  import.meta.env.VITE_SINERGY_BRIDGE_DST_DENOM ??
+  DEFAULT_SINERGY_BRIDGE_ASSET?.destinationDenom ??
   "l2/7835b9ce5f65720a12cd653306cfe00afb93dcf1b73e69eb5eeddc568fc455cf";
 
 export function buildBridgeDefaults() {
@@ -100,6 +119,13 @@ export function buildBridgeDefaults() {
     srcChainId: SINERGY_BRIDGE_SOURCE_CHAIN_ID,
     srcDenom: SINERGY_BRIDGE_SOURCE_DENOM,
   };
+}
+
+export function resolveBridgeAsset(tokenSymbol?: string) {
+  return (
+    SINERGY_BRIDGE_ASSETS.find((asset) => asset.tokenSymbol === tokenSymbol) ??
+    DEFAULT_SINERGY_BRIDGE_ASSET
+  );
 }
 
 export function buildInterwovenCustomChain() {
