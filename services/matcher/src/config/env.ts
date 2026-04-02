@@ -35,7 +35,8 @@ const envSchema = z.object({
   ROUTER_REBALANCE_INTERVAL_MS: z.coerce.number().int().positive().default(15_000),
   ROUTER_CANONICAL_ASSETS_JSON: z.string().default("{}"),
   ROUTER_MARKETS_JSON: z.string().default("{}"),
-  ROUTER_BOOTSTRAP_INVENTORY_JSON: z.string().default("{}")
+  ROUTER_BOOTSTRAP_INVENTORY_JSON: z.string().default("{}"),
+  ZK_WITHDRAWAL_PACKAGE_FILE: z.string().optional()
 });
 
 export const env = envSchema.parse(process.env);
