@@ -4,7 +4,7 @@
 
 Explain the architecture of `Sinergy` and describe how privacy works in the project today, what is already protected, what is still exposed, and how the system is evolving toward stronger confidentiality.
 
-This document is intentionally more explanatory than [privacy-engine-design.md](/home/sari/Sinergy-project/docs/privacy-engine-design.md). That design doc is the implementation blueprint. This document is the architectural overview.
+This document is intentionally more explanatory than [privacy-engine-design.md](./privacy-engine-design.md). That design doc is the implementation blueprint. This document is the architectural overview.
 
 ## One-Sentence Summary
 
@@ -63,9 +63,9 @@ The frontend in `apps/web` is responsible for:
 
 Relevant files:
 
-- [App.tsx](/home/sari/Sinergy-project/apps/web/src/App.tsx)
-- [VaultPanel.tsx](/home/sari/Sinergy-project/apps/web/src/components/VaultPanel.tsx)
-- [PortfolioView.tsx](/home/sari/Sinergy-project/apps/web/src/components/PortfolioView.tsx)
+- [App.tsx](../apps/web/src/App.tsx)
+- [VaultPanel.tsx](../apps/web/src/components/VaultPanel.tsx)
+- [PortfolioView.tsx](../apps/web/src/components/PortfolioView.tsx)
 
 ### 2. Matcher Service
 
@@ -83,11 +83,11 @@ It handles:
 
 Relevant files:
 
-- [index.ts](/home/sari/Sinergy-project/services/matcher/src/index.ts)
-- [vault.ts](/home/sari/Sinergy-project/services/matcher/src/services/vault.ts)
-- [router.ts](/home/sari/Sinergy-project/services/matcher/src/services/router.ts)
-- [initiaDex.ts](/home/sari/Sinergy-project/services/matcher/src/services/initiaDex.ts)
-- [zkProofs.ts](/home/sari/Sinergy-project/services/matcher/src/services/zkProofs.ts)
+- [index.ts](../services/matcher/src/index.ts)
+- [vault.ts](../services/matcher/src/services/vault.ts)
+- [router.ts](../services/matcher/src/services/router.ts)
+- [initiaDex.ts](../services/matcher/src/services/initiaDex.ts)
+- [zkProofs.ts](../services/matcher/src/services/zkProofs.ts)
 
 ### 3. On-Chain Contracts
 
@@ -102,11 +102,11 @@ There are now two logical generations in the repo:
 
 Relevant files:
 
-- [DarkPoolVault.sol](/home/sari/Sinergy-project/contracts/src/DarkPoolVault.sol)
-- [DarkPoolMarket.sol](/home/sari/Sinergy-project/contracts/src/DarkPoolMarket.sol)
-- [DarkVaultV2.sol](/home/sari/Sinergy-project/contracts/src/DarkVaultV2.sol)
-- [DarkStateAnchor.sol](/home/sari/Sinergy-project/contracts/src/DarkStateAnchor.sol)
-- [Groth16WithdrawalVerifier.sol](/home/sari/Sinergy-project/contracts/src/Groth16WithdrawalVerifier.sol)
+- [DarkPoolVault.sol](../contracts/src/DarkPoolVault.sol)
+- [DarkPoolMarket.sol](../contracts/src/DarkPoolMarket.sol)
+- [DarkVaultV2.sol](../contracts/src/DarkVaultV2.sol)
+- [DarkStateAnchor.sol](../contracts/src/DarkStateAnchor.sol)
+- [Groth16WithdrawalVerifier.sol](../contracts/src/Groth16WithdrawalVerifier.sol)
 
 ### 4. Initia L1 Liquidity Layer
 
@@ -114,7 +114,7 @@ Relevant files:
 
 Relevant doc:
 
-- [initia-dex-liquidity-routing.md](/home/sari/Sinergy-project/docs/initia-dex-liquidity-routing.md)
+- [initia-dex-liquidity-routing.md](./initia-dex-liquidity-routing.md)
 
 ## How Privacy Works
 
@@ -419,20 +419,20 @@ The privacy roadmap is cumulative.
 
 If someone wants to understand the project quickly, the best reading order is:
 
-1. [architecture.md](/home/sari/Sinergy-project/docs/architecture.md)
-2. [privacy-architecture.md](/home/sari/Sinergy-project/docs/privacy-architecture.md)
-3. [privacy-engine-design.md](/home/sari/Sinergy-project/docs/privacy-engine-design.md)
-4. [initia-dex-liquidity-routing.md](/home/sari/Sinergy-project/docs/initia-dex-liquidity-routing.md)
-5. [zk-withdrawal-runbook.md](/home/sari/Sinergy-project/docs/zk-withdrawal-runbook.md)
+1. [architecture.md](./architecture.md)
+2. [privacy-architecture.md](./privacy-architecture.md)
+3. [privacy-engine-design.md](./privacy-engine-design.md)
+4. [initia-dex-liquidity-routing.md](./initia-dex-liquidity-routing.md)
+5. [zk-withdrawal-runbook.md](./zk-withdrawal-runbook.md)
 
 ## Relevant Source Files
 
-- [deployments/testnet.json](/home/sari/Sinergy-project/deployments/testnet.json)
-- [DarkPoolVault.sol](/home/sari/Sinergy-project/contracts/src/DarkPoolVault.sol)
-- [DarkVaultV2.sol](/home/sari/Sinergy-project/contracts/src/DarkVaultV2.sol)
-- [DarkStateAnchor.sol](/home/sari/Sinergy-project/contracts/src/DarkStateAnchor.sol)
-- [Groth16WithdrawalVerifier.sol](/home/sari/Sinergy-project/contracts/src/Groth16WithdrawalVerifier.sol)
-- [VaultPanel.tsx](/home/sari/Sinergy-project/apps/web/src/components/VaultPanel.tsx)
-- [vault.ts](/home/sari/Sinergy-project/services/matcher/src/services/vault.ts)
-- [router.ts](/home/sari/Sinergy-project/services/matcher/src/services/router.ts)
-- [initiaDex.ts](/home/sari/Sinergy-project/services/matcher/src/services/initiaDex.ts)
+- [deployments/testnet.json](../deployments/testnet.json)
+- [DarkPoolVault.sol](../contracts/src/DarkPoolVault.sol)
+- [DarkVaultV2.sol](../contracts/src/DarkVaultV2.sol)
+- [DarkStateAnchor.sol](../contracts/src/DarkStateAnchor.sol)
+- [Groth16WithdrawalVerifier.sol](../contracts/src/Groth16WithdrawalVerifier.sol)
+- [VaultPanel.tsx](../apps/web/src/components/VaultPanel.tsx)
+- [vault.ts](../services/matcher/src/services/vault.ts)
+- [router.ts](../services/matcher/src/services/router.ts)
+- [initiaDex.ts](../services/matcher/src/services/initiaDex.ts)

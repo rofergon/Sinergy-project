@@ -6,10 +6,10 @@ Run the first real `Groth16` withdrawal pipeline for `DarkVaultV2`.
 
 This runbook assumes:
 
-- [DarkVaultV2.sol](/home/sari/Sinergy-project/contracts/src/DarkVaultV2.sol) is deployed
-- [DarkStateAnchor.sol](/home/sari/Sinergy-project/contracts/src/DarkStateAnchor.sol) is deployed
-- [Groth16WithdrawalVerifier.sol](/home/sari/Sinergy-project/contracts/src/Groth16WithdrawalVerifier.sol) is deployed
-- the withdrawal circuit source exists at [circuits/withdrawal.circom](/home/sari/Sinergy-project/circuits/withdrawal.circom)
+- [DarkVaultV2.sol](../contracts/src/DarkVaultV2.sol) is deployed
+- [DarkStateAnchor.sol](../contracts/src/DarkStateAnchor.sol) is deployed
+- [Groth16WithdrawalVerifier.sol](../contracts/src/Groth16WithdrawalVerifier.sol) is deployed
+- the withdrawal circuit source exists at [circuits/withdrawal.circom](../circuits/withdrawal.circom)
 
 ## Public Inputs
 

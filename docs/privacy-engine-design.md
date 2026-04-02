@@ -21,9 +21,9 @@ Into a stronger model where:
 
 Today the system already has three useful building blocks:
 
-1. `Sinergy-2` `MiniEVM` rollup running on testnet and configured in [deployments/testnet.json](/home/sari/Sinergy-project/deployments/testnet.json)
-2. `DarkPoolVault` for on-chain custody in [DarkPoolVault.sol](/home/sari/Sinergy-project/contracts/src/DarkPoolVault.sol)
-3. `Initia L1` liquidity routing in [initia-dex-liquidity-routing.md](/home/sari/Sinergy-project/docs/initia-dex-liquidity-routing.md)
+1. `Sinergy-2` `MiniEVM` rollup running on testnet and configured in [deployments/testnet.json](../deployments/testnet.json)
+2. `DarkPoolVault` for on-chain custody in [DarkPoolVault.sol](../contracts/src/DarkPoolVault.sol)
+3. `Initia L1` liquidity routing in [initia-dex-liquidity-routing.md](./initia-dex-liquidity-routing.md)
 
 Current trust assumptions are still strong:
 
@@ -385,7 +385,7 @@ Deliverables:
 
 Current:
 
-- [DarkPoolVault.sol](/home/sari/Sinergy-project/contracts/src/DarkPoolVault.sol)
+- [DarkPoolVault.sol](../contracts/src/DarkPoolVault.sol)
 - `DarkPoolMarket`
 
 Proposed:
@@ -398,9 +398,9 @@ Proposed:
 
 Current:
 
-- [vault.ts](/home/sari/Sinergy-project/services/matcher/src/services/vault.ts)
-- [router.ts](/home/sari/Sinergy-project/services/matcher/src/services/router.ts)
-- [initiaDex.ts](/home/sari/Sinergy-project/services/matcher/src/services/initiaDex.ts)
+- [vault.ts](../services/matcher/src/services/vault.ts)
+- [router.ts](../services/matcher/src/services/router.ts)
+- [initiaDex.ts](../services/matcher/src/services/initiaDex.ts)
 
 Proposed split:
 
@@ -520,10 +520,10 @@ That path significantly improves the technical quality of the protocol without f
 
 ## References Inside This Repo
 
-- [deployments/testnet.json](/home/sari/Sinergy-project/deployments/testnet.json)
-- [architecture.md](/home/sari/Sinergy-project/docs/architecture.md)
-- [initia-dex-liquidity-routing.md](/home/sari/Sinergy-project/docs/initia-dex-liquidity-routing.md)
-- [DarkPoolVault.sol](/home/sari/Sinergy-project/contracts/src/DarkPoolVault.sol)
-- [vault.ts](/home/sari/Sinergy-project/services/matcher/src/services/vault.ts)
-- [router.ts](/home/sari/Sinergy-project/services/matcher/src/services/router.ts)
-- [initiaDex.ts](/home/sari/Sinergy-project/services/matcher/src/services/initiaDex.ts)
+- [deployments/testnet.json](../deployments/testnet.json)
+- [architecture.md](./architecture.md)
+- [initia-dex-liquidity-routing.md](./initia-dex-liquidity-routing.md)
+- [DarkPoolVault.sol](../contracts/src/DarkPoolVault.sol)
+- [vault.ts](../services/matcher/src/services/vault.ts)
+- [router.ts](../services/matcher/src/services/router.ts)
+- [initiaDex.ts](../services/matcher/src/services/initiaDex.ts)
