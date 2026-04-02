@@ -5,10 +5,10 @@ import type { Address } from "viem";
 import { formatUnits, parseUnits } from "viem";
 import { api } from "../lib/api";
 import {
-  SINERGY_BRIDGE_DESTINATION_DENOM,
+  DEFAULT_SINERGY_BRIDGE_ASSET,
   SINERGY_BRIDGE_ID,
-  SINERGY_BRIDGE_SOURCE_CHAIN_ID,
-  SINERGY_BRIDGE_SOURCE_DENOM,
+  SINERGY_BRIDGE_ASSETS,
+  resolveBridgeAsset,
   resolveRollupRestUrl,
 } from "../initia";
 
@@ -23,12 +23,17 @@ type Props = {
 };
 
 type BridgeClaimPreview = {
-  initiaAddress: string;
-  evmAddress?: Address;
-  bridgeDenom: string;
   tokenSymbol: string;
+  tokenName: string;
   tokenAddress: Address;
   tokenDecimals: number;
+  sourceChainId: string;
+  sourceDenom: string;
+  sourceSymbol: string;
+  sourceDecimals: number;
+  destinationDenom: string;
+  initiaAddress: string;
+  evmAddress?: Address;
   observedBalanceAtomic: string;
   claimedAtomic: string;
   claimableAtomic: string;
@@ -48,14 +53,14 @@ function formatClaimableLabel(preview: BridgeClaimPreview | null, initiaAddress?
   const claimedAtomic = BigInt(preview.claimedAtomic);
 
   if (claimableAtomic > 0n) {
-    return `${formatUnits(claimableAtomic, 6)} INIT`;
+    return `${formatUnits(claimableAtomic, preview.sourceDecimals)} ${preview.sourceSymbol}`;
   }
 
   if (observedAtomic > 0n && claimedAtomic >= observedAtomic) {
-    return `0 INIT (already claimed)`;
+    return `0 ${preview.sourceSymbol} (already claimed)`;
   }
 
-  return "0 INIT";
+  return `0 ${preview.sourceSymbol}`;
 }
 
 function formatMintableLabel(preview: BridgeClaimPreview | null) {
@@ -137,6 +142,9 @@ export function BridgeLanding({
 }: Props) {
   const { requestTxBlock } = useInterwovenKit();
   const [amount, setAmount] = useState("1");
+  const [selectedBridgeAssetSymbol, setSelectedBridgeAssetSymbol] = useState(
+    DEFAULT_SINERGY_BRIDGE_ASSET?.tokenSymbol ?? "cINIT"
+  );
   const [bridgeStatus, setBridgeStatus] = useState("");
   const [txHash, setTxHash] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -147,11 +155,15 @@ export function BridgeLanding({
   const [redeemStatus, setRedeemStatus] = useState("");
   const [isRedeeming, setIsRedeeming] = useState(false);
   const rollupRestUrl = useMemo(() => resolveRollupRestUrl(), []);
+  const selectedBridgeAsset = useMemo(
+    () => resolveBridgeAsset(selectedBridgeAssetSymbol),
+    [selectedBridgeAssetSymbol]
+  );
 
-  async function waitForBridgeCredit(address: string, expectedIncrease: bigint) {
+  async function waitForBridgeCredit(address: string, expectedIncrease: bigint, destinationDenom: string) {
     const startingBalance = await queryRollupBalance(
       address,
-      SINERGY_BRIDGE_DESTINATION_DENOM,
+      destinationDenom,
       rollupRestUrl
     );
 
@@ -159,7 +171,7 @@ export function BridgeLanding({
       await new Promise((resolve) => window.setTimeout(resolve, 3_000));
       const currentBalance = await queryRollupBalance(
         address,
-        SINERGY_BRIDGE_DESTINATION_DENOM,
+        destinationDenom,
         rollupRestUrl
       );
 
@@ -182,13 +194,17 @@ export function BridgeLanding({
       setTxHash("");
       setBridgeStatus("Preparing deposit to Sinergy...");
 
-      const amountAtomic = parseUnits(amount, 6);
+      const bridgeAsset = selectedBridgeAsset;
+      if (!bridgeAsset) {
+        throw new Error("No bridge-backed asset is configured for this deployment.");
+      }
+      const amountAtomic = parseUnits(amount, bridgeAsset.sourceDecimals);
       if (amountAtomic <= 0n) {
-        throw new Error("Enter a positive INIT amount.");
+        throw new Error(`Enter a positive ${bridgeAsset.sourceSymbol} amount.`);
       }
 
       const result = await requestTxBlock({
-        chainId: SINERGY_BRIDGE_SOURCE_CHAIN_ID,
+        chainId: bridgeAsset.sourceChainId,
         gas: 250_000,
         messages: [
           {
@@ -198,7 +214,7 @@ export function BridgeLanding({
               bridgeId: SINERGY_BRIDGE_ID,
               to: initiaAddress,
               amount: {
-                denom: SINERGY_BRIDGE_SOURCE_DENOM,
+                denom: bridgeAsset.sourceDenom,
                 amount: amountAtomic.toString(),
               },
               data: new Uint8Array(0),
@@ -220,11 +236,15 @@ export function BridgeLanding({
         : null;
 
       setBridgeStatus("Deposit submitted. Waiting for Sinergy balance...");
-      const creditedBalance = await waitForBridgeCredit(initiaAddress, amountAtomic);
+      const creditedBalance = await waitForBridgeCredit(
+        initiaAddress,
+        amountAtomic,
+        bridgeAsset.destinationDenom
+      );
 
       if (creditedBalance !== null) {
         setBridgeStatus(
-          `Bridge complete. ${amount} INIT arrived on Sinergy${
+          `Bridge complete. ${amount} ${bridgeAsset.sourceSymbol} arrived on Sinergy${
             sequence ? ` (deposit #${sequence})` : ""
           }.`
         );
@@ -232,7 +252,7 @@ export function BridgeLanding({
       }
 
       setBridgeStatus(
-        `Deposit submitted${sequence ? ` as #${sequence}` : ""}. Funds can take a short moment to appear on Sinergy.`
+        `Deposit submitted${sequence ? ` as #${sequence}` : ""}. ${bridgeAsset.sourceSymbol} can take a short moment to appear on Sinergy.`
       );
     } catch (error) {
       setBridgeStatus(error instanceof Error ? error.message : String(error));
@@ -241,7 +261,7 @@ export function BridgeLanding({
     }
   }
 
-  async function refreshClaimPreview(nextInitiaAddress = initiaAddress) {
+  async function refreshClaimPreview(nextInitiaAddress = initiaAddress, nextTokenSymbol = selectedBridgeAssetSymbol) {
     setClaimStatus("");
     setRedeemStatus("");
 
@@ -253,7 +273,7 @@ export function BridgeLanding({
     try {
       const search = address ? `?evmAddress=${encodeURIComponent(address)}` : "";
       const preview = await api<BridgeClaimPreview>(
-        `/bridge/claimable/${encodeURIComponent(nextInitiaAddress)}${search}`
+        `/bridge/claimable/${encodeURIComponent(nextTokenSymbol)}/${encodeURIComponent(nextInitiaAddress)}${search}`
       );
       setClaimPreview(preview);
       if (
@@ -262,7 +282,7 @@ export function BridgeLanding({
         BigInt(preview.claimedAtomic) >= BigInt(preview.observedBalanceAtomic)
       ) {
         setClaimStatus(
-          `All bridged INIT for this Initia address has already been claimed as ${preview.tokenSymbol}. You can continue to vault deposit.`
+          `All bridged ${preview.sourceSymbol} for this Initia address has already been claimed as ${preview.tokenSymbol}. You can continue to vault deposit.`
         );
       }
     } catch (error) {
@@ -279,13 +299,14 @@ export function BridgeLanding({
 
     try {
       setIsClaiming(true);
-      setClaimStatus("Minting cINIT from your bridged INIT...");
+      setClaimStatus(`Minting ${claimPreview?.tokenSymbol ?? selectedBridgeAssetSymbol} from your bridged balance...`);
 
       const result = await api<BridgeClaimPreview & { evmAddress: Address; txHash: string }>(
-        "/bridge/claim-cinit",
+        "/bridge/claim",
         {
           method: "POST",
           body: JSON.stringify({
+            tokenSymbol: selectedBridgeAssetSymbol,
             initiaAddress,
             evmAddress: address,
           }),
@@ -295,7 +316,7 @@ export function BridgeLanding({
       setClaimStatus(
         `Claim complete. ${formatUnits(BigInt(result.mintableAtomic), result.tokenDecimals)} ${result.tokenSymbol} minted to your EVM wallet.`
       );
-      await refreshClaimPreview(initiaAddress);
+      await refreshClaimPreview(initiaAddress, selectedBridgeAssetSymbol);
     } catch (error) {
       setClaimStatus(error instanceof Error ? error.message : String(error));
     } finally {
@@ -311,11 +332,13 @@ export function BridgeLanding({
 
     try {
       setIsRedeeming(true);
-      setRedeemStatus("Burning cINIT and reopening bridged INIT on Sinergy...");
+      setRedeemStatus(
+        `Burning ${claimPreview.tokenSymbol} and reopening bridged ${claimPreview.sourceSymbol} on Sinergy...`
+      );
 
       const amountAtomic = parseUnits(redeemAmount, claimPreview.tokenDecimals);
       if (amountAtomic <= 0n) {
-        throw new Error("Enter a positive cINIT amount to redeem.");
+        throw new Error(`Enter a positive ${claimPreview.tokenSymbol} amount to redeem.`);
       }
 
       const result = await api<
@@ -325,9 +348,10 @@ export function BridgeLanding({
           releasedBridgeAtomic: string;
           burnedTokenAtomic: string;
         }
-      >("/bridge/redeem-cinit", {
+      >("/bridge/redeem", {
         method: "POST",
         body: JSON.stringify({
+          tokenSymbol: selectedBridgeAssetSymbol,
           initiaAddress,
           evmAddress: address,
           amountAtomic: amountAtomic.toString(),
@@ -337,10 +361,10 @@ export function BridgeLanding({
       setRedeemStatus(
         `Redeem complete. ${formatUnits(
           BigInt(result.releasedBridgeAtomic),
-          6
-        )} INIT is available again as bridged balance on Sinergy.`
+          result.sourceDecimals
+        )} ${result.sourceSymbol} is available again as bridged balance on Sinergy.`
       );
-      await refreshClaimPreview(initiaAddress);
+      await refreshClaimPreview(initiaAddress, selectedBridgeAssetSymbol);
     } catch (error) {
       setRedeemStatus(error instanceof Error ? error.message : String(error));
     } finally {
@@ -350,7 +374,7 @@ export function BridgeLanding({
 
   useEffect(() => {
     void refreshClaimPreview();
-  }, [initiaAddress]);
+  }, [initiaAddress, selectedBridgeAssetSymbol]);
 
   return (
     <div className="bridge-page">
@@ -397,13 +421,32 @@ export function BridgeLanding({
           <div className="bridge-direct-card">
             <div className="bridge-direct-head">
               <strong>Direct deposit to Sinergy</strong>
-              <span>{SINERGY_BRIDGE_SOURCE_CHAIN_ID}</span>
+              <span>{selectedBridgeAsset?.sourceChainId ?? "initiation-2"}</span>
             </div>
 
             <p className="bridge-direct-copy">
               This path skips destination discovery in the public bridge UI and signs the OPinit
               deposit directly with InterwovenKit.
             </p>
+
+            {SINERGY_BRIDGE_ASSETS.length > 1 ? (
+              <label className="bridge-direct-field">
+                <span>Bridge asset</span>
+                <div className="tt-input-wrap">
+                  <select
+                    value={selectedBridgeAssetSymbol}
+                    onChange={(event) => setSelectedBridgeAssetSymbol(event.target.value)}
+                    disabled={isSubmitting || isClaiming || isRedeeming}
+                  >
+                    {SINERGY_BRIDGE_ASSETS.map((asset) => (
+                      <option key={asset.tokenSymbol} value={asset.tokenSymbol}>
+                        {asset.tokenSymbol} ({asset.sourceSymbol})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </label>
+            ) : null}
 
             <div className="bridge-direct-grid">
               <label className="bridge-direct-field">
@@ -418,7 +461,7 @@ export function BridgeLanding({
                     onChange={(event) => setAmount(event.target.value)}
                     disabled={isSubmitting}
                   />
-                  <strong>{SINERGY_BRIDGE_SOURCE_DENOM.toUpperCase()}</strong>
+                  <strong>{selectedBridgeAsset?.sourceSymbol ?? "ASSET"}</strong>
                 </div>
               </label>
 
@@ -432,6 +475,7 @@ export function BridgeLanding({
 
             <div className="bridge-direct-meta">
               <span>Bridge ID {SINERGY_BRIDGE_ID.toString()}</span>
+              <span>Source denom {selectedBridgeAsset?.sourceDenom ?? "--"}</span>
               <span>Rollup REST {rollupRestUrl}</span>
             </div>
 
@@ -441,26 +485,27 @@ export function BridgeLanding({
 
           <div className="bridge-direct-card">
             <div className="bridge-direct-head">
-              <strong>Claim bridged INIT as cINIT</strong>
-              <span>{claimPreview?.tokenSymbol ?? "cINIT"}</span>
+              <strong>Claim bridged asset as connected token</strong>
+              <span>{claimPreview?.tokenSymbol ?? selectedBridgeAssetSymbol}</span>
             </div>
 
             <p className="bridge-direct-copy">
-              Once bridged INIT reaches your Initia address on Sinergy, mint the EVM-side `cINIT`
-              token so you can deposit it into the vault and route trades through the private
-              router.
+              Once bridged{" "}
+              {claimPreview?.sourceSymbol ?? selectedBridgeAsset?.sourceSymbol ?? "asset"} reaches
+              your Initia address on Sinergy, mint the connected EVM token so you can deposit it
+              into the vault and route trades through the private router.
             </p>
 
             <div className="bridge-direct-grid">
               <label className="bridge-direct-field">
-                <span>Bridged INIT available</span>
+                <span>Bridged {claimPreview?.sourceSymbol ?? selectedBridgeAsset?.sourceSymbol ?? "asset"} available</span>
                 <div className="bridge-direct-address">
                   {formatClaimableLabel(claimPreview, initiaAddress)}
                 </div>
               </label>
 
               <label className="bridge-direct-field">
-                <span>Mintable cINIT</span>
+                <span>Mintable {claimPreview?.tokenSymbol ?? selectedBridgeAssetSymbol}</span>
                 <div className="bridge-direct-address">
                   {formatMintableLabel(claimPreview)}
                 </div>
@@ -473,7 +518,7 @@ export function BridgeLanding({
                 onClick={handleClaimCinit}
                 disabled={isClaiming || !claimPreview || BigInt(claimPreview.claimableAtomic) <= 0n}
               >
-                {isClaiming ? "Claiming cINIT..." : "Claim cINIT"}
+                {isClaiming ? `Claiming ${claimPreview?.tokenSymbol ?? selectedBridgeAssetSymbol}...` : `Claim ${claimPreview?.tokenSymbol ?? selectedBridgeAssetSymbol}`}
               </button>
               <button className="bridge-secondary-btn" onClick={() => void refreshClaimPreview()}>
                 Refresh Claimable
@@ -490,23 +535,26 @@ export function BridgeLanding({
 
           <div className="bridge-direct-card">
             <div className="bridge-direct-head">
-              <strong>Redeem cINIT back to bridged INIT</strong>
-              <span>{claimPreview?.bridgeDenom ?? "l2 INIT"}</span>
+              <strong>Redeem connected token back to bridged balance</strong>
+              <span>{claimPreview?.destinationDenom ?? selectedBridgeAsset?.destinationDenom ?? "l2 asset"}</span>
             </div>
 
             <p className="bridge-direct-copy">
-              Burn wallet-side `cINIT` to reopen the same amount as bridged INIT on Sinergy. This
-              gives you the bridge-native balance again on the rollup.
+              Burn wallet-side{" "}
+              <code>{claimPreview?.tokenSymbol ?? selectedBridgeAssetSymbol}</code> to reopen the
+              same amount as bridged{" "}
+              {claimPreview?.sourceSymbol ?? selectedBridgeAsset?.sourceSymbol ?? "asset"} on
+              Sinergy.
             </p>
 
             <div className="bridge-direct-grid">
               <label className="bridge-direct-field">
-                <span>Redeemable cINIT</span>
+                <span>Redeemable {claimPreview?.tokenSymbol ?? selectedBridgeAssetSymbol}</span>
                 <div className="bridge-direct-address">{formatRedeemableLabel(claimPreview)}</div>
               </label>
 
               <label className="bridge-direct-field">
-                <span>Wallet cINIT balance</span>
+                <span>Wallet {claimPreview?.tokenSymbol ?? selectedBridgeAssetSymbol} balance</span>
                 <div className="bridge-direct-address">
                   {claimPreview
                     ? `${formatUnits(
@@ -520,7 +568,7 @@ export function BridgeLanding({
 
             <div className="bridge-direct-grid">
               <label className="bridge-direct-field">
-                <span>Market-only cINIT</span>
+                <span>Market-only {claimPreview?.tokenSymbol ?? selectedBridgeAssetSymbol}</span>
                 <div className="bridge-direct-address">{formatMarketOnlyLabel(claimPreview)}</div>
               </label>
 
@@ -537,9 +585,12 @@ export function BridgeLanding({
             </div>
 
             <p className="bridge-direct-copy">
-              `Redeemable cINIT` comes from your bridged INIT history. `Market-only cINIT` is the
-              same ERC20 token, but it was bought inside Sinergy and cannot reopen bridge-native
-              INIT by itself.
+              <code>Redeemable {claimPreview?.tokenSymbol ?? selectedBridgeAssetSymbol}</code>{" "}
+              comes from your bridged{" "}
+              {claimPreview?.sourceSymbol ?? selectedBridgeAsset?.sourceSymbol ?? "asset"} history.{" "}
+              <code>Market-only {claimPreview?.tokenSymbol ?? selectedBridgeAssetSymbol}</code> is
+              the same ERC20 token, but it was bought inside Sinergy and cannot reopen bridge-native
+              balance by itself.
             </p>
 
             <label className="bridge-direct-field">
@@ -554,9 +605,9 @@ export function BridgeLanding({
                   onChange={(event) => setRedeemAmount(event.target.value)}
                   disabled={isRedeeming}
                 />
-                <strong>{claimPreview?.tokenSymbol ?? "cINIT"}</strong>
-              </div>
-            </label>
+                  <strong>{claimPreview?.tokenSymbol ?? selectedBridgeAssetSymbol}</strong>
+                </div>
+              </label>
 
             <div className="bridge-cta-row bridge-claim-actions">
               <button
@@ -566,7 +617,9 @@ export function BridgeLanding({
                   isRedeeming || !claimPreview || BigInt(claimPreview.redeemableAtomic) <= 0n
                 }
               >
-                {isRedeeming ? "Redeeming cINIT..." : "Redeem cINIT"}
+                {isRedeeming
+                  ? `Redeeming ${claimPreview?.tokenSymbol ?? selectedBridgeAssetSymbol}...`
+                  : `Redeem ${claimPreview?.tokenSymbol ?? selectedBridgeAssetSymbol}`}
               </button>
               <button className="bridge-secondary-btn" onClick={() => void refreshClaimPreview()}>
                 Refresh Redeemable
