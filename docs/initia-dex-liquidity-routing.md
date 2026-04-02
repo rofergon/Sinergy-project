@@ -1,5 +1,19 @@
 # Initia DEX Liquidity Routing
 
+## En pocas palabras
+
+Este documento explica cuando una operacion se resuelve con inventario local dentro de `Sinergy` y cuando necesita apoyarse en liquidez externa de `Initia DEX`. La clave es que, aunque la liquidez venga de L1, para el usuario la operacion sigue sintiendose como un flujo dentro de `Sinergy`.
+
+## Cuando leer este documento
+
+Leelo si quieres entender el router, la diferencia entre rutas `local` y `dex`, o el impacto operativo de depender de liquidez externa.
+
+## Que debes recordar
+
+- `Sinergy` intenta llenar primero con inventario local cuando eso tiene sentido.
+- Si no alcanza, el matcher puede reequilibrar usando `Initia DEX`.
+- Para el usuario, la experiencia sigue siendo la de operar dentro de `Sinergy`, aunque por detras haya una ruta externa.
+
 This document explains how Sinergy can source liquidity from Initia L1 for a private trade instead of filling only from the matcher's local inventory.
 
 ## Overview

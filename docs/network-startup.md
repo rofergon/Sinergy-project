@@ -1,5 +1,19 @@
 # Network Startup
 
+## En pocas palabras
+
+Este documento es una lista de arranque operativo. Sirve para levantar `Sinergy-2`, comprobar que los servicios criticos estan vivos y validar que el bridge realmente funciona antes de exponer la red a usuarios o demos.
+
+## Cuando leer este documento
+
+Leelo cuando ya tengas la infraestructura preparada y necesites encender la red, revisar salud minima y resolver bloqueos comunes del bridge.
+
+## Que debes recordar
+
+- Primero se levanta la base, luego se valida salud minima y despues se prueba el bridge.
+- Si el bridge se atasca, normalmente hay que revisar saldo, secuencia o reiniciar el executor.
+- Este doc es operativo: esta pensado para usarse mientras la red ya esta arrancando.
+
 ## Goal
 
 Bring `Sinergy-2` up in the validated operating state:

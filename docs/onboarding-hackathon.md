@@ -1,5 +1,15 @@
 # Sinergy: Onboarding para Hackathon
 
+## Resumen rapido
+
+Este documento es la mejor puerta de entrada para entender `Sinergy` sin meterse primero en detalles tecnicos. Si alguien nuevo en el proyecto necesita captar la idea, el problema y la propuesta de valor, deberia empezar aqui.
+
+## Qué debes recordar antes de leerlo
+
+- `Sinergy` mezcla privacidad practica, UX de appchain y trading de RWAs/cripto.
+- El MVP ya funciona con una arquitectura hibrida entre contratos, matcher y frontend.
+- Para una demo o pitch, este documento es mas util que los docs de arquitectura profunda.
+
 ## 1. Qué es Sinergy
 
 **Sinergy** es un mercado privado de activos tokenizados y cripto construido sobre la appchain `Sinergy-2` de Initia.
@@ -164,16 +174,16 @@ El diseño ya deja abierta la siguiente etapa:
 
 ### Mercados con ruta conectada a `InitiaDEX`
 
-- `cINIT/sUSDC`
-- `cETH/sUSDC`
+- `cINIT/cUSDC`
+- `cETH/cUSDC`
 
 ### Mercados dark-pool only
 
-- `cBTC/sUSDC`
-- `cSOL/sUSDC`
-- `tAAPL/sUSDC`
-- `tBOND/sUSDC`
-- `tNVDA/sUSDC`
+- `cBTC/cUSDC`
+- `cSOL/cUSDC`
+- `tAAPL/cUSDC`
+- `tBOND/cUSDC`
+- `tNVDA/cUSDC`
 
 ## 8. Cómo funciona el flujo del usuario
 

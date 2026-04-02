@@ -1,5 +1,19 @@
 # Sinergy Privacy Architecture
 
+## En pocas palabras
+
+Este documento explica como funciona hoy la privacidad en `Sinergy`, que cosas ya estan protegidas y que partes todavia dependen del backend. No es el plano tecnico final; es la explicacion de alto nivel.
+
+## Cuando leer este documento
+
+Leelo si quieres entender la idea de privacidad del proyecto sin entrar de una vez al detalle de contratos, pruebas o implementacion avanzada.
+
+## Que debes recordar
+
+- Hoy la privacidad de `Sinergy` es real, pero parcial: oculta flujo de ordenes, no todo el sistema.
+- Lo que mas se protege ahora es la intencion de trading y el matching.
+- La evolucion va hacia retiros y estado verificables con menos confianza en el backend.
+
 ## Objective
 
 Explain the architecture of `Sinergy` and describe how privacy works in the project today, what is already protected, what is still exposed, and how the system is evolving toward stronger confidentiality.

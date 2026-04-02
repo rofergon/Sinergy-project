@@ -1,5 +1,19 @@
 # Testnet Runbook
 
+## En pocas palabras
+
+Este documento explica como correr `Sinergy` sobre una testnet real sin mezclar ese entorno con el flujo local. Es la guia practica para dejar contratos, servicios y endpoints listos para pruebas externas.
+
+## Cuando leer este documento
+
+Leelo cuando ya tengas claro el plan general y quieras ejecutar los pasos concretos para levantar el stack en testnet.
+
+## Que debes recordar
+
+- La separacion entre `local` y `testnet` es una parte importante del flujo, no un detalle.
+- Primero se configuran archivos y contratos; despues se levantan servicios y endpoints publicos.
+- La salida esperada es una testnet utilizable desde wallet y frontend, no solo servicios encendidos.
+
 ## Goal
 
 Run `Sinergy` against an operable testnet rollup without affecting the local workflow.

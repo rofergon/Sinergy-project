@@ -1,5 +1,19 @@
 # Implementation Plan
 
+## En pocas palabras
+
+Este plan explica como pasar de un entorno local a una testnet operable sin romper el flujo de desarrollo actual. La idea no es "tener todo resuelto", sino llegar a una version que se pueda desplegar, probar y operar de forma realista.
+
+## Cuando leer este documento
+
+Leelo si necesitas ver el roadmap operativo completo, entender el orden recomendado de ejecucion o repartir trabajo por fases.
+
+## Que debes recordar
+
+- El objetivo es llegar a una testnet operable, no cerrar toda la vision final del proyecto.
+- El entorno local sigue siendo importante y no debe romperse durante la migracion.
+- Las fases estan pensadas para bajar riesgo operativo y separar responsabilidades.
+
 ## Objective
 
 Take `Sinergy` from a local environment on `Sinergy-2` to an **operable testnet** on `initiation-2`, keeping the local environment as the development path and not yet relying on `whitelist` to operate the rollup.
