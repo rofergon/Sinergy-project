@@ -11,7 +11,7 @@ test("fallback loop executes tool actions and collects artifacts", async () => {
     },
     {
       content:
-        '{"type":"tool","tool":"run_strategy_backtest","input":{"strategyId":"11111111-1111-4111-8111-111111111111"},"reason":"Need to test it"}'
+        '{"type":"tool","tool":"run_strategy_backtest","input":{},"reason":"Need to test it"}'
     },
     {
       content:
@@ -62,4 +62,5 @@ test("fallback loop executes tool actions and collects artifacts", async () => {
   assert.equal(result.artifacts.strategyId, "11111111-1111-4111-8111-111111111111");
   assert.equal(result.artifacts.runId, "22222222-2222-4222-8222-222222222222");
   assert.equal(trace.length, 2);
+  assert.equal(trace[1]?.input?.strategyId, "11111111-1111-4111-8111-111111111111");
 });

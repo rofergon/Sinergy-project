@@ -1063,7 +1063,7 @@ a { color: inherit; text-decoration: none; }
 
 .strategy-agent-context {
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: repeat(4, auto minmax(0, 1fr));
   gap: 10px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
@@ -1073,6 +1073,113 @@ a { color: inherit; text-decoration: none; }
 
 .strategy-agent-context strong {
   color: var(--text-primary);
+}
+
+.strategy-agent-session-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.strategy-agent-session-bar small {
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.strategy-agent-session-bar button {
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-radius: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.strategy-agent-session-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.strategy-agent-history {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.strategy-agent-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.strategy-agent-history-head button {
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-radius: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.strategy-agent-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.strategy-agent-history-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(18, 22, 28, 0.76);
+}
+
+.strategy-agent-history-card.active {
+  border-color: rgba(30, 157, 242, 0.35);
+  background: rgba(30, 157, 242, 0.08);
+}
+
+.strategy-agent-history-copy {
+  min-width: 0;
+}
+
+.strategy-agent-history-copy strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.strategy-agent-history-copy small,
+.strategy-agent-history-copy p {
+  color: var(--text-secondary);
+}
+
+.strategy-agent-history-copy p {
+  margin-top: 8px;
+  line-height: 1.45;
+}
+
+.strategy-agent-history-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 140px;
+}
+
+.strategy-agent-history-actions button {
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-radius: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
 }
 
 .strategy-agent-thread {
@@ -1210,6 +1317,25 @@ a { color: inherit; text-decoration: none; }
   border-radius: 12px;
   padding: 10px 14px;
   cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .strategy-agent-context {
+    grid-template-columns: repeat(2, auto minmax(0, 1fr));
+  }
+
+  .strategy-agent-session-bar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .strategy-agent-history-card {
+    flex-direction: column;
+  }
+
+  .strategy-agent-history-actions {
+    min-width: 0;
+  }
 }
 
 /* ══════════════ PORTFOLIO PAGE ════════════════════════ */

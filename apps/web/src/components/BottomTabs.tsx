@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { StrategyBacktestSummary, StrategyBacktestTrade } from "@sinergy/shared";
 import { formatUnits } from "viem";
 import { TradeHistory } from "./TradeHistory";
@@ -43,6 +43,12 @@ export function BottomTabs({
   const [activeTab, setActiveTab] = useState<"trades" | "open" | "history" | "backtest">("trades");
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [status, setStatus] = useState("");
+
+  useEffect(() => {
+    if (backtestSummary) {
+      setActiveTab("backtest");
+    }
+  }, [backtestSummary?.runId, backtestSummary?.strategyId]);
 
   async function handleCancel(orderId: string) {
     if (!address) {

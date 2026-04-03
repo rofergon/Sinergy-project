@@ -12,6 +12,8 @@ import type {
   MarketSnapshot,
   StrategyAgentPlanResponse,
   StrategyAgentRunResponse,
+  StrategyAgentSessionListItem,
+  StrategyAgentSessionSnapshot,
   StrategyAgentToolTraceEntry,
   StrategyBacktestBundle
 } from "../types";
@@ -57,8 +59,30 @@ type AgentCapabilitiesResponse = {
   }>;
 };
 
+type PersistedAgentState = {
+  prompt: string;
+  activeSessionId?: string;
+};
+
 function buildMessageId() {
   return `agent-msg-${crypto.randomUUID()}`;
+}
+
+function shortId(value?: string) {
+  if (!value) return "--";
+  return value.length <= 14 ? value : `${value.slice(0, 8)}...${value.slice(-4)}`;
+}
+
+function readPersistedAgentState(storageKey: string): PersistedAgentState | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(storageKey);
+    if (!raw) return null;
+    return JSON.parse(raw) as PersistedAgentState;
+  } catch {
+    return null;
+  }
 }
 
 function toBacktestBundle(trace: StrategyAgentToolTraceEntry[]): StrategyBacktestBundle | null {
@@ -87,6 +111,26 @@ function toBacktestBundle(trace: StrategyAgentToolTraceEntry[]): StrategyBacktes
   };
 }
 
+function toMessagesFromSession(session: StrategyAgentSessionSnapshot): AgentMessage[] {
+  return session.recentTurns.map((turn) => ({
+    id: turn.id,
+    role: turn.role,
+    text: turn.text,
+    mode: turn.mode,
+    usedTools: turn.usedTools,
+    warnings: turn.warnings,
+    strategyId: turn.role === "assistant" ? session.strategyId : undefined
+  }));
+}
+
+function formatTimestamp(value: string) {
+  return new Date(value).toLocaleString();
+}
+
+function summarizeSession(item: StrategyAgentSessionListItem) {
+  return item.strategy?.name ?? item.lastUserMessage ?? "Untitled session";
+}
+
 export function StrategyAgentPanel({
   address,
   selectedMarket,
@@ -99,6 +143,14 @@ export function StrategyAgentPanel({
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [status, setStatus] = useState("");
   const [runtime, setRuntime] = useState<AgentCapabilitiesResponse | null>(null);
+  const [session, setSession] = useState<StrategyAgentSessionSnapshot | null>(null);
+  const [history, setHistory] = useState<StrategyAgentSessionListItem[]>([]);
+  const [historyBusy, setHistoryBusy] = useState(false);
+
+  const storageKey = useMemo(() => {
+    if (!address || !selectedMarket?.id) return null;
+    return `sinergy.strategy-agent.${address}.${selectedMarket.id}`;
+  }, [address, selectedMarket?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -128,6 +180,92 @@ export function StrategyAgentPanel({
     return runtime.model.toolCallingObserved ? "Native tools" : "Fallback JSON";
   }, [runtime]);
 
+  async function loadSession(sessionId: string, options?: { updateStatus?: boolean }) {
+    if (!address) return;
+
+    const payload = await agentApi<{ ok: true; result: { session: StrategyAgentSessionSnapshot } }>(
+      `/sessions/${sessionId}?ownerAddress=${address}`
+    );
+    setSession(payload.result.session);
+    setMessages(toMessagesFromSession(payload.result.session));
+    onBacktestResult(null);
+
+    if (payload.result.session.strategy?.timeframe) {
+      onTimeframeChange(payload.result.session.strategy.timeframe);
+    }
+
+    if (options?.updateStatus !== false) {
+      setStatus("Session loaded.");
+    }
+  }
+
+  async function refreshHistory(preferredSessionId?: string, hydrateSession = false) {
+    if (!address || !selectedMarket?.id) {
+      setHistory([]);
+      return;
+    }
+
+    setHistoryBusy(true);
+    try {
+      const payload = await agentApi<{ ok: true; result: { sessions: StrategyAgentSessionListItem[] } }>(
+        `/sessions?ownerAddress=${address}&marketId=${selectedMarket.id}&limit=20`
+      );
+      setHistory(payload.result.sessions);
+
+      const targetSessionId = preferredSessionId ?? session?.sessionId;
+      if (
+        hydrateSession &&
+        targetSessionId &&
+        payload.result.sessions.some((item) => item.sessionId === targetSessionId)
+      ) {
+        await loadSession(targetSessionId, { updateStatus: false });
+      }
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setHistoryBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadWorkspace() {
+      if (!storageKey || !address || !selectedMarket?.id) {
+        setPrompt("");
+        setMessages([]);
+        setSession(null);
+        setHistory([]);
+        return;
+      }
+
+      const persisted = readPersistedAgentState(storageKey);
+      if (!cancelled) {
+        setPrompt(persisted?.prompt ?? "");
+        setMessages([]);
+        setSession(null);
+      }
+
+      await refreshHistory(persisted?.activeSessionId, Boolean(persisted?.activeSessionId));
+    }
+
+    void loadWorkspace();
+    return () => {
+      cancelled = true;
+    };
+  }, [address, selectedMarket?.id, storageKey]);
+
+  useEffect(() => {
+    if (!storageKey || typeof window === "undefined") return;
+
+    const payload: PersistedAgentState = {
+      prompt,
+      activeSessionId: session?.sessionId
+    };
+
+    window.sessionStorage.setItem(storageKey, JSON.stringify(payload));
+  }, [prompt, session?.sessionId, storageKey]);
+
   async function submit(mode: "plan" | "run") {
     const goal = prompt.trim();
     if (!address || !goal || !selectedMarket) return;
@@ -144,19 +282,18 @@ export function StrategyAgentPanel({
 
     try {
       if (mode === "plan") {
-        const payload = await agentApi<{ ok: true; result: StrategyAgentPlanResponse }>(
-          "/strategy/plan",
-          {
-            method: "POST",
-            body: JSON.stringify({
-              ownerAddress: address,
-              marketId: selectedMarket.id,
-              goal,
-              mode
-            })
-          }
-        );
+        const payload = await agentApi<{ ok: true; result: StrategyAgentPlanResponse }>("/strategy/plan", {
+          method: "POST",
+          body: JSON.stringify({
+            ownerAddress: address,
+            marketId: selectedMarket.id,
+            goal,
+            sessionId: session?.sessionId,
+            mode
+          })
+        });
 
+        setSession(payload.result.session);
         setMessages((current) => [
           ...current,
           {
@@ -165,32 +302,35 @@ export function StrategyAgentPanel({
             text: payload.result.finalMessage,
             mode,
             plannedTools: payload.result.plannedTools,
-            warnings: payload.result.warnings
+            warnings: payload.result.warnings,
+            strategyId: payload.result.session.strategyId
           }
         ]);
         setStatus("Plan ready.");
+        void refreshHistory(payload.result.session.sessionId, false);
         return;
       }
 
-      const payload = await agentApi<{ ok: true; result: StrategyAgentRunResponse }>(
-        "/strategy/run",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            ownerAddress: address,
-            marketId: selectedMarket.id,
-            goal,
-            mode
-          })
-        }
-      );
+      const payload = await agentApi<{ ok: true; result: StrategyAgentRunResponse }>("/strategy/run", {
+        method: "POST",
+        body: JSON.stringify({
+          ownerAddress: address,
+          marketId: selectedMarket.id,
+          goal,
+          sessionId: session?.sessionId,
+          mode
+        })
+      });
 
       const bundle = toBacktestBundle(payload.result.toolTrace);
       if (bundle) {
         onTimeframeChange(bundle.summary.timeframe);
-        onBacktestResult(bundle);
+        setTimeout(() => {
+          onBacktestResult(bundle);
+        }, 50);
       }
 
+      setSession(payload.result.session);
       setMessages((current) => [
         ...current,
         {
@@ -201,15 +341,16 @@ export function StrategyAgentPanel({
           usedTools: payload.result.usedTools,
           trace: payload.result.toolTrace,
           warnings: payload.result.warnings,
-          strategyId: payload.result.artifacts.strategyId,
+          strategyId: payload.result.artifacts.strategyId ?? payload.result.session.strategyId,
           bundle
         }
       ]);
       setStatus(
-        payload.result.artifacts.strategyId
-          ? "Agent workflow finished. Review the generated strategy in the builder."
+        payload.result.session.strategyId
+          ? "Agent workflow finished. Session and strategy are ready to reopen."
           : "Agent workflow finished."
       );
+      void refreshHistory(payload.result.session.sessionId, false);
     } catch (error) {
       setMessages((current) => [
         ...current,
@@ -224,6 +365,13 @@ export function StrategyAgentPanel({
     } finally {
       setBusy(null);
     }
+  }
+
+  function startNewSession() {
+    setMessages([]);
+    setSession(null);
+    setStatus("Started a fresh strategy session.");
+    onBacktestResult(null);
   }
 
   if (!address) {
@@ -259,12 +407,86 @@ export function StrategyAgentPanel({
         <strong>{selectedMarket?.symbol ?? "Select a market"}</strong>
         <span>Tools</span>
         <strong>{runtime?.tools.length ?? "--"}</strong>
+        <span>Session</span>
+        <strong>{session ? shortId(session.sessionId) : "New"}</strong>
+        <span>Strategy</span>
+        <strong>{session?.strategy?.name ?? shortId(session?.strategyId)}</strong>
+      </div>
+
+      <div className="strategy-agent-session-bar">
+        <small>
+          {session
+            ? `${session.turnCount} turns in memory • updated ${formatTimestamp(session.updatedAt)}`
+            : "Pick a previous session from history or start a fresh one for this market."}
+        </small>
+        <div className="strategy-agent-session-actions">
+          {session?.strategyId && (
+            <button
+              type="button"
+              onClick={() => onReviewStrategy(session.strategyId!, null)}
+              disabled={busy !== null}
+            >
+              Open Strategy In Builder
+            </button>
+          )}
+          <button type="button" onClick={startNewSession} disabled={busy !== null}>
+            New Session
+          </button>
+        </div>
+      </div>
+
+      <div className="strategy-agent-history">
+        <div className="strategy-agent-history-head">
+          <strong>Session History</strong>
+          <button type="button" onClick={() => void refreshHistory()} disabled={historyBusy || busy !== null}>
+            {historyBusy ? "Refreshing..." : "Refresh History"}
+          </button>
+        </div>
+
+        {history.length === 0 ? (
+          <div className="strategy-empty-state">No saved sessions yet for this market.</div>
+        ) : (
+          <div className="strategy-agent-history-list">
+            {history.map((item) => (
+              <div
+                key={item.sessionId}
+                className={`strategy-agent-history-card ${item.sessionId === session?.sessionId ? "active" : ""}`}
+              >
+                <div className="strategy-agent-history-copy">
+                  <strong>{summarizeSession(item)}</strong>
+                  <small>{formatTimestamp(item.updatedAt)}</small>
+                  <p>{item.lastAssistantMessage ?? item.lastUserMessage ?? "Session without messages yet."}</p>
+                  <div className="strategy-agent-chips">
+                    <span>{item.turnCount} turns</span>
+                    {item.strategy?.status && <span>{item.strategy.status}</span>}
+                    {item.strategy?.timeframe && <span>{item.strategy.timeframe}</span>}
+                  </div>
+                </div>
+                <div className="strategy-agent-history-actions">
+                  <button type="button" onClick={() => void loadSession(item.sessionId)} disabled={busy !== null}>
+                    Open Session
+                  </button>
+                  {item.strategyId && (
+                    <button
+                      type="button"
+                      onClick={() => onReviewStrategy(item.strategyId!, null)}
+                      disabled={busy !== null}
+                    >
+                      Open Strategy
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="strategy-agent-thread">
         {messages.length === 0 ? (
           <div className="strategy-empty-state">
-            Try something like: "Create an EMA crossover strategy for this market, validate it, and run a backtest."
+            Try something like: "Create an EMA crossover strategy for this market, validate it, and run a
+            backtest." Sessions and linked strategies now stay available in history.
           </div>
         ) : (
           messages.map((message) => (
@@ -336,7 +558,7 @@ export function StrategyAgentPanel({
         <textarea
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
-          placeholder="Describe the strategy you want to build, validate, or improve..."
+          placeholder="Describe the strategy you want to build, validate, improve, or continue..."
         />
         <div className="strategy-agent-actions">
           <button type="button" onClick={() => void submit("plan")} disabled={busy !== null || !prompt.trim()}>

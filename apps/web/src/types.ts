@@ -1,8 +1,10 @@
 import type {
   HexString,
+  StrategyStatus,
   StrategyBacktestSummary,
   StrategyBacktestTrade,
   StrategyChartOverlay,
+  StrategyTimeframe,
   StrategyToolName
 } from "@sinergy/shared";
 
@@ -45,6 +47,7 @@ export type StrategyAgentPlanResponse = {
     tool: StrategyToolName;
     why: string;
   }>;
+  session: StrategyAgentSessionSnapshot;
   modelModeUsed: "native-tools" | "fallback-json";
   warnings: string[];
 };
@@ -69,10 +72,47 @@ export type StrategyAgentRunResponse = {
   toolTrace: StrategyAgentToolTraceEntry[];
   artifacts: {
     strategyId?: string;
+    strategy?: StrategyAgentStrategySummary;
     runId?: string;
     summary?: Record<string, unknown>;
     validation?: Record<string, unknown>;
   };
+  session: StrategyAgentSessionSnapshot;
   modelModeUsed: "native-tools" | "fallback-json";
   warnings: string[];
+};
+
+export type StrategyAgentSessionSnapshot = {
+  sessionId: string;
+  ownerAddress: HexString;
+  marketId?: HexString;
+  strategyId?: string;
+  strategy?: StrategyAgentStrategySummary;
+  runId?: string;
+  createdAt: string;
+  updatedAt: string;
+  turnCount: number;
+  recentTurns: Array<{
+    id: string;
+    role: "user" | "assistant";
+    mode: "run" | "plan";
+    text: string;
+    createdAt: string;
+    usedTools?: StrategyToolName[];
+    warnings?: string[];
+  }>;
+};
+
+export type StrategyAgentStrategySummary = {
+  id: string;
+  name?: string;
+  marketId?: HexString;
+  timeframe?: StrategyTimeframe;
+  status?: StrategyStatus;
+  updatedAt?: string;
+};
+
+export type StrategyAgentSessionListItem = Omit<StrategyAgentSessionSnapshot, "recentTurns"> & {
+  lastUserMessage?: string;
+  lastAssistantMessage?: string;
 };

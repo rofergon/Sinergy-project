@@ -7,10 +7,17 @@ import {
   type StrategyToolName
 } from "@sinergy/shared";
 import { STRATEGY_AGENT_SYSTEM_PROMPT, buildUserPrompt } from "../prompts.js";
-import type { AgentPlanResponse, AgentResponse, AgentStrategyRequest, AgentToolTraceEntry } from "../types.js";
+import type {
+  AgentPlanResponse,
+  AgentResponse,
+  AgentStrategyRequest,
+  AgentStrategySummary,
+  AgentToolTraceEntry
+} from "../types.js";
 import { createTrackedStrategyLangChainTools } from "./matcherTools.js";
 import { probeModel } from "./modelProbe.js";
 import { runFallbackJsonLoop } from "./fallbackRuntime.js";
+import { StrategyAgentSessionStore } from "./sessionStore.js";
 
 function extractMessageText(output: unknown) {
   if (!output || typeof output !== "object") return "";
@@ -35,12 +42,48 @@ function extractMessageText(output: unknown) {
   return "";
 }
 
+function collectArtifactsFromTrace(
+  trace: AgentToolTraceEntry[],
+  initial: AgentResponse["artifacts"] = {}
+): AgentResponse["artifacts"] {
+  const artifacts: AgentResponse["artifacts"] = { ...initial };
+
+  for (const entry of trace) {
+    const output = entry.output;
+    if (!output) continue;
+
+    if (typeof output.strategy === "object" && output.strategy && "id" in output.strategy) {
+      const strategy = output.strategy as AgentStrategySummary;
+      artifacts.strategyId = String(strategy.id);
+      artifacts.strategy = {
+        id: String(strategy.id),
+        name: strategy.name,
+        marketId: strategy.marketId,
+        timeframe: strategy.timeframe,
+        status: strategy.status,
+        updatedAt: strategy.updatedAt
+      };
+    }
+    if (typeof output.summary === "object" && output.summary && "runId" in output.summary) {
+      artifacts.runId = String((output.summary as { runId: string }).runId);
+      artifacts.summary = output.summary as Record<string, unknown>;
+    }
+    if (typeof output.validation === "object" && output.validation) {
+      artifacts.validation = output.validation as Record<string, unknown>;
+    }
+  }
+
+  return artifacts;
+}
+
 export class StrategyAgentService {
   private readonly model: ChatOpenAI;
   private readonly matcherTransport: ReturnType<typeof createHttpStrategyToolTransport>;
+  private readonly sessions: StrategyAgentSessionStore;
 
   constructor(private readonly options: {
     matcherUrl: string;
+    sessionDbFile: string;
     modelBaseUrl: string;
     modelName: string;
     modelApiKey: string;
@@ -61,6 +104,9 @@ export class StrategyAgentService {
     });
     this.matcherTransport = createHttpStrategyToolTransport({
       baseUrl: options.matcherUrl
+    });
+    this.sessions = new StrategyAgentSessionStore({
+      dbFile: options.sessionDbFile
     });
   }
 
@@ -106,8 +152,29 @@ export class StrategyAgentService {
     };
   }
 
+  async listSessions(input: { ownerAddress: string; marketId?: string; limit?: number }) {
+    return {
+      sessions: this.sessions.listSessions(input)
+    };
+  }
+
+  async getSession(input: { ownerAddress: string; sessionId: string }) {
+    const session = this.sessions.getSession(input.sessionId, input.ownerAddress);
+    if (!session) {
+      throw new Error("Session not found.");
+    }
+
+    return { session };
+  }
+
   async plan(input: AgentStrategyRequest): Promise<AgentPlanResponse> {
     const requestId = crypto.randomUUID();
+    const session = this.sessions.getOrCreate(input);
+    this.sessions.addTurn(session, {
+      role: "user",
+      mode: "plan",
+      text: input.goal
+    });
     const capabilities = await this.matcherTransport("list_strategy_capabilities", {
       ownerAddress: input.ownerAddress as HexString
     });
@@ -123,7 +190,11 @@ Capabilities summary:
 ${JSON.stringify(capabilities.capabilities, null, 2)}
 
 User request:
-${buildUserPrompt(input)}
+${buildUserPrompt({
+  ...input,
+  strategyId: input.strategyId ?? session.strategyId,
+  session: this.sessions.snapshot(session)
+})}
 
 Return JSON like:
 {"finalMessage":"...","plannedTools":[{"tool":"list_strategy_capabilities","why":"..."},{"tool":"create_strategy_draft","why":"..."}]}
@@ -150,10 +221,18 @@ Return JSON like:
       };
     }
 
+    this.sessions.addTurn(session, {
+      role: "assistant",
+      mode: "plan",
+      text: parsed.finalMessage,
+      usedTools: parsed.plannedTools.map((item) => item.tool)
+    });
+
     return {
       requestId,
       finalMessage: parsed.finalMessage,
       plannedTools: parsed.plannedTools,
+      session: this.sessions.snapshot(session),
       modelModeUsed: "fallback-json",
       warnings: []
     };
@@ -164,17 +243,68 @@ Return JSON like:
     const trace: AgentToolTraceEntry[] = [];
     const warnings: string[] = [];
     let artifacts: AgentResponse["artifacts"] = {};
+    const session = this.sessions.getOrCreate(input);
+    this.sessions.addTurn(session, {
+      role: "user",
+      mode: "run",
+      text: input.goal
+    });
+    const sessionSnapshot = this.sessions.snapshot(session);
+    const activeInput = {
+      ...input,
+      strategyId: input.strategyId ?? sessionSnapshot.strategyId
+    };
 
     if (!this.options.forceFallbackJson) {
       try {
-        const nativeResult = await this.runNativeToolAgent(input, trace);
+        const nativeResult = await this.runNativeToolAgent(activeInput, trace, sessionSnapshot);
         if (trace.length > 0) {
+          artifacts = collectArtifactsFromTrace(trace, nativeResult.artifacts);
+          
+          // AUTO-BACKTEST SAFETY NET
+          const goalMentionsBacktest = /backtest|test|evaluat/i.test(activeInput.goal);
+          const backtestDone = trace.some(entry => entry.tool === "run_strategy_backtest" && entry.output && !entry.error);
+          
+          if (goalMentionsBacktest && !backtestDone && artifacts.strategyId) {
+            warnings.push("Agent finished without running requested backtest. Auto-executing backtest safety net.");
+            const step = trace.length + 1;
+            const entry: AgentToolTraceEntry = {
+              step,
+              tool: "run_strategy_backtest",
+              input: { ownerAddress: activeInput.ownerAddress, strategyId: artifacts.strategyId },
+              startedAt: new Date().toISOString()
+            };
+            trace.push(entry);
+            try {
+              const result = await this.matcherTransport("run_strategy_backtest", { ownerAddress: activeInput.ownerAddress as HexString, strategyId: artifacts.strategyId });
+              entry.output = result as Record<string, unknown>;
+              entry.completedAt = new Date().toISOString();
+              artifacts = collectArtifactsFromTrace([entry], artifacts);
+              nativeResult.finalMessage += " (A backtest was automatically run to complete your request).";
+            } catch (error) {
+              entry.error = { message: error instanceof Error ? error.message : String(error) };
+              entry.completedAt = new Date().toISOString();
+              warnings.push(`Auto-backtest failed: ${entry.error.message}`);
+            }
+          }
+
+          this.sessions.applyArtifacts(session, artifacts);
+          this.sessions.appendTrace(session, trace);
+          this.sessions.addTurn(session, {
+            role: "assistant",
+            mode: "run",
+            text: nativeResult.finalMessage,
+            usedTools: Array.from(new Set(trace.map((entry) => entry.tool))),
+            warnings
+          });
+
           return {
             requestId,
             finalMessage: nativeResult.finalMessage,
             usedTools: Array.from(new Set(trace.map((entry) => entry.tool))),
             toolTrace: trace,
-            artifacts: nativeResult.artifacts,
+            artifacts,
+            session: this.sessions.snapshot(session),
             modelModeUsed: "native-tools",
             warnings
           };
@@ -188,10 +318,11 @@ Return JSON like:
 
     const fallbackResult = await runFallbackJsonLoop({
       model: this.model,
-      goal: input.goal,
-      ownerAddress: input.ownerAddress,
-      marketId: input.marketId,
-      strategyId: input.strategyId,
+      goal: activeInput.goal,
+      ownerAddress: activeInput.ownerAddress,
+      marketId: activeInput.marketId,
+      strategyId: activeInput.strategyId,
+      session: sessionSnapshot,
       maxSteps: this.options.maxSteps,
       trace,
       invokeTool: async (toolName, rawInput) => {
@@ -217,8 +348,45 @@ Return JSON like:
         }
       }
     });
-    artifacts = fallbackResult.artifacts;
+    artifacts = collectArtifactsFromTrace(trace, fallbackResult.artifacts);
+
+    // AUTO-BACKTEST SAFETY NET
+    const goalMentionsBacktest = /backtest|test|evaluat/i.test(activeInput.goal);
+    const backtestDoneFallback = trace.some(entry => entry.tool === "run_strategy_backtest" && entry.output && !entry.error);
+    
+    if (goalMentionsBacktest && !backtestDoneFallback && artifacts.strategyId) {
+      warnings.push("Fallback agent finished without running requested backtest. Auto-executing backtest safety net.");
+      const step = trace.length + 1;
+      const entry: AgentToolTraceEntry = {
+        step,
+        tool: "run_strategy_backtest",
+        input: { ownerAddress: activeInput.ownerAddress, strategyId: artifacts.strategyId },
+        startedAt: new Date().toISOString()
+      };
+      trace.push(entry);
+      try {
+        const result = await this.matcherTransport("run_strategy_backtest", { ownerAddress: activeInput.ownerAddress as HexString, strategyId: artifacts.strategyId });
+        entry.output = result as Record<string, unknown>;
+        entry.completedAt = new Date().toISOString();
+        artifacts = collectArtifactsFromTrace([entry], artifacts);
+        fallbackResult.finalMessage += " (A backtest was automatically run to complete your request).";
+      } catch (error) {
+        entry.error = { message: error instanceof Error ? error.message : String(error) };
+        entry.completedAt = new Date().toISOString();
+        warnings.push(`Auto-backtest failed: ${entry.error.message}`);
+      }
+    }
+
+    this.sessions.applyArtifacts(session, artifacts);
+    this.sessions.appendTrace(session, trace);
     warnings.push(...fallbackResult.warnings);
+    this.sessions.addTurn(session, {
+      role: "assistant",
+      mode: "run",
+      text: fallbackResult.finalMessage,
+      usedTools: Array.from(new Set(trace.map((entry) => entry.tool))),
+      warnings
+    });
 
     return {
       requestId,
@@ -226,6 +394,7 @@ Return JSON like:
       usedTools: Array.from(new Set(trace.map((entry) => entry.tool))),
       toolTrace: trace,
       artifacts,
+      session: this.sessions.snapshot(session),
       modelModeUsed: "fallback-json",
       warnings
     };
@@ -233,7 +402,8 @@ Return JSON like:
 
   private async runNativeToolAgent(
     input: AgentStrategyRequest,
-    trace: AgentToolTraceEntry[]
+    trace: AgentToolTraceEntry[],
+    session: AgentPlanResponse["session"]
   ): Promise<{ finalMessage: string; artifacts: AgentResponse["artifacts"] }> {
     const tools = createTrackedStrategyLangChainTools({
       matcherUrl: this.options.matcherUrl,
@@ -264,7 +434,7 @@ Return JSON like:
       messages: [
         {
           role: "user",
-          content: buildUserPrompt(input)
+          content: buildUserPrompt({ ...input, session })
         }
       ]
     });
@@ -273,24 +443,9 @@ Return JSON like:
       extractMessageText(response) ||
       "Native tool agent completed without a textual summary.";
 
-    const artifacts: AgentResponse["artifacts"] = {};
-    for (const entry of trace) {
-      const output = entry.output ?? {};
-      if (typeof output.strategy === "object" && output.strategy && "id" in output.strategy) {
-        artifacts.strategyId = String((output.strategy as { id: string }).id);
-      }
-      if (typeof output.summary === "object" && output.summary && "runId" in output.summary) {
-        artifacts.runId = String((output.summary as { runId: string }).runId);
-        artifacts.summary = output.summary as Record<string, unknown>;
-      }
-      if (typeof output.validation === "object" && output.validation) {
-        artifacts.validation = output.validation as Record<string, unknown>;
-      }
-    }
-
     return {
       finalMessage,
-      artifacts
+      artifacts: collectArtifactsFromTrace(trace)
     };
   }
 }

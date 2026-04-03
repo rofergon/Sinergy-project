@@ -1,7 +1,7 @@
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { StrategyToolName } from "@sinergy/shared";
 import { strategyToolDefinitions } from "@sinergy/shared";
-import type { AgentArtifacts, AgentToolTraceEntry } from "../types.js";
+import type { AgentArtifacts, AgentSessionSnapshot, AgentToolTraceEntry } from "../types.js";
 import { buildFallbackPlannerPrompt } from "../prompts.js";
 
 function extractJsonObject(text: string) {
@@ -40,6 +40,7 @@ export async function runFallbackJsonLoop(options: {
   ownerAddress: string;
   marketId?: string;
   strategyId?: string;
+  session?: AgentSessionSnapshot;
   maxSteps: number;
   trace: AgentToolTraceEntry[];
   invokeTool: (tool: StrategyToolName, input: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -51,6 +52,8 @@ export async function runFallbackJsonLoop(options: {
   }));
   let finalMessage = "";
   let artifacts: AgentArtifacts = {};
+  let activeStrategyId = options.strategyId ?? options.session?.strategyId;
+  let activeRunId = options.session?.runId;
   const repeatedCalls = new Map<string, number>();
 
   for (let index = 0; index < options.maxSteps; index += 1) {
@@ -58,7 +61,9 @@ export async function runFallbackJsonLoop(options: {
       goal: options.goal,
       ownerAddress: options.ownerAddress,
       marketId: options.marketId,
-      strategyId: options.strategyId,
+      strategyId: activeStrategyId,
+      runId: activeRunId,
+      session: options.session,
       toolsCatalog,
       priorTrace: options.trace.map((entry) => ({
         tool: entry.tool,
@@ -81,6 +86,8 @@ export async function runFallbackJsonLoop(options: {
     if (decision.type === "final") {
       finalMessage = decision.message ?? "Completed strategy task.";
       artifacts = decision.artifacts ?? artifacts;
+      activeStrategyId = decision.artifacts?.strategyId ?? activeStrategyId;
+      activeRunId = decision.artifacts?.runId ?? activeRunId;
       break;
     }
 
@@ -93,8 +100,8 @@ export async function runFallbackJsonLoop(options: {
       ...(decision.input ?? {}),
       ownerAddress: options.ownerAddress,
       ...(options.marketId && decision.input?.marketId === undefined ? { marketId: options.marketId } : {}),
-      ...(options.strategyId && decision.input?.strategyId === undefined
-        ? { strategyId: options.strategyId }
+      ...(activeStrategyId && decision.input?.strategyId === undefined
+        ? { strategyId: activeStrategyId }
         : {})
     };
     const repeatKey = `${decision.tool}:${JSON.stringify(toolInput)}`;
@@ -107,10 +114,12 @@ export async function runFallbackJsonLoop(options: {
 
     const output = await options.invokeTool(decision.tool, toolInput);
     if (typeof output.strategy === "object" && output.strategy && "id" in output.strategy) {
-      artifacts.strategyId = String((output.strategy as { id: string }).id);
+      activeStrategyId = String((output.strategy as { id: string }).id);
+      artifacts.strategyId = activeStrategyId;
     }
     if (typeof output.summary === "object" && output.summary && "runId" in output.summary) {
-      artifacts.runId = String((output.summary as { runId: string }).runId);
+      activeRunId = String((output.summary as { runId: string }).runId);
+      artifacts.runId = activeRunId;
       artifacts.summary = output.summary as Record<string, unknown>;
     }
     if (typeof output.validation === "object" && output.validation) {

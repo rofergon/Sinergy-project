@@ -1,11 +1,12 @@
 import { z } from "zod";
-import type { StrategyToolName } from "@sinergy/shared";
+import type { StrategyStatus, StrategyTimeframe, StrategyToolName } from "@sinergy/shared";
 
 export const agentStrategyRequestSchema = z.object({
   ownerAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
   goal: z.string().min(1),
   marketId: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
   strategyId: z.string().uuid().optional(),
+  sessionId: z.string().uuid().optional(),
   mode: z.enum(["run", "plan"]).default("run")
 });
 
@@ -26,10 +27,58 @@ export type AgentToolTraceEntry = {
 
 export type AgentArtifacts = {
   strategyId?: string;
+  strategy?: AgentStrategySummary;
   runId?: string;
   summary?: Record<string, unknown>;
   validation?: Record<string, unknown>;
 };
+
+export type AgentStrategySummary = {
+  id: string;
+  name?: string;
+  marketId?: string;
+  timeframe?: StrategyTimeframe;
+  status?: StrategyStatus;
+  updatedAt?: string;
+};
+
+export type AgentSessionTurn = {
+  id: string;
+  role: "user" | "assistant";
+  mode: "run" | "plan";
+  text: string;
+  createdAt: string;
+  usedTools?: StrategyToolName[];
+  warnings?: string[];
+};
+
+export type AgentSessionSnapshot = {
+  sessionId: string;
+  ownerAddress: string;
+  marketId?: string;
+  strategyId?: string;
+  strategy?: AgentStrategySummary;
+  runId?: string;
+  createdAt: string;
+  updatedAt: string;
+  turnCount: number;
+  recentTurns: AgentSessionTurn[];
+};
+
+export type AgentSessionListItem = Omit<AgentSessionSnapshot, "recentTurns"> & {
+  lastUserMessage?: string;
+  lastAssistantMessage?: string;
+};
+
+export const agentSessionListQuerySchema = z.object({
+  ownerAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+  marketId: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
+  limit: z.coerce.number().int().positive().max(50).default(20)
+});
+
+export const agentSessionParamsSchema = z.object({
+  sessionId: z.string().uuid()
+});
 
 export type AgentResponse = {
   requestId: string;
@@ -37,6 +86,7 @@ export type AgentResponse = {
   usedTools: StrategyToolName[];
   toolTrace: AgentToolTraceEntry[];
   artifacts: AgentArtifacts;
+  session: AgentSessionSnapshot;
   modelModeUsed: "native-tools" | "fallback-json";
   warnings: string[];
 };
@@ -48,6 +98,7 @@ export type AgentPlanResponse = {
     tool: StrategyToolName;
     why: string;
   }>;
+  session: AgentSessionSnapshot;
   modelModeUsed: "native-tools" | "fallback-json";
   warnings: string[];
 };
