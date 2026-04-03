@@ -6,6 +6,8 @@ import {
   type StrategyToolName
 } from "@sinergy/shared";
 import type { AgentToolTraceEntry } from "../types.js";
+import { summarizeToolProgress } from "./runtimePolicy.js";
+import { mergeToolContext } from "./toolInputContext.js";
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -29,16 +31,11 @@ export function createTrackedStrategyLangChainTools(options: {
         const step = options.trace.length + 1;
         const startedAt = new Date().toISOString();
         const baseInput: Record<string, unknown> = isObject(rawInput) ? rawInput : {};
-        const mergedInput = {
-          ...baseInput,
+        const mergedInput = mergeToolContext(definition.name as StrategyToolName, baseInput, {
           ownerAddress: options.ownerAddress,
-          ...(options.marketId && baseInput.marketId === undefined
-            ? { marketId: options.marketId }
-            : {}),
-          ...(options.strategyId && baseInput.strategyId === undefined
-            ? { strategyId: options.strategyId }
-            : {})
-        } as Record<string, unknown>;
+          marketId: options.marketId,
+          strategyId: options.strategyId
+        });
 
         const entry: AgentToolTraceEntry = {
           step,
@@ -52,12 +49,18 @@ export function createTrackedStrategyLangChainTools(options: {
           const output = await definition.invoke(mergedInput);
           entry.output = isObject(output) ? output : { value: output };
           entry.completedAt = new Date().toISOString();
+          const progress = summarizeToolProgress(entry);
+          entry.progressObserved = progress.progressObserved;
+          entry.resultSummary = progress.resultSummary;
           return output;
         } catch (error) {
           entry.error = {
             message: error instanceof Error ? error.message : String(error)
           };
           entry.completedAt = new Date().toISOString();
+          entry.failureClass = "tool_error";
+          entry.progressObserved = false;
+          entry.resultSummary = entry.error.message;
           throw error;
         }
       },

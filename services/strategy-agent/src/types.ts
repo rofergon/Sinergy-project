@@ -16,6 +16,11 @@ export type AgentToolTraceEntry = {
   step: number;
   tool: StrategyToolName;
   input: Record<string, unknown>;
+  reason?: string;
+  expectedArtifact?: string;
+  resultSummary?: string;
+  progressObserved?: boolean;
+  failureClass?: "invalid_input" | "tool_error" | "parse_error" | "stalled" | "policy_block" | "unknown";
   output?: Record<string, unknown>;
   error?: {
     code?: string;
@@ -31,6 +36,21 @@ export type AgentArtifacts = {
   runId?: string;
   summary?: Record<string, unknown>;
   validation?: Record<string, unknown>;
+};
+
+export type AgentExecutionMetrics = {
+  toolCalls: number;
+  successfulToolCalls: number;
+  failedToolCalls: number;
+  firstPassValidationSuccess: boolean;
+  repairsAttempted: number;
+  repairsSucceeded: number;
+  loopsAborted: number;
+  toolMisuseCount: number;
+  stalledTurns: number;
+  finalizationBlocks: number;
+  enforcementTriggered: boolean;
+  finalizationGuardrailsApplied: string[];
 };
 
 export type AgentStrategySummary = {
@@ -59,6 +79,8 @@ export type AgentSessionSnapshot = {
   strategyId?: string;
   strategy?: AgentStrategySummary;
   runId?: string;
+  lastRunMode?: "native-tools" | "fallback-json";
+  metrics?: AgentExecutionMetrics;
   createdAt: string;
   updatedAt: string;
   turnCount: number;
@@ -89,6 +111,7 @@ export type AgentResponse = {
   session: AgentSessionSnapshot;
   modelModeUsed: "native-tools" | "fallback-json";
   warnings: string[];
+  metrics: AgentExecutionMetrics;
 };
 
 export type AgentPlanResponse = {

@@ -74,6 +74,40 @@ app.get("/agent/sessions/:sessionId", async (request, reply) => {
   }
 });
 
+app.get("/agent/sessions/:sessionId/diagnostics", async (request, reply) => {
+  const params = agentSessionParamsSchema.safeParse(request.params);
+  const query = agentSessionListQuerySchema.pick({ ownerAddress: true }).safeParse(request.query);
+
+  if (!params.success || !query.success) {
+    reply.code(422);
+    return {
+      ok: false,
+      error: {
+        message: "Invalid diagnostics request.",
+        issues: [...(params.success ? [] : params.error.issues), ...(query.success ? [] : query.error.issues)]
+      }
+    };
+  }
+
+  try {
+    return {
+      ok: true,
+      result: await agentService.getDiagnostics({
+        ownerAddress: query.data.ownerAddress,
+        sessionId: params.data.sessionId
+      })
+    };
+  } catch (error) {
+    reply.code(404);
+    return {
+      ok: false,
+      error: {
+        message: error instanceof Error ? error.message : String(error)
+      }
+    };
+  }
+});
+
 app.post("/agent/strategy/plan", async (request, reply) => {
   const parsed = agentStrategyRequestSchema.safeParse(request.body);
   if (!parsed.success) {

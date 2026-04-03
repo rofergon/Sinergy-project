@@ -63,82 +63,41 @@ export function StrategyStudio({
 
   return (
     <div className="strategy-studio-page">
-      <aside className="strategy-studio-side">
-        <div className="strategy-studio-card hero">
-          <span className="strategy-studio-kicker">Strategy Studio</span>
-          <h1>Build, test, and iterate from one workspace.</h1>
-          <p>
-            Move between manual rule editing and agent-guided generation without leaving the chart or
-            backtest context.
-          </p>
-        </div>
-
-        <div className="strategy-studio-card">
-          <span className="panel-title">Quick Actions</span>
-          <div className="strategy-studio-action-list">
-            <button type="button" onClick={() => onWorkspaceModeChange("manual")}>
-              Open Manual Builder
-            </button>
-            <button type="button" onClick={() => onWorkspaceModeChange("agentic")}>
-              Open Agent Chat
-            </button>
-            <button type="button" onClick={onGoTrade}>
+      <div className="strategy-studio-main">
+        <div className="strategy-studio-topbar">
+          <div className="strategy-studio-toolbar-copy">
+            <span className="panel-title">Strategy Workspace</span>
+            <div className="strategy-studio-toolbar-meta">
+              <span>{selectedMarket?.symbol ?? "--"}</span>
+              <span>{timeframe}</span>
+              <span>{workspaceMode === "manual" ? "Manual Builder" : "Agent Workspace"}</span>
+              <span>{strategyBacktest ? `${strategyBacktest.summary.tradeCount} trades` : "No backtest yet"}</span>
+            </div>
+          </div>
+          <div className="strategy-studio-toolbar-actions">
+            <div className="strategy-studio-mode-tabs">
+              <button
+                type="button"
+                className={`trade-mode-tab ${workspaceMode === "manual" ? "active" : ""}`}
+                onClick={() => onWorkspaceModeChange("manual")}
+              >
+                Manual Builder
+              </button>
+              <button
+                type="button"
+                className={`trade-mode-tab ${workspaceMode === "agentic" ? "active" : ""}`}
+                onClick={() => onWorkspaceModeChange("agentic")}
+              >
+                Agent Workspace
+              </button>
+            </div>
+            <button type="button" className="strategy-studio-trade-btn" onClick={onGoTrade}>
               Return To Trade
             </button>
           </div>
         </div>
 
-        <div className="strategy-studio-card">
-          <span className="panel-title">Current Context</span>
-          <div className="strategy-studio-context-grid">
-            <div>
-              <span>Market</span>
-              <strong>{selectedMarket?.symbol ?? "--"}</strong>
-            </div>
-            <div>
-              <span>Timeframe</span>
-              <strong>{timeframe}</strong>
-            </div>
-            <div>
-              <span>Mode</span>
-              <strong>{workspaceMode === "manual" ? "Manual Builder" : "Agent Workspace"}</strong>
-            </div>
-            <div>
-              <span>Backtest</span>
-              <strong>{strategyBacktest ? `${strategyBacktest.summary.tradeCount} trades` : "Not run yet"}</strong>
-            </div>
-          </div>
-        </div>
-      </aside>
-
-      <div className="strategy-studio-main">
-        <div className="strategy-studio-topbar">
-          <div>
-            <span className="panel-title">Workspace</span>
-            <p>
-              Use the manual builder for precise editing, or switch to the agent workspace to describe
-              a strategy in natural language.
-            </p>
-          </div>
-          <div className="strategy-studio-mode-tabs">
-            <button
-              type="button"
-              className={`trade-mode-tab ${workspaceMode === "manual" ? "active" : ""}`}
-              onClick={() => onWorkspaceModeChange("manual")}
-            >
-              Manual Builder
-            </button>
-            <button
-              type="button"
-              className={`trade-mode-tab ${workspaceMode === "agentic" ? "active" : ""}`}
-              onClick={() => onWorkspaceModeChange("agentic")}
-            >
-              Agent Workspace
-            </button>
-          </div>
-        </div>
-
-        <div className="strategy-studio-grid">
+        <div className={`strategy-studio-grid ${workspaceMode === "agentic" ? "agentic-mode" : ""}`}>
           <div className="strategy-studio-chart-col">
             <TradingViewChart
               market={selectedMarket}

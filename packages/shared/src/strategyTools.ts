@@ -211,79 +211,79 @@ export type StrategyToolDefinition<TTool extends StrategyToolName = StrategyTool
 export const strategyToolDefinitions = [
   {
     name: "list_strategy_capabilities",
-    description: "Return the machine-readable catalog of indicators, operators, limits and defaults.",
+    description: "Discovery tool. Use first when building from scratch to learn valid indicators, operators, limits, defaults, and schema-safe choices. Do not use for validation or backtesting. Produces capabilities.",
     inputSchema: strategyToolInputSchemas.list_strategy_capabilities,
     endpoint: "/strategy-tools/list_strategy_capabilities"
   },
   {
     name: "list_strategy_templates",
-    description: "List built-in strategy templates available for cloning.",
+    description: "Discovery tool. Use before creating a draft when a built-in template may match the user's goal or market. Do not use once a draft already exists. Produces template candidates.",
     inputSchema: strategyToolInputSchemas.list_strategy_templates,
     endpoint: "/strategy-tools/list_strategy_templates"
   },
   {
     name: "create_strategy_draft",
-    description: "Create a new strategy draft owned by a wallet address.",
+    description: "Mutation tool. Use to create a brand-new draft after capabilities are known and when no reusable strategy or template fits. Do not use if an active strategyId already exists. Produces a strategy draft.",
     inputSchema: strategyToolInputSchemas.create_strategy_draft,
     endpoint: "/strategy-tools/create_strategy_draft"
   },
   {
     name: "update_strategy_draft",
-    description: "Replace a strategy draft payload after local edits.",
+    description: "Mutation tool. Use to replace the full strategy payload after editing rules, sizing, costs, or repairs. Do not send partial objects or root-level strategyId. Produces an updated strategy draft.",
     inputSchema: strategyToolInputSchemas.update_strategy_draft,
     endpoint: "/strategy-tools/update_strategy_draft"
   },
   {
     name: "validate_strategy_draft",
-    description: "Validate a strategy payload or an existing strategy draft and return structured issues.",
+    description: "Verification tool. Use after creating or updating a strategy to confirm schema and logic correctness. Do not skip before backtesting or saving. Produces structured validation status and issues.",
     inputSchema: strategyToolInputSchemas.validate_strategy_draft,
     endpoint: "/strategy-tools/validate_strategy_draft"
   },
   {
     name: "run_strategy_backtest",
-    description: "Run a server-side strategy backtest and return summary, trades and chart overlay.",
+    description: "Terminal tool. Use only after validation succeeds or when the request explicitly requires testing an existing valid strategy. Do not use with a raw strategy payload. Produces backtest summary, trades, and overlay.",
     inputSchema: strategyToolInputSchemas.run_strategy_backtest,
     endpoint: "/strategy-tools/run_strategy_backtest"
   },
   {
     name: "get_backtest_summary",
-    description: "Read the summary metrics of a prior backtest run.",
+    description: "Read-only terminal follow-up. Use after a prior backtest run when only summary metrics are needed. Do not use to start a test. Produces backtest summary.",
     inputSchema: strategyToolInputSchemas.get_backtest_summary,
     endpoint: "/strategy-tools/get_backtest_summary"
   },
   {
     name: "get_backtest_trades",
-    description: "Read the executed trade list of a prior backtest run.",
+    description: "Read-only terminal follow-up. Use after a prior backtest run when trade-by-trade detail is needed. Do not use to start a test. Produces backtest trades.",
     inputSchema: strategyToolInputSchemas.get_backtest_trades,
     endpoint: "/strategy-tools/get_backtest_trades"
   },
   {
     name: "get_backtest_chart_overlay",
-    description: "Read indicator overlays and buy/sell markers for a prior backtest run.",
+    description: "Read-only terminal follow-up. Use after a prior backtest run when chart markers or indicator overlays are needed. Do not use to start a test. Produces chart overlay.",
     inputSchema: strategyToolInputSchemas.get_backtest_chart_overlay,
     endpoint: "/strategy-tools/get_backtest_chart_overlay"
   },
   {
     name: "save_strategy",
-    description: "Validate and promote a draft into a saved strategy version.",
+    description: "Mutation tool. Use after validation passes when the user wants the draft promoted into a saved strategy. Do not use as a substitute for backtesting. Produces a saved strategy and validation result.",
     inputSchema: strategyToolInputSchemas.save_strategy,
     endpoint: "/strategy-tools/save_strategy"
   },
   {
     name: "list_user_strategies",
-    description: "List all strategies owned by the given wallet address.",
+    description: "Discovery tool. Use when the user asks about existing saved or draft strategies for an owner. Do not use when a specific strategyId is already known. Produces a strategy list.",
     inputSchema: strategyToolInputSchemas.list_user_strategies,
     endpoint: "/strategy-tools/list_user_strategies"
   },
   {
     name: "get_strategy",
-    description: "Fetch one strategy by id for the given owner.",
+    description: "Discovery tool. Use when a specific strategyId already exists and you need the full stored payload before validation, edits, or explanation. Produces one strategy.",
     inputSchema: strategyToolInputSchemas.get_strategy,
     endpoint: "/strategy-tools/get_strategy"
   },
   {
     name: "clone_strategy_template",
-    description: "Clone a built-in template into a new draft for a specific owner and market.",
+    description: "Mutation tool. Use when a template already matches the request better than creating from scratch. Do not use without marketId and templateId. Produces a cloned strategy draft.",
     inputSchema: strategyToolInputSchemas.clone_strategy_template,
     endpoint: "/strategy-tools/clone_strategy_template"
   }

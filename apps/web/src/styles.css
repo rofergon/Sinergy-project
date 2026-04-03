@@ -618,6 +618,8 @@ a { color: inherit; text-decoration: none; }
 .strategy-panel {
   display: flex;
   flex-direction: column;
+  min-height: 100%;
+  overflow: hidden;
   border-bottom: 1px solid var(--border);
   background: linear-gradient(180deg, rgba(18, 22, 28, 0.95), rgba(11, 14, 17, 0.98));
 }
@@ -666,8 +668,11 @@ a { color: inherit; text-decoration: none; }
 .strategy-panel-body {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   gap: 14px;
   padding: 14px;
+  overflow-y: auto;
 }
 
 .strategy-row,
@@ -865,101 +870,24 @@ a { color: inherit; text-decoration: none; }
 }
 
 .strategy-studio-page {
-  min-height: calc(100vh - var(--navbar-h) - var(--ticker-h));
-  display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  height: calc(100vh - var(--navbar-h) - var(--ticker-h));
+  display: flex;
+  overflow: hidden;
   background:
     radial-gradient(circle at top left, rgba(14, 203, 129, 0.06), transparent 28%),
     radial-gradient(circle at top right, rgba(30, 157, 242, 0.08), transparent 28%),
     var(--bg-primary);
 }
 
-.strategy-studio-side {
-  border-right: 1px solid var(--border);
-  padding: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  background: rgba(11, 14, 17, 0.88);
-}
-
-.strategy-studio-card {
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 16px;
-  background: linear-gradient(180deg, rgba(18, 22, 28, 0.98), rgba(11, 14, 17, 0.98));
-}
-
-.strategy-studio-card.hero {
-  padding: 20px;
-}
-
-.strategy-studio-kicker {
-  display: inline-block;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 11px;
-  font-weight: 700;
-  margin-bottom: 10px;
-}
-
-.strategy-studio-card h1 {
-  font-size: 28px;
-  line-height: 1.02;
-  letter-spacing: -0.05em;
-  margin-bottom: 10px;
-}
-
-.strategy-studio-card p {
-  color: var(--text-secondary);
-  line-height: 1.55;
-}
-
-.strategy-studio-action-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.strategy-studio-action-list button {
-  width: 100%;
-  border: 1px solid var(--border);
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  border-radius: 12px;
-  padding: 11px 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.strategy-studio-context-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-top: 12px;
-}
-
-.strategy-studio-context-grid span {
-  display: block;
-  color: var(--text-secondary);
-  font-size: 11px;
-  margin-bottom: 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.strategy-studio-context-grid strong {
-  font-size: 14px;
-}
-
 .strategy-studio-main {
+  width: 100%;
   min-width: 0;
+  min-height: 0;
   padding: 18px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  overflow: hidden;
 }
 
 .strategy-studio-topbar {
@@ -967,16 +895,40 @@ a { color: inherit; text-decoration: none; }
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  padding: 16px 18px;
+  padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 18px;
   background: linear-gradient(180deg, rgba(18, 22, 28, 0.96), rgba(11, 14, 17, 0.98));
 }
 
-.strategy-studio-topbar p {
+.strategy-studio-toolbar-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.strategy-studio-toolbar-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.strategy-studio-toolbar-meta span {
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(30, 35, 41, 0.58);
   color: var(--text-secondary);
-  margin-top: 6px;
-  max-width: 620px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.strategy-studio-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: flex-end;
 }
 
 .strategy-studio-mode-tabs {
@@ -985,16 +937,32 @@ a { color: inherit; text-decoration: none; }
   min-width: 320px;
 }
 
+.strategy-studio-trade-btn {
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-radius: 12px;
+  padding: 10px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 .strategy-studio-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) 440px;
   gap: 16px;
   min-height: 0;
   flex: 1;
+  overflow: hidden;
+}
+
+.strategy-studio-grid.agentic-mode {
+  grid-template-columns: minmax(0, 1fr) minmax(560px, 640px);
 }
 
 .strategy-studio-chart-col,
 .strategy-studio-workspace-col {
+  height: 100%;
   min-height: 0;
   border: 1px solid var(--border);
   border-radius: 18px;
@@ -1009,13 +977,125 @@ a { color: inherit; text-decoration: none; }
 
 .strategy-studio-workspace-col {
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .strategy-agent-panel {
   display: flex;
   flex-direction: column;
   min-height: 100%;
+  overflow: hidden;
   background: linear-gradient(180deg, rgba(18, 22, 28, 0.96), rgba(11, 14, 17, 0.98));
+}
+
+.strategy-agent-workspace {
+  position: relative;
+  display: block;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.strategy-agent-sidebar {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  bottom: 10px;
+  width: min(360px, calc(100% - 20px));
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(22, 27, 34, 0.98), rgba(14, 18, 24, 0.96));
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
+  transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease;
+}
+
+.strategy-agent-workspace.sessions-closed .strategy-agent-sidebar {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(18px);
+}
+
+.strategy-agent-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.strategy-agent-rail-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border: none;
+  background: rgba(5, 9, 14, 0.38);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.strategy-agent-rail-backdrop.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.strategy-agent-main-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(18, 22, 28, 0.36);
+}
+
+.strategy-agent-main-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.strategy-agent-main-copy strong {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.strategy-agent-main-copy small {
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.strategy-agent-rail-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-radius: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.strategy-agent-rail-icon {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.strategy-agent-rail-icon span {
+  width: 14px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
 }
 
 .strategy-agent-head {
@@ -1077,16 +1157,30 @@ a { color: inherit; text-decoration: none; }
 
 .strategy-agent-session-bar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
   gap: 12px;
-  padding: 10px 16px;
+  padding: 16px;
   border-bottom: 1px solid var(--border);
+  background: rgba(18, 22, 28, 0.42);
 }
 
 .strategy-agent-session-bar small {
   color: var(--text-secondary);
   line-height: 1.45;
+}
+
+.strategy-agent-session-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.strategy-agent-session-copy strong {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
 }
 
 .strategy-agent-session-bar button {
@@ -1105,16 +1199,34 @@ a { color: inherit; text-decoration: none; }
 }
 
 .strategy-agent-history {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
+  padding: 14px 16px 16px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .strategy-agent-history-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
+}
+
+.strategy-agent-history-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.strategy-agent-history-head strong {
+  display: block;
+}
+
+.strategy-agent-history-head small {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-secondary);
 }
 
 .strategy-agent-history-head button {
@@ -1134,8 +1246,8 @@ a { color: inherit; text-decoration: none; }
 
 .strategy-agent-history-card {
   display: flex;
-  justify-content: space-between;
-  gap: 16px;
+  flex-direction: column;
+  gap: 14px;
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -1168,12 +1280,13 @@ a { color: inherit; text-decoration: none; }
 
 .strategy-agent-history-actions {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 8px;
-  min-width: 140px;
+  min-width: 0;
 }
 
 .strategy-agent-history-actions button {
+  flex: 1 1 130px;
   border: 1px solid var(--border);
   background: var(--bg-secondary);
   color: var(--text-primary);
@@ -1291,6 +1404,7 @@ a { color: inherit; text-decoration: none; }
   display: flex;
   flex-direction: column;
   gap: 12px;
+  background: rgba(14, 18, 24, 0.82);
 }
 
 .strategy-agent-compose textarea {
@@ -1306,8 +1420,24 @@ a { color: inherit; text-decoration: none; }
 
 .strategy-agent-actions {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
   gap: 10px;
+}
+
+.strategy-agent-plan-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.strategy-agent-plan-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
 }
 
 .strategy-agent-actions button {
@@ -1319,14 +1449,56 @@ a { color: inherit; text-decoration: none; }
   cursor: pointer;
 }
 
+.strategy-agent-actions button:disabled,
+.strategy-agent-plan-toggle input:disabled {
+  cursor: not-allowed;
+}
+
+.strategy-agent-actions button:disabled {
+  opacity: 0.58;
+}
+
+.strategy-agent-submit-btn {
+  min-width: 144px;
+}
+
+.strategy-primary-btn:disabled {
+  background: linear-gradient(135deg, rgba(240, 185, 11, 0.28), rgba(247, 201, 72, 0.24)) !important;
+  color: rgba(255, 255, 255, 0.88) !important;
+  border: 1px solid rgba(240, 185, 11, 0.14) !important;
+}
+
+.strategy-agent-status-msg {
+  margin: 0 16px 16px;
+}
+
 @media (max-width: 900px) {
+  .strategy-agent-workspace {
+    display: block;
+  }
+
+  .strategy-agent-sidebar {
+    top: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: min(380px, calc(100% - 16px));
+  }
+
+  .strategy-agent-workspace.sessions-closed .strategy-agent-sidebar {
+    display: flex;
+  }
+
+  .strategy-agent-main-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   .strategy-agent-context {
     grid-template-columns: repeat(2, auto minmax(0, 1fr));
   }
 
   .strategy-agent-session-bar {
-    flex-direction: column;
-    align-items: flex-start;
+    padding-bottom: 14px;
   }
 
   .strategy-agent-history-card {
@@ -2848,26 +3020,31 @@ a { color: inherit; text-decoration: none; }
   .strategy-card-grid,
   .strategy-actions-row,
   .backtest-metric-grid,
-  .strategy-studio-context-grid,
   .strategy-quick-actions {
     grid-template-columns: 1fr;
   }
-  .strategy-studio-page,
   .strategy-studio-grid {
     grid-template-columns: 1fr;
   }
-  .strategy-studio-page { min-height: auto; }
-  .strategy-studio-side {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
+  .strategy-studio-page {
+    height: auto;
+    min-height: auto;
+    overflow: visible;
   }
   .strategy-studio-topbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .strategy-studio-toolbar-actions {
     flex-direction: column;
     align-items: stretch;
   }
   .strategy-studio-mode-tabs {
     width: 100%;
     min-width: 0;
+  }
+  .strategy-studio-trade-btn {
+    width: 100%;
   }
   .strategy-agent-context {
     grid-template-columns: 1fr 1fr;
@@ -2892,8 +3069,7 @@ a { color: inherit; text-decoration: none; }
   .markets-hero-copy,
   .markets-spotlight,
   .markets-mover-card { border-radius: 20px; }
-  .strategy-studio-main,
-  .strategy-studio-side {
+  .strategy-studio-main {
     padding: 12px;
   }
   .markets-table-head,
@@ -2913,5 +3089,14 @@ a { color: inherit; text-decoration: none; }
   .strategy-agent-actions,
   .strategy-panel-footer {
     flex-direction: column;
+  }
+
+  .strategy-agent-plan-toggle {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .strategy-agent-submit-btn {
+    width: 100%;
   }
 }

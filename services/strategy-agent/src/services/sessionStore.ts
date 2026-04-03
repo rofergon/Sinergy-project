@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { StrategyToolName } from "@sinergy/shared";
 import type {
   AgentArtifacts,
+  AgentExecutionMetrics,
   AgentSessionListItem,
   AgentSessionSnapshot,
   AgentSessionTurn,
@@ -20,6 +21,8 @@ type StrategyAgentSession = {
   runId?: string;
   summary?: Record<string, unknown>;
   validation?: Record<string, unknown>;
+  lastRunMode?: "native-tools" | "fallback-json";
+  metrics?: AgentExecutionMetrics;
   createdAt: string;
   updatedAt: string;
 };
@@ -133,13 +136,18 @@ export class StrategyAgentSessionStore {
           step,
           tool,
           input_json,
+          reason,
+          expected_artifact,
+          result_summary,
+          progress_observed,
+          failure_class,
           output_json,
           error_json,
           started_at,
           completed_at,
           created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     );
 
@@ -151,6 +159,11 @@ export class StrategyAgentSessionStore {
         entry.step,
         entry.tool,
         JSON.stringify(entry.input),
+        entry.reason ?? null,
+        entry.expectedArtifact ?? null,
+        entry.resultSummary ?? null,
+        entry.progressObserved === undefined ? null : Number(entry.progressObserved),
+        entry.failureClass ?? null,
         entry.output ? JSON.stringify(entry.output) : null,
         entry.error ? JSON.stringify(entry.error) : null,
         entry.startedAt,
@@ -169,6 +182,16 @@ export class StrategyAgentSessionStore {
     session.runId = artifacts.runId ?? session.runId;
     session.summary = artifacts.summary ?? session.summary;
     session.validation = artifacts.validation ?? session.validation;
+    session.updatedAt = new Date().toISOString();
+    this.writeSession(session);
+  }
+
+  applyRunDiagnostics(
+    session: StrategyAgentSession,
+    diagnostics: { mode: "native-tools" | "fallback-json"; metrics: AgentExecutionMetrics }
+  ) {
+    session.lastRunMode = diagnostics.mode;
+    session.metrics = diagnostics.metrics;
     session.updatedAt = new Date().toISOString();
     this.writeSession(session);
   }
@@ -211,6 +234,8 @@ export class StrategyAgentSessionStore {
       strategyId: session.strategyId,
       strategy: session.strategy,
       runId: session.runId,
+      lastRunMode: session.lastRunMode,
+      metrics: session.metrics,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
       turnCount: turnCountRow.count,
@@ -299,6 +324,8 @@ export class StrategyAgentSessionStore {
         run_id TEXT,
         summary_json TEXT,
         validation_json TEXT,
+        last_run_mode TEXT,
+        metrics_json TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -327,6 +354,11 @@ export class StrategyAgentSessionStore {
         step INTEGER NOT NULL,
         tool TEXT NOT NULL,
         input_json TEXT NOT NULL,
+        reason TEXT,
+        expected_artifact TEXT,
+        result_summary TEXT,
+        progress_observed INTEGER,
+        failure_class TEXT,
         output_json TEXT,
         error_json TEXT,
         started_at TEXT NOT NULL,
@@ -343,6 +375,13 @@ export class StrategyAgentSessionStore {
     this.ensureColumn("agent_sessions", "strategy_status", "TEXT");
     this.ensureColumn("agent_sessions", "strategy_timeframe", "TEXT");
     this.ensureColumn("agent_sessions", "strategy_updated_at", "TEXT");
+    this.ensureColumn("agent_sessions", "last_run_mode", "TEXT");
+    this.ensureColumn("agent_sessions", "metrics_json", "TEXT");
+    this.ensureColumn("agent_session_tool_trace", "reason", "TEXT");
+    this.ensureColumn("agent_session_tool_trace", "expected_artifact", "TEXT");
+    this.ensureColumn("agent_session_tool_trace", "result_summary", "TEXT");
+    this.ensureColumn("agent_session_tool_trace", "progress_observed", "INTEGER");
+    this.ensureColumn("agent_session_tool_trace", "failure_class", "TEXT");
   }
 
   private readSession(sessionId: string) {
@@ -361,6 +400,8 @@ export class StrategyAgentSessionStore {
             run_id,
             summary_json,
             validation_json,
+            last_run_mode,
+            metrics_json,
             created_at,
             updated_at
           FROM agent_sessions
@@ -380,6 +421,8 @@ export class StrategyAgentSessionStore {
           run_id: string | null;
           summary_json: string | null;
           validation_json: string | null;
+          last_run_mode: string | null;
+          metrics_json: string | null;
           created_at: string;
           updated_at: string;
         }
@@ -408,6 +451,8 @@ export class StrategyAgentSessionStore {
       runId: row.run_id ?? undefined,
       summary: parseOptionalJson(row.summary_json),
       validation: parseOptionalJson(row.validation_json),
+      lastRunMode: row.last_run_mode as StrategyAgentSession["lastRunMode"],
+      metrics: parseOptionalJson(row.metrics_json) as AgentExecutionMetrics | undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at
     } satisfies StrategyAgentSession;
@@ -429,10 +474,12 @@ export class StrategyAgentSessionStore {
             run_id,
             summary_json,
             validation_json,
+            last_run_mode,
+            metrics_json,
             created_at,
             updated_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(session_id) DO UPDATE SET
             owner_address = excluded.owner_address,
             market_id = excluded.market_id,
@@ -444,6 +491,8 @@ export class StrategyAgentSessionStore {
             run_id = excluded.run_id,
             summary_json = excluded.summary_json,
             validation_json = excluded.validation_json,
+            last_run_mode = excluded.last_run_mode,
+            metrics_json = excluded.metrics_json,
             updated_at = excluded.updated_at
         `
       )
@@ -459,6 +508,8 @@ export class StrategyAgentSessionStore {
         session.runId ?? null,
         session.summary ? JSON.stringify(session.summary) : null,
         session.validation ? JSON.stringify(session.validation) : null,
+        session.lastRunMode ?? null,
+        session.metrics ? JSON.stringify(session.metrics) : null,
         session.createdAt,
         session.updatedAt
       );
@@ -477,6 +528,8 @@ export class StrategyAgentSessionStore {
             strategy_timeframe = ?,
             strategy_updated_at = ?,
             run_id = ?,
+            last_run_mode = ?,
+            metrics_json = ?,
             updated_at = ?
           WHERE session_id = ?
         `
@@ -489,6 +542,8 @@ export class StrategyAgentSessionStore {
         session.strategy?.timeframe ?? null,
         session.strategy?.updatedAt ?? null,
         session.runId ?? null,
+        session.lastRunMode ?? null,
+        session.metrics ? JSON.stringify(session.metrics) : null,
         session.updatedAt,
         session.sessionId
       );

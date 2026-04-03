@@ -146,6 +146,8 @@ export function StrategyAgentPanel({
   const [session, setSession] = useState<StrategyAgentSessionSnapshot | null>(null);
   const [history, setHistory] = useState<StrategyAgentSessionListItem[]>([]);
   const [historyBusy, setHistoryBusy] = useState(false);
+  const [historyRailOpen, setHistoryRailOpen] = useState(false);
+  const [planModeEnabled, setPlanModeEnabled] = useState(false);
 
   const storageKey = useMemo(() => {
     if (!address || !selectedMarket?.id) return null;
@@ -413,169 +415,231 @@ export function StrategyAgentPanel({
         <strong>{session?.strategy?.name ?? shortId(session?.strategyId)}</strong>
       </div>
 
-      <div className="strategy-agent-session-bar">
-        <small>
-          {session
-            ? `${session.turnCount} turns in memory • updated ${formatTimestamp(session.updatedAt)}`
-            : "Pick a previous session from history or start a fresh one for this market."}
-        </small>
-        <div className="strategy-agent-session-actions">
-          {session?.strategyId && (
+      <div className={`strategy-agent-workspace ${historyRailOpen ? "sessions-open" : "sessions-closed"}`}>
+        <div className="strategy-agent-main">
+          <div className="strategy-agent-main-toolbar">
+            <div className="strategy-agent-main-copy">
+              <strong>Conversation</strong>
+              <small>
+                {session
+                  ? `${session.turnCount} turns in memory • session ${shortId(session.sessionId)}`
+                  : "Start a fresh run or reopen one from the sessions rail."}
+              </small>
+            </div>
             <button
               type="button"
-              onClick={() => onReviewStrategy(session.strategyId!, null)}
-              disabled={busy !== null}
+              className="strategy-agent-rail-toggle"
+              onClick={() => setHistoryRailOpen((current) => !current)}
+              aria-expanded={historyRailOpen}
+              aria-label={historyRailOpen ? "Hide sessions panel" : "Show sessions panel"}
             >
-              Open Strategy In Builder
+              <span className="strategy-agent-rail-icon" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </span>
+              <span>{historyRailOpen ? "Hide Sessions" : "Show Sessions"}</span>
             </button>
-          )}
-          <button type="button" onClick={startNewSession} disabled={busy !== null}>
-            New Session
-          </button>
-        </div>
-      </div>
+          </div>
 
-      <div className="strategy-agent-history">
-        <div className="strategy-agent-history-head">
-          <strong>Session History</strong>
-          <button type="button" onClick={() => void refreshHistory()} disabled={historyBusy || busy !== null}>
-            {historyBusy ? "Refreshing..." : "Refresh History"}
-          </button>
-        </div>
-
-        {history.length === 0 ? (
-          <div className="strategy-empty-state">No saved sessions yet for this market.</div>
-        ) : (
-          <div className="strategy-agent-history-list">
-            {history.map((item) => (
-              <div
-                key={item.sessionId}
-                className={`strategy-agent-history-card ${item.sessionId === session?.sessionId ? "active" : ""}`}
-              >
-                <div className="strategy-agent-history-copy">
-                  <strong>{summarizeSession(item)}</strong>
-                  <small>{formatTimestamp(item.updatedAt)}</small>
-                  <p>{item.lastAssistantMessage ?? item.lastUserMessage ?? "Session without messages yet."}</p>
-                  <div className="strategy-agent-chips">
-                    <span>{item.turnCount} turns</span>
-                    {item.strategy?.status && <span>{item.strategy.status}</span>}
-                    {item.strategy?.timeframe && <span>{item.strategy.timeframe}</span>}
+          <div className="strategy-agent-thread">
+            {messages.length === 0 ? (
+              <div className="strategy-empty-state">
+                Try something like: "Create an EMA crossover strategy for this market, validate it, and run a
+                backtest." Sessions and linked strategies stay available in the right rail.
+              </div>
+            ) : (
+              messages.map((message) => (
+                <div
+                  key={message.id}
+                  className={`strategy-agent-message ${message.role === "assistant" ? "assistant" : "user"}`}
+                >
+                  <div className="strategy-agent-message-head">
+                    <strong>{message.role === "assistant" ? "Agent" : "You"}</strong>
+                    {message.mode && <span>{message.mode === "plan" ? "Plan" : "Run"}</span>}
                   </div>
-                </div>
-                <div className="strategy-agent-history-actions">
-                  <button type="button" onClick={() => void loadSession(item.sessionId)} disabled={busy !== null}>
-                    Open Session
-                  </button>
-                  {item.strategyId && (
+                  <p>{message.text}</p>
+
+                  {message.plannedTools && message.plannedTools.length > 0 && (
+                    <div className="strategy-agent-list">
+                      {message.plannedTools.map((item) => (
+                        <div key={`${message.id}-${item.tool}`}>
+                          <strong>{item.tool}</strong>
+                          <small>{item.why}</small>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {message.usedTools && message.usedTools.length > 0 && (
+                    <div className="strategy-agent-chips">
+                      {message.usedTools.map((tool) => (
+                        <span key={`${message.id}-${tool}`}>{tool}</span>
+                      ))}
+                    </div>
+                  )}
+
+                  {message.trace && message.trace.length > 0 && (
+                    <div className="strategy-agent-trace">
+                      {message.trace.map((entry) => (
+                        <div key={`${message.id}-${entry.step}`}>
+                          <strong>
+                            {entry.step}. {entry.tool}
+                          </strong>
+                          <small>{entry.error?.message ?? "completed"}</small>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {message.warnings && message.warnings.length > 0 && (
+                    <div className="strategy-agent-warnings">
+                      {message.warnings.map((warning) => (
+                        <small key={`${message.id}-${warning}`}>{warning}</small>
+                      ))}
+                    </div>
+                  )}
+
+                  {message.strategyId && (
                     <button
                       type="button"
-                      onClick={() => onReviewStrategy(item.strategyId!, null)}
-                      disabled={busy !== null}
+                      className="strategy-agent-review-btn"
+                      onClick={() => onReviewStrategy(message.strategyId!, message.bundle ?? null)}
                     >
-                      Open Strategy
+                      Review In Builder
                     </button>
                   )}
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
-        )}
-      </div>
 
-      <div className="strategy-agent-thread">
-        {messages.length === 0 ? (
-          <div className="strategy-empty-state">
-            Try something like: "Create an EMA crossover strategy for this market, validate it, and run a
-            backtest." Sessions and linked strategies now stay available in history.
+          <div className="strategy-agent-compose">
+            <textarea
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              placeholder="Describe the strategy you want to build, validate, improve, or continue..."
+            />
+            <div className="strategy-agent-actions">
+              <label className="strategy-agent-plan-toggle">
+                <input
+                  type="checkbox"
+                  checked={planModeEnabled}
+                  onChange={(event) => setPlanModeEnabled(event.target.checked)}
+                  disabled={busy !== null}
+                />
+                <span>Plan mode</span>
+              </label>
+              <button
+                type="button"
+                className="strategy-primary-btn strategy-agent-submit-btn"
+                onClick={() => void submit(planModeEnabled ? "plan" : "run")}
+                disabled={busy !== null || !prompt.trim()}
+              >
+                {busy === "plan"
+                  ? "Planning..."
+                  : busy === "run"
+                    ? "Running..."
+                    : planModeEnabled
+                      ? "Plan With AI"
+                      : "Run With AI"}
+              </button>
+            </div>
           </div>
-        ) : (
-          messages.map((message) => (
-            <div
-              key={message.id}
-              className={`strategy-agent-message ${message.role === "assistant" ? "assistant" : "user"}`}
-            >
-              <div className="strategy-agent-message-head">
-                <strong>{message.role === "assistant" ? "Agent" : "You"}</strong>
-                {message.mode && <span>{message.mode === "plan" ? "Plan" : "Run"}</span>}
-              </div>
-              <p>{message.text}</p>
 
-              {message.plannedTools && message.plannedTools.length > 0 && (
-                <div className="strategy-agent-list">
-                  {message.plannedTools.map((item) => (
-                    <div key={`${message.id}-${item.tool}`}>
-                      <strong>{item.tool}</strong>
-                      <small>{item.why}</small>
-                    </div>
-                  ))}
-                </div>
-              )}
+          {status && <div className="strategy-status-msg strategy-agent-status-msg">{status}</div>}
+        </div>
 
-              {message.usedTools && message.usedTools.length > 0 && (
-                <div className="strategy-agent-chips">
-                  {message.usedTools.map((tool) => (
-                    <span key={`${message.id}-${tool}`}>{tool}</span>
-                  ))}
-                </div>
-              )}
+        <button
+          type="button"
+          className={`strategy-agent-rail-backdrop ${historyRailOpen ? "open" : ""}`}
+          onClick={() => setHistoryRailOpen(false)}
+          aria-hidden={!historyRailOpen}
+          tabIndex={historyRailOpen ? 0 : -1}
+        />
 
-              {message.trace && message.trace.length > 0 && (
-                <div className="strategy-agent-trace">
-                  {message.trace.map((entry) => (
-                    <div key={`${message.id}-${entry.step}`}>
-                      <strong>
-                        {entry.step}. {entry.tool}
-                      </strong>
-                      <small>{entry.error?.message ?? "completed"}</small>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {message.warnings && message.warnings.length > 0 && (
-                <div className="strategy-agent-warnings">
-                  {message.warnings.map((warning) => (
-                    <small key={`${message.id}-${warning}`}>{warning}</small>
-                  ))}
-                </div>
-              )}
-
-              {message.strategyId && (
+        <aside className="strategy-agent-sidebar" aria-hidden={!historyRailOpen}>
+          <div className="strategy-agent-session-bar">
+            <div className="strategy-agent-session-copy">
+              <strong>Session Workspace</strong>
+              <small>
+                {session
+                  ? `${session.turnCount} turns in memory • updated ${formatTimestamp(session.updatedAt)}`
+                  : "Pick a previous session from the right rail or start a fresh one for this market."}
+              </small>
+            </div>
+            <div className="strategy-agent-session-actions">
+              {session?.strategyId && (
                 <button
                   type="button"
-                  className="strategy-agent-review-btn"
-                  onClick={() => onReviewStrategy(message.strategyId!, message.bundle ?? null)}
+                  onClick={() => onReviewStrategy(session.strategyId!, null)}
+                  disabled={busy !== null}
                 >
-                  Review In Builder
+                  Open Strategy In Builder
                 </button>
               )}
+              <button type="button" onClick={startNewSession} disabled={busy !== null}>
+                New Session
+              </button>
             </div>
-          ))
-        )}
-      </div>
+          </div>
 
-      <div className="strategy-agent-compose">
-        <textarea
-          value={prompt}
-          onChange={(event) => setPrompt(event.target.value)}
-          placeholder="Describe the strategy you want to build, validate, improve, or continue..."
-        />
-        <div className="strategy-agent-actions">
-          <button type="button" onClick={() => void submit("plan")} disabled={busy !== null || !prompt.trim()}>
-            {busy === "plan" ? "Planning..." : "Plan With AI"}
-          </button>
-          <button
-            type="button"
-            className="strategy-primary-btn"
-            onClick={() => void submit("run")}
-            disabled={busy !== null || !prompt.trim()}
-          >
-            {busy === "run" ? "Running..." : "Run With AI"}
-          </button>
-        </div>
-      </div>
+          <div className="strategy-agent-history">
+            <div className="strategy-agent-history-head">
+              <div>
+                <strong>Session History</strong>
+                <small>Your recent runs for this market.</small>
+              </div>
+              <div className="strategy-agent-history-head-actions">
+                <button type="button" onClick={() => void refreshHistory()} disabled={historyBusy || busy !== null}>
+                  {historyBusy ? "Refreshing..." : "Refresh"}
+                </button>
+                <button type="button" onClick={() => setHistoryRailOpen(false)} disabled={busy !== null}>
+                  Close
+                </button>
+              </div>
+            </div>
 
-      {status && <div className="strategy-status-msg">{status}</div>}
+            {history.length === 0 ? (
+              <div className="strategy-empty-state">No saved sessions yet for this market.</div>
+            ) : (
+              <div className="strategy-agent-history-list">
+                {history.map((item) => (
+                  <div
+                    key={item.sessionId}
+                    className={`strategy-agent-history-card ${item.sessionId === session?.sessionId ? "active" : ""}`}
+                  >
+                    <div className="strategy-agent-history-copy">
+                      <strong>{summarizeSession(item)}</strong>
+                      <small>{formatTimestamp(item.updatedAt)}</small>
+                      <p>{item.lastAssistantMessage ?? item.lastUserMessage ?? "Session without messages yet."}</p>
+                      <div className="strategy-agent-chips">
+                        <span>{item.turnCount} turns</span>
+                        {item.strategy?.status && <span>{item.strategy.status}</span>}
+                        {item.strategy?.timeframe && <span>{item.strategy.timeframe}</span>}
+                      </div>
+                    </div>
+                    <div className="strategy-agent-history-actions">
+                      <button type="button" onClick={() => void loadSession(item.sessionId)} disabled={busy !== null}>
+                        Open Session
+                      </button>
+                      {item.strategyId && (
+                        <button
+                          type="button"
+                          onClick={() => onReviewStrategy(item.strategyId!, null)}
+                          disabled={busy !== null}
+                        >
+                          Open Strategy
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </aside>
+      </div>
     </div>
   );
 }
