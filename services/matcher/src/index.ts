@@ -17,11 +17,15 @@ import { LiquidityRouter } from "./services/router.js";
 import { RebalanceWorker } from "./services/rebalanceWorker.js";
 import { BridgeClaimService } from "./services/bridgeClaims.js";
 import { ZkProofService } from "./services/zkProofs.js";
+import { StrategyService } from "./services/strategyService.js";
+import { StrategyToolApi } from "./services/strategyToolApi.js";
+import { makeStrategyToolMeta, toStrategyToolErrorPayload } from "./services/strategyToolSecurity.js";
 import type {
   CanonicalAssetConfig,
   RoutePreference,
   RouterMarketConfig
 } from "./types.js";
+import { strategyToolDefinitions, type StrategyToolName } from "@sinergy/shared";
 
 const deployment = loadDeployment(env.DEPLOYMENT_FILE);
 const tokens = resolveTokens(deployment);
@@ -137,6 +141,12 @@ const rebalanceWorker = new RebalanceWorker({
 });
 rebalanceWorker.start();
 const zkProofService = new ZkProofService(env.ZK_WITHDRAWAL_PACKAGE_FILE);
+const strategyService = new StrategyService({
+  dbFile: env.STRATEGY_DB_FILE,
+  markets,
+  priceService
+});
+const strategyToolApi = new StrategyToolApi(strategyService);
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
@@ -160,6 +170,58 @@ app.get("/prices", async () => ({
   prices: priceService.getAll(),
   status: priceService.getStatus()
 }));
+
+app.get("/strategy/openapi.json", async () => strategyService.getOpenApiSpec());
+
+app.get("/strategy/capabilities", async () => ({
+  capabilities: strategyService.listCapabilities()
+}));
+
+app.get("/strategy-tools/catalog", async () => ({
+  ok: true,
+  meta: makeStrategyToolMeta("catalog"),
+  result: {
+    tools: strategyToolDefinitions.map((definition) => ({
+      name: definition.name,
+      description: definition.description,
+      endpoint: definition.endpoint
+    }))
+  }
+}));
+
+app.get("/strategy/templates", async (request) => {
+  const { ownerAddress, marketId } = request.query as {
+    ownerAddress?: `0x${string}`;
+    marketId?: `0x${string}`;
+  };
+
+  if (!ownerAddress) {
+    throw new Error("ownerAddress query param is required");
+  }
+
+  return {
+    templates: strategyService.listTemplates(ownerAddress, marketId)
+  };
+});
+
+app.post("/strategy-tools/:tool", async (request, reply) => {
+  const { tool } = request.params as { tool: StrategyToolName };
+  const input = (request.body ?? {}) as Record<string, unknown>;
+  const meta = makeStrategyToolMeta(tool);
+
+  try {
+    const result = await strategyToolApi.execute(tool, input);
+    return {
+      ok: true,
+      meta,
+      result
+    };
+  } catch (error) {
+    const payload = toStrategyToolErrorPayload(error, tool);
+    reply.code(payload.statusCode);
+    return payload.body;
+  }
+});
 
 app.get("/markets", async () => ({
   markets: markets.map((market) => ({

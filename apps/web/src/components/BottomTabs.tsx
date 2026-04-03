@@ -1,6 +1,8 @@
 import { useState } from "react";
+import type { StrategyBacktestSummary, StrategyBacktestTrade } from "@sinergy/shared";
 import { formatUnits } from "viem";
 import { TradeHistory } from "./TradeHistory";
+import { BacktestResults } from "./BacktestResults";
 
 type MarketSnapshot = {
   id: `0x${string}`;
@@ -25,10 +27,20 @@ type Props = {
   orders: Order[];
   markets: MarketSnapshot[];
   onCancelOrder: (orderId: string) => Promise<void>;
+  backtestSummary?: StrategyBacktestSummary | null;
+  backtestTrades?: StrategyBacktestTrade[];
 };
 
-export function BottomTabs({ address, market, orders, markets, onCancelOrder }: Props) {
-  const [activeTab, setActiveTab] = useState<"trades" | "open" | "history">("trades");
+export function BottomTabs({
+  address,
+  market,
+  orders,
+  markets,
+  onCancelOrder,
+  backtestSummary = null,
+  backtestTrades = []
+}: Props) {
+  const [activeTab, setActiveTab] = useState<"trades" | "open" | "history" | "backtest">("trades");
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [status, setStatus] = useState("");
 
@@ -73,10 +85,19 @@ export function BottomTabs({ address, market, orders, markets, onCancelOrder }: 
         >
           Order History
         </button>
+        <button
+          className={`bottom-tab ${activeTab === "backtest" ? "active" : ""}`}
+          onClick={() => setActiveTab("backtest")}
+        >
+          Backtest
+        </button>
       </div>
 
       <div className="bottom-tab-content">
         {activeTab === "trades" && <TradeHistory market={market} />}
+        {activeTab === "backtest" && (
+          <BacktestResults summary={backtestSummary} trades={backtestTrades} />
+        )}
 
         {activeTab === "open" && (
           <>

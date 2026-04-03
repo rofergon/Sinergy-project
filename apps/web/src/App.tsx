@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useInterwovenKit } from "@initia/interwovenkit-react";
+import type { StrategyTimeframe } from "@sinergy/shared";
 import type { Address, Hex } from "viem";
 import { api } from "./lib/api";
 import { Navbar } from "./components/Navbar";
@@ -14,27 +15,10 @@ import { BalancesPanel } from "./components/BalancesPanel";
 import { PortfolioView } from "./components/PortfolioView";
 import { BridgeLanding } from "./components/BridgeLanding";
 import { MarketsView } from "./components/MarketsView";
+import { StrategyStudio } from "./components/StrategyStudio";
 import { buildBridgeDefaults } from "./initia";
+import type { Market, MarketSnapshot, StrategyBacktestBundle, Token } from "./types";
 import "./styles.css";
-
-type Token = {
-  symbol: string;
-  name: string;
-  address: Address;
-  decimals: number;
-  kind: "quote" | "rwa" | "crypto";
-};
-
-type Market = {
-  id: Hex;
-  symbol: string;
-  baseToken: Token;
-  quoteToken: Token;
-  referencePrice: string;
-  series?: number[];
-  routeable: boolean;
-  routePolicy: "router-enabled" | "dark-pool-only";
-};
 
 type BridgeStatus = {
   relayer: boolean;
@@ -52,13 +36,6 @@ type InventoryPosition = {
   targetAtomic: string;
   maxAtomic: string;
   routeable: boolean;
-};
-
-type MarketSnapshot = Market & {
-  series: number[];
-  changePct: number;
-  trend: "up" | "down";
-  volumeLabel: string;
 };
 
 function buildSeries(key: string, anchor: number) {
@@ -96,7 +73,10 @@ function Dashboard() {
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus | null>(null);
   const [inventory, setInventory] = useState<InventoryPosition[]>([]);
   const [error, setError] = useState("");
-  const [activeView, setActiveView] = useState<"trade" | "markets" | "portfolio" | "bridge">("trade");
+  const [activeView, setActiveView] = useState<"trade" | "strategies" | "markets" | "portfolio" | "bridge">("trade");
+  const [strategyWorkspaceMode, setStrategyWorkspaceMode] = useState<"manual" | "agentic">("manual");
+  const [chartTimeframe, setChartTimeframe] = useState<StrategyTimeframe>("15m");
+  const [strategyBacktest, setStrategyBacktest] = useState<StrategyBacktestBundle | null>(null);
 
   const userAddress = address as Address | undefined;
   const tokens: Token[] = useMemo(() => deployment?.tokens ?? [], [deployment]);
@@ -182,13 +162,28 @@ function Dashboard() {
   }, [marketSnapshots, selectedMarketId]);
 
   useEffect(() => {
+    if (
+      strategyBacktest &&
+      selectedMarket &&
+      strategyBacktest.summary.marketId.toLowerCase() !== selectedMarket.id.toLowerCase()
+    ) {
+      setStrategyBacktest(null);
+    }
+  }, [selectedMarket?.id, strategyBacktest?.summary.marketId]);
+
+  useEffect(() => {
     refreshUser().catch((err) =>
       setError(err instanceof Error ? err.message : String(err))
     );
   }, [userAddress]);
 
-  function navigateTo(view: "trade" | "markets" | "portfolio" | "bridge") {
+  function navigateTo(view: "trade" | "strategies" | "markets" | "portfolio" | "bridge") {
     setActiveView(view);
+  }
+
+  function openStrategies(mode: "manual" | "agentic") {
+    setStrategyWorkspaceMode(mode);
+    setActiveView("strategies");
   }
 
   async function cancelOrder(orderId: string) {
@@ -262,6 +257,22 @@ function Dashboard() {
           onSelectMarket={setSelectedMarketId}
           onGoTrade={() => setActiveView("trade")}
         />
+      ) : activeView === "strategies" ? (
+        <StrategyStudio
+          address={userAddress}
+          markets={marketSnapshots}
+          selectedMarketId={selectedMarket?.id}
+          timeframe={chartTimeframe}
+          onSelectMarket={(marketId) => setSelectedMarketId(marketId as Hex)}
+          onTimeframeChange={setChartTimeframe}
+          orders={orders}
+          onCancelOrder={cancelOrder}
+          strategyBacktest={strategyBacktest}
+          onBacktestResult={setStrategyBacktest}
+          workspaceMode={strategyWorkspaceMode}
+          onWorkspaceModeChange={setStrategyWorkspaceMode}
+          onGoTrade={() => setActiveView("trade")}
+        />
       ) : activeView === "portfolio" ? (
         <PortfolioView
           connected={isConnected}
@@ -282,18 +293,42 @@ function Dashboard() {
             <OrderBook market={selectedMarket} />
           </div>
 
-          <div className="dex-col-center">
-            <TradingViewChart market={selectedMarket} />
+        <div className="dex-col-center">
+            <TradingViewChart
+              market={selectedMarket}
+              timeframe={chartTimeframe}
+              onTimeframeChange={setChartTimeframe}
+              overlay={strategyBacktest?.overlay ?? null}
+            />
             <BottomTabs
               address={userAddress}
               market={selectedMarket}
               orders={orders}
               markets={marketSnapshots}
               onCancelOrder={cancelOrder}
+              backtestSummary={strategyBacktest?.summary ?? null}
+              backtestTrades={strategyBacktest?.trades ?? []}
             />
           </div>
 
           <div className="dex-col-right">
+            <div className="strategy-quick-card">
+              <span className="panel-title">Strategy Builder</span>
+              <strong>Open the full strategy workspace.</strong>
+              <p>
+                Keep Trade focused on execution. Build manually or collaborate with the agent from the
+                dedicated Strategies page.
+              </p>
+              <div className="strategy-quick-actions">
+                <button type="button" onClick={() => openStrategies("manual")}>
+                  Manual Builder
+                </button>
+                <button type="button" onClick={() => openStrategies("agentic")}>
+                  Agent Workspace
+                </button>
+              </div>
+            </div>
+
             <OrderPanel
               connected={isConnected}
               address={userAddress}
