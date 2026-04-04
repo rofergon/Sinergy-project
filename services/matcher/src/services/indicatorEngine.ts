@@ -3,6 +3,7 @@ import type {
   StrategyIndicatorKind,
   StrategyIndicatorOutput,
   StrategyOperand,
+  StrategyOverlayPane,
   StrategyOverlaySeries,
   StrategyRuleGroup
 } from "@sinergy/shared";
@@ -266,6 +267,18 @@ function indicatorColor(ref: IndicatorReference) {
   return palette[ref.indicator];
 }
 
+function indicatorPane(ref: IndicatorReference): StrategyOverlayPane {
+  switch (ref.indicator) {
+    case "rsi":
+    case "macd":
+    case "candle_body_pct":
+    case "candle_direction":
+      return "oscillator";
+    default:
+      return "price";
+  }
+}
+
 export function buildIndicatorOverlays(
   candles: StrategyCandle[],
   strategy: StrategyDefinition,
@@ -277,6 +290,7 @@ export function buildIndicatorOverlays(
     label: indicatorLabel(ref),
     color: indicatorColor(ref),
     seriesType: "line",
+    pane: indicatorPane(ref),
     values: candles.flatMap((candle, index) => {
       const value = seriesMap.get(ref.key)?.[index];
       return value === null || value === undefined ? [] : [{ time: candle.ts, value }];
