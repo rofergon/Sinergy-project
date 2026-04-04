@@ -23,14 +23,14 @@ const envSchema = z.object({
   AGENT_MODEL_BASE_URL: z.string().url().default("http://127.0.0.1:18002/v1"),
   AGENT_MODEL_NAME: z.string().default("Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf"),
   AGENT_MODEL_API_KEY: z.string().default("dummy"),
-  AGENT_MODEL_TIMEOUT_MS: z.coerce.number().int().positive().default(90_000),
-  AGENT_MAX_STEPS: z.coerce.number().int().positive().default(12),
+  AGENT_MODEL_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
+  AGENT_MAX_STEPS: z.coerce.number().int().positive().default(6),
   AGENT_TOOLCALL_RETRIES: z.coerce.number().int().nonnegative().default(2),
   AGENT_FORCE_FALLBACK_JSON: z
     .string()
     .optional()
     .transform((value) => value === "1" || value === "true")
-    .default(false)
+    .default(true)
 });
 
 export const env = envSchema.parse(process.env);

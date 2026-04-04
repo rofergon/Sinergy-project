@@ -16,7 +16,11 @@ const agentService = new StrategyAgentService({
   forceFallbackJson: env.AGENT_FORCE_FALLBACK_JSON
 });
 
-const app = Fastify({ logger: true });
+const app = Fastify({
+  logger: true,
+  connectionTimeout: 600_000,
+  requestTimeout: 600_000
+});
 await app.register(cors, { origin: true });
 
 app.get("/agent/health", async () => await agentService.getHealth());

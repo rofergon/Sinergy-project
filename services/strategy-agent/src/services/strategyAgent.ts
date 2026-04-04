@@ -7,7 +7,7 @@ import {
   type StrategyToolName,
   type StrategyDefinition
 } from "@sinergy/shared";
-import { STRATEGY_AGENT_SYSTEM_PROMPT, buildUserPrompt, buildValidationCorrectionPrompt } from "../prompts.js";
+import { STRATEGY_AGENT_SYSTEM_PROMPT, buildUserPrompt, buildValidationCorrectionPrompt, buildOptimizationPlanPrompt, buildCreationPlanPrompt } from "../prompts.js";
 import type {
   AgentPlanResponse,
   AgentResponse,
@@ -21,6 +21,458 @@ import { runFallbackJsonLoop } from "./fallbackRuntime.js";
 import { createEmptyMetrics, finalizeMetrics, finalMessageMentionsRealArtifacts, summarizeToolProgress } from "./runtimePolicy.js";
 import { StrategyAgentSessionStore } from "./sessionStore.js";
 import { attemptValidationRepair } from "./validationRepairLoop.js";
+
+type BasicFastPathConfig = {
+  kind: "ema" | "template";
+  name: string;
+  templateId?: "rsi-mean-reversion" | "range-breakout" | "bollinger-reversion";
+};
+
+type BasicStrategyKind = "ema" | "rsi-mean-reversion" | "range-breakout" | "bollinger-reversion";
+type OptimizationCandidate = {
+  label?: string;
+  params?: Record<string, unknown>;
+};
+type CreationPlan = {
+  analysis?: string;
+  mode?: "clone_template" | "create_custom";
+  templateId?: string;
+  name?: string;
+  strategyPatch?: Partial<StrategyDefinition>;
+};
+
+function goalRequestsBacktest(goal: string) {
+  return /backtest|test|evaluat|probar|prueba|evaluar/i.test(goal);
+}
+
+function goalLooksLikeEmaCrossover(goal: string) {
+  return /(ema).*(crossover|cross|cruce)|(crossover|cross|cruce).*(ema)/i.test(goal);
+}
+
+function detectBasicFastPath(goal: string): BasicFastPathConfig | null {
+  if (goalLooksLikeEmaCrossover(goal)) {
+    return { kind: "ema", name: "EMA Crossover Strategy" };
+  }
+
+  if (/(rsi).*(mean reversion|reversion|revert|oversold|sobreventa)|(mean reversion|reversion|sobreventa).*(rsi)/i.test(goal)) {
+    return {
+      kind: "template",
+      name: "RSI Mean Reversion",
+      templateId: "rsi-mean-reversion"
+    };
+  }
+
+  if (/(breakout|ruptura|range breakout|canal|rolling high|rolling low)/i.test(goal)) {
+    return {
+      kind: "template",
+      name: "Range Breakout",
+      templateId: "range-breakout"
+    };
+  }
+
+  if (/(bollinger|banda).*(reversion|revert|mean reversion)|(reversion|mean reversion).*(bollinger|banda)/i.test(goal)) {
+    return {
+      kind: "template",
+      name: "Bollinger Reversion",
+      templateId: "bollinger-reversion"
+    };
+  }
+
+  return null;
+}
+
+function goalLooksLikeOptimization(goal: string) {
+  return /improve|optimi|positive pnl|positive|better pnl|make.*profit|mejor|optimiza|positivo|rentable/i.test(goal);
+}
+
+function goalLooksLikeFreshCreation(goal: string) {
+  return /create|build|make|new strategy|from scratch|crea|construye|nueva estrategia/i.test(goal);
+}
+
+function classifyBasicStrategy(strategy: StrategyDefinition): BasicStrategyKind | null {
+  const name = strategy.name.toLowerCase();
+
+  if (name.includes("ema")) return "ema";
+  if (name.includes("rsi")) return "rsi-mean-reversion";
+  if (name.includes("breakout")) return "range-breakout";
+  if (name.includes("bollinger")) return "bollinger-reversion";
+
+  const firstLongEntry = strategy.entryRules.long[0]?.rules[0];
+  if (
+    firstLongEntry?.left.type === "indicator_output" &&
+    firstLongEntry.left.indicator === "ema" &&
+    firstLongEntry?.right.type === "indicator_output" &&
+    firstLongEntry.right.indicator === "ema"
+  ) {
+    return "ema";
+  }
+  if (
+    firstLongEntry?.left.type === "indicator_output" &&
+    firstLongEntry.left.indicator === "rsi"
+  ) {
+    return "rsi-mean-reversion";
+  }
+  if (
+    firstLongEntry?.right.type === "indicator_output" &&
+    (firstLongEntry.right.indicator === "rolling_high" || firstLongEntry.right.indicator === "rolling_low")
+  ) {
+    return "range-breakout";
+  }
+  if (
+    firstLongEntry?.right.type === "indicator_output" &&
+    firstLongEntry.right.indicator === "bollinger"
+  ) {
+    return "bollinger-reversion";
+  }
+
+  return null;
+}
+
+function emaOperand(period: number): StrategyDefinition["entryRules"]["long"][number]["rules"][number]["left"] {
+  return {
+    type: "indicator_output",
+    indicator: "ema",
+    output: "value",
+    params: { period }
+  };
+}
+
+function buildEmaCrossoverDraft(strategy: StrategyDefinition) {
+  const strategyId = strategy.id;
+
+  return {
+    ...strategy,
+    name: strategy.name && strategy.name !== "Strategy Draft" ? strategy.name : "EMA Crossover Strategy",
+    timeframe: "15m",
+    enabledSides: ["long", "short"],
+    entryRules: {
+      long: [
+        {
+          id: `${strategyId}-entry-long-1`,
+          rules: [
+            {
+              id: `${strategyId}-entry-long-rule-1`,
+              left: emaOperand(9),
+              operator: "crosses_above",
+              right: emaOperand(21)
+            }
+          ]
+        }
+      ],
+      short: [
+        {
+          id: `${strategyId}-entry-short-1`,
+          rules: [
+            {
+              id: `${strategyId}-entry-short-rule-1`,
+              left: emaOperand(9),
+              operator: "crosses_below",
+              right: emaOperand(21)
+            }
+          ]
+        }
+      ]
+    },
+    exitRules: {
+      long: [
+        {
+          id: `${strategyId}-exit-long-1`,
+          rules: [
+            {
+              id: `${strategyId}-exit-long-rule-1`,
+              left: emaOperand(9),
+              operator: "crosses_below",
+              right: emaOperand(21)
+            }
+          ]
+        }
+      ],
+      short: [
+        {
+          id: `${strategyId}-exit-short-1`,
+          rules: [
+            {
+              id: `${strategyId}-exit-short-rule-1`,
+              left: emaOperand(9),
+              operator: "crosses_above",
+              right: emaOperand(21)
+            }
+          ]
+        }
+      ]
+    },
+    sizing: {
+      mode: "percent_of_equity",
+      value: 25
+    },
+    riskRules: {
+      stopLossPct: 2,
+      takeProfitPct: 4,
+      trailingStopPct: 1,
+      maxBarsInTrade: 40
+    },
+    costModel: {
+      feeBps: 10,
+      slippageBps: 5,
+      startingEquity: 10_000
+    }
+  } satisfies StrategyDefinition;
+}
+
+function withStrategyName(strategy: StrategyDefinition, name: string) {
+  return {
+    ...strategy,
+    name
+  } satisfies StrategyDefinition;
+}
+
+function buildEmaVariant(strategy: StrategyDefinition, input: {
+  fast: number;
+  slow: number;
+  timeframe?: StrategyDefinition["timeframe"];
+  longOnly?: boolean;
+  stopLossPct?: number;
+  takeProfitPct?: number;
+  trailingStopPct?: number;
+  maxBarsInTrade?: number;
+}) {
+  const base = buildEmaCrossoverDraft(strategy);
+  const next = {
+    ...base,
+    timeframe: input.timeframe ?? base.timeframe,
+    enabledSides: input.longOnly ? ["long"] : ["long", "short"],
+    riskRules: {
+      stopLossPct: input.stopLossPct ?? base.riskRules.stopLossPct,
+      takeProfitPct: input.takeProfitPct ?? base.riskRules.takeProfitPct,
+      trailingStopPct: input.trailingStopPct ?? base.riskRules.trailingStopPct,
+      maxBarsInTrade: input.maxBarsInTrade ?? base.riskRules.maxBarsInTrade
+    }
+  } satisfies StrategyDefinition;
+
+  next.entryRules.long[0].rules[0] = {
+    ...next.entryRules.long[0].rules[0],
+    left: emaOperand(input.fast),
+    right: emaOperand(input.slow)
+  };
+  next.exitRules.long[0].rules[0] = {
+    ...next.exitRules.long[0].rules[0],
+    left: emaOperand(input.fast),
+    right: emaOperand(input.slow)
+  };
+
+  if (input.longOnly) {
+    next.entryRules.short = [];
+    next.exitRules.short = [];
+  } else {
+    next.entryRules.short[0].rules[0] = {
+      ...next.entryRules.short[0].rules[0],
+      left: emaOperand(input.fast),
+      right: emaOperand(input.slow)
+    };
+    next.exitRules.short[0].rules[0] = {
+      ...next.exitRules.short[0].rules[0],
+      left: emaOperand(input.fast),
+      right: emaOperand(input.slow)
+    };
+  }
+
+  return withStrategyName(next, `EMA Crossover ${input.fast}/${input.slow}${input.longOnly ? " Long Only" : ""}`);
+}
+
+function buildRsiVariant(strategy: StrategyDefinition, input: {
+  timeframe?: StrategyDefinition["timeframe"];
+  period: number;
+  entry: number;
+  exit: number;
+  stopLossPct?: number;
+  takeProfitPct?: number;
+}) {
+  const rule = strategy.entryRules.long[0]?.rules[0];
+  const exitRule = strategy.exitRules.long[0]?.rules[0];
+  if (!rule || !exitRule || rule.left.type !== "indicator_output" || exitRule.left.type !== "indicator_output") {
+    return strategy;
+  }
+
+  return withStrategyName({
+    ...strategy,
+    timeframe: input.timeframe ?? strategy.timeframe,
+    enabledSides: ["long"],
+    entryRules: {
+      long: [
+        {
+          ...strategy.entryRules.long[0],
+          rules: [
+            {
+              ...rule,
+              left: {
+                ...rule.left,
+                indicator: "rsi",
+                output: "value",
+                params: { period: input.period }
+              },
+              operator: "<=",
+              right: { type: "constant", value: input.entry }
+            }
+          ]
+        }
+      ],
+      short: []
+    },
+    exitRules: {
+      long: [
+        {
+          ...strategy.exitRules.long[0],
+          rules: [
+            {
+              ...exitRule,
+              left: {
+                ...exitRule.left,
+                indicator: "rsi",
+                output: "value",
+                params: { period: input.period }
+              },
+              operator: ">=",
+              right: { type: "constant", value: input.exit }
+            }
+          ]
+        }
+      ],
+      short: []
+    },
+    riskRules: {
+      ...strategy.riskRules,
+      stopLossPct: input.stopLossPct ?? strategy.riskRules.stopLossPct,
+      takeProfitPct: input.takeProfitPct ?? strategy.riskRules.takeProfitPct
+    }
+  }, `RSI Mean Reversion ${input.period}/${input.entry}-${input.exit}`);
+}
+
+function buildBreakoutVariant(strategy: StrategyDefinition, input: {
+  timeframe?: StrategyDefinition["timeframe"];
+  lookback: number;
+  exitEma: number;
+  stopLossPct?: number;
+  takeProfitPct?: number;
+}) {
+  const longEntry = strategy.entryRules.long[0]?.rules[0];
+  const shortEntry = strategy.entryRules.short[0]?.rules[0];
+  const longExit = strategy.exitRules.long[0]?.rules[0];
+  const shortExit = strategy.exitRules.short[0]?.rules[0];
+  if (!longEntry || !shortEntry || !longExit || !shortExit) {
+    return strategy;
+  }
+
+  return withStrategyName({
+    ...strategy,
+    timeframe: input.timeframe ?? strategy.timeframe,
+    entryRules: {
+      long: [
+        {
+          ...strategy.entryRules.long[0],
+          rules: [
+            {
+              ...longEntry,
+              right: { type: "indicator_output", indicator: "rolling_high", output: "value", params: { lookback: input.lookback } }
+            }
+          ]
+        }
+      ],
+      short: [
+        {
+          ...strategy.entryRules.short[0],
+          rules: [
+            {
+              ...shortEntry,
+              right: { type: "indicator_output", indicator: "rolling_low", output: "value", params: { lookback: input.lookback } }
+            }
+          ]
+        }
+      ]
+    },
+    exitRules: {
+      long: [
+        {
+          ...strategy.exitRules.long[0],
+          rules: [
+            {
+              ...longExit,
+              right: { type: "indicator_output", indicator: "ema", output: "value", params: { period: input.exitEma } }
+            }
+          ]
+        }
+      ],
+      short: [
+        {
+          ...strategy.exitRules.short[0],
+          rules: [
+            {
+              ...shortExit,
+              right: { type: "indicator_output", indicator: "ema", output: "value", params: { period: input.exitEma } }
+            }
+          ]
+        }
+      ]
+    },
+    riskRules: {
+      ...strategy.riskRules,
+      stopLossPct: input.stopLossPct ?? strategy.riskRules.stopLossPct,
+      takeProfitPct: input.takeProfitPct ?? strategy.riskRules.takeProfitPct
+    }
+  }, `Range Breakout ${input.lookback}/${input.exitEma}`);
+}
+
+function buildBollingerVariant(strategy: StrategyDefinition, input: {
+  timeframe?: StrategyDefinition["timeframe"];
+  period: number;
+  stdDev: number;
+  takeProfitPct?: number;
+  stopLossPct?: number;
+}) {
+  const longEntry = strategy.entryRules.long[0]?.rules[0];
+  const longExit = strategy.exitRules.long[0]?.rules[0];
+  if (!longEntry || !longExit) {
+    return strategy;
+  }
+
+  return withStrategyName({
+    ...strategy,
+    timeframe: input.timeframe ?? strategy.timeframe,
+    enabledSides: ["long"],
+    entryRules: {
+      long: [
+        {
+          ...strategy.entryRules.long[0],
+          rules: [
+            {
+              ...longEntry,
+              right: { type: "indicator_output", indicator: "bollinger", output: "lower", params: { period: input.period, stdDev: input.stdDev } }
+            }
+          ]
+        }
+      ],
+      short: []
+    },
+    exitRules: {
+      long: [
+        {
+          ...strategy.exitRules.long[0],
+          rules: [
+            {
+              ...longExit,
+              right: { type: "indicator_output", indicator: "bollinger", output: "middle", params: { period: input.period, stdDev: input.stdDev } }
+            }
+          ]
+        }
+      ],
+      short: []
+    },
+    riskRules: {
+      ...strategy.riskRules,
+      stopLossPct: input.stopLossPct ?? strategy.riskRules.stopLossPct,
+      takeProfitPct: input.takeProfitPct ?? strategy.riskRules.takeProfitPct
+    }
+  }, `Bollinger Reversion ${input.period}/${input.stdDev}`);
+}
 
 function extractMessageText(output: unknown) {
   if (!output || typeof output !== "object") return "";
@@ -43,6 +495,24 @@ function extractMessageText(output: unknown) {
   }
 
   return "";
+}
+
+function parseOptimizationCandidates(text: string): OptimizationCandidate[] {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1) return [];
+  const parsed = JSON.parse(text.slice(start, end + 1)) as { candidates?: OptimizationCandidate[] };
+  return Array.isArray(parsed.candidates) ? parsed.candidates.slice(0, 3) : [];
+}
+
+function parseCreationPlan(text: string): CreationPlan | null {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1) return null;
+  const parsed = JSON.parse(text.slice(start, end + 1)) as CreationPlan;
+  if (!parsed || typeof parsed !== "object") return null;
+  if (parsed.mode !== "clone_template" && parsed.mode !== "create_custom") return null;
+  return parsed;
 }
 
 function collectArtifactsFromTrace(
@@ -257,7 +727,7 @@ async function enforceCompletion(options: CompletionEnforcementOptions): Promise
   let finalMessageAddition = "";
   let finalMessage = options.finalMessage;
   let currentStrategyId = artifacts.strategyId;
-  const goalMentionsBacktest = /backtest|test|evaluat/i.test(goal);
+  const goalMentionsBacktest = goalRequestsBacktest(goal);
 
   if (!currentStrategyId) {
     warnings.push("No strategy was created by the agent. Cannot enforce completion.");
@@ -377,28 +847,7 @@ async function enforceCompletion(options: CompletionEnforcementOptions): Promise
                 validationOk = true;
               } else if (revalidateValidation) {
                 const remaining = revalidateValidation.issues?.length ?? 0;
-                warnings.push(`Auto-repair partial: ${fixableAttempts.length} fixed, ${remaining} remain. Starting LLM correction loop.`);
-
-                const llmResult = await llmCorrectionLoop({
-                  model: model!,
-                  ownerAddress,
-                  strategyId: currentStrategyId,
-                  strategy: typeof revalidateOutput.strategy === "object" && revalidateOutput.strategy ? (revalidateOutput.strategy as StrategyDefinition) : repairResult.patchedStrategy,
-                  issues: (revalidateValidation.issues ?? []) as Array<{ path: string; code: string; message: string; suggestion?: string }>,
-                  maxAttempts: 3,
-                  matcherTransport,
-                  trace,
-                  warnings,
-                  goal,
-                  marketId,
-                  capabilities
-                });
-
-                if (llmResult.validationOk) {
-                  validationOk = true;
-                  artifacts.validation = { ok: true, issues: [] } as Record<string, unknown>;
-                  metrics.repairsSucceeded += 1;
-                }
+                warnings.push(`Auto-repair partial: ${fixableAttempts.length} fixed, ${remaining} remain. Skipping extra LLM repair loop to keep the workflow fast.`);
               }
             } catch (error) {
               revalidateEntry.error = { message: error instanceof Error ? error.message : String(error) };
@@ -417,34 +866,9 @@ async function enforceCompletion(options: CompletionEnforcementOptions): Promise
             warnings.push(`Auto-repair update_strategy_draft failed: ${updateEntry.error.message}`);
           }
         } else {
-          warnings.push(`Auto-repair could not fix any of ${validation.issues.length} issues. Starting LLM correction loop.`);
+          warnings.push(`Auto-repair could not fix any of ${validation.issues.length} issues. Skipping LLM repair loop to avoid long retries.`);
           metrics.enforcementTriggered = true;
-          metrics.finalizationGuardrailsApplied.push("llm_repair");
-
-          if (model) {
-            const llmResult = await llmCorrectionLoop({
-              model,
-              ownerAddress,
-              strategyId: currentStrategyId,
-              strategy: strategyData,
-              issues: validation.issues,
-              maxAttempts: 3,
-              matcherTransport,
-              trace,
-              warnings,
-              goal,
-              marketId,
-              capabilities
-            });
-
-            if (llmResult.validationOk) {
-              validationOk = true;
-              artifacts.validation = { ok: true, issues: [] } as Record<string, unknown>;
-              metrics.repairsSucceeded += 1;
-            }
-          } else {
-            warnings.push("No model available for LLM correction. Strategy may not be backtestable.");
-          }
+          metrics.finalizationGuardrailsApplied.push("fast_fail_on_invalid_strategy");
         }
       }
     }
@@ -505,6 +929,7 @@ async function enforceCompletion(options: CompletionEnforcementOptions): Promise
 
 export class StrategyAgentService {
   private readonly model: ChatOpenAI;
+  private readonly planningModel: ChatOpenAI;
   private readonly matcherTransport: ReturnType<typeof createHttpStrategyToolTransport>;
   private readonly sessions: StrategyAgentSessionStore;
 
@@ -526,6 +951,16 @@ export class StrategyAgentService {
         baseURL: options.modelBaseUrl
       },
       timeout: options.modelTimeoutMs,
+      temperature: 0,
+      maxRetries: 0
+    });
+    this.planningModel = new ChatOpenAI({
+      model: options.modelName,
+      apiKey: options.modelApiKey,
+      configuration: {
+        baseURL: options.modelBaseUrl
+      },
+      timeout: Math.min(options.modelTimeoutMs, 12_000),
       temperature: 0,
       maxRetries: 0
     });
@@ -553,6 +988,10 @@ export class StrategyAgentService {
       model: modelProbe,
       matcher: matcherHealth
     };
+  }
+
+  private async invokePlanningModel(prompt: string) {
+    return await this.planningModel.invoke(prompt);
   }
 
   async getCapabilities() {
@@ -695,10 +1134,69 @@ Return JSON like:
       text: input.goal
     });
     const sessionSnapshot = this.sessions.snapshot(session);
+    const preferFreshCreation = goalLooksLikeFreshCreation(input.goal) && !goalLooksLikeOptimization(input.goal);
     const activeInput = {
       ...input,
-      strategyId: input.strategyId ?? sessionSnapshot.strategyId
+      strategyId: preferFreshCreation ? input.strategyId : (input.strategyId ?? sessionSnapshot.strategyId)
     };
+
+    const fastPathResult = await this.tryRunFastPath(activeInput, trace, warnings, metrics);
+    if (fastPathResult) {
+      artifacts = collectArtifactsFromTrace(trace, fastPathResult.artifacts);
+      metrics = finalizeMetrics(metrics, trace);
+
+      this.sessions.applyArtifacts(session, artifacts);
+      this.sessions.applyRunDiagnostics(session, { mode: "fallback-json", metrics });
+      this.sessions.appendTrace(session, trace);
+      this.sessions.addTurn(session, {
+        role: "assistant",
+        mode: "run",
+        text: fastPathResult.finalMessage,
+        usedTools: Array.from(new Set(trace.map((entry) => entry.tool))),
+        warnings
+      });
+
+      return {
+        requestId,
+        finalMessage: fastPathResult.finalMessage,
+        usedTools: Array.from(new Set(trace.map((entry) => entry.tool))),
+        toolTrace: trace,
+        artifacts,
+        session: this.sessions.snapshot(session),
+        modelModeUsed: "fallback-json",
+        warnings,
+        metrics
+      };
+    }
+
+    const optimizationFastPathResult = await this.tryRunOptimizationFastPath(activeInput, trace, warnings, metrics);
+    if (optimizationFastPathResult) {
+      artifacts = collectArtifactsFromTrace(trace, optimizationFastPathResult.artifacts);
+      metrics = finalizeMetrics(metrics, trace);
+
+      this.sessions.applyArtifacts(session, artifacts);
+      this.sessions.applyRunDiagnostics(session, { mode: "fallback-json", metrics });
+      this.sessions.appendTrace(session, trace);
+      this.sessions.addTurn(session, {
+        role: "assistant",
+        mode: "run",
+        text: optimizationFastPathResult.finalMessage,
+        usedTools: Array.from(new Set(trace.map((entry) => entry.tool))),
+        warnings
+      });
+
+      return {
+        requestId,
+        finalMessage: optimizationFastPathResult.finalMessage,
+        usedTools: Array.from(new Set(trace.map((entry) => entry.tool))),
+        toolTrace: trace,
+        artifacts,
+        session: this.sessions.snapshot(session),
+        modelModeUsed: "fallback-json",
+        warnings,
+        metrics
+      };
+    }
 
     if (!this.options.forceFallbackJson) {
       try {
@@ -867,6 +1365,598 @@ Return JSON like:
     return {
       finalMessage,
       artifacts: collectArtifactsFromTrace(trace)
+    };
+  }
+
+  private async tryRunFastPath(
+    input: AgentStrategyRequest,
+    trace: AgentToolTraceEntry[],
+    warnings: string[],
+    metrics: AgentResponse["metrics"]
+  ): Promise<{ finalMessage: string; artifacts: AgentResponse["artifacts"] } | null> {
+    if (!input.marketId || (input.strategyId && !goalLooksLikeFreshCreation(input.goal))) {
+      return null;
+    }
+
+    warnings.push("Used model-guided creation fast path.");
+    metrics.enforcementTriggered = true;
+    metrics.finalizationGuardrailsApplied.push("model_creation_fast_path");
+
+    const capabilitiesEntry: AgentToolTraceEntry = {
+      step: trace.length + 1,
+      tool: "list_strategy_capabilities",
+      input: { ownerAddress: input.ownerAddress },
+      reason: "Creation fast path: inspect available strategy capabilities first",
+      expectedArtifact: "capabilities",
+      startedAt: new Date().toISOString()
+    };
+    trace.push(capabilitiesEntry);
+
+    const capabilitiesResult = await this.matcherTransport("list_strategy_capabilities", {
+      ownerAddress: input.ownerAddress as HexString
+    });
+    capabilitiesEntry.output = capabilitiesResult as Record<string, unknown>;
+    capabilitiesEntry.completedAt = new Date().toISOString();
+    Object.assign(capabilitiesEntry, summarizeToolProgress(capabilitiesEntry));
+
+    const templatesEntry: AgentToolTraceEntry = {
+      step: trace.length + 1,
+      tool: "list_strategy_templates",
+      input: { ownerAddress: input.ownerAddress, marketId: input.marketId },
+      reason: "Creation fast path: inspect built-in templates before drafting",
+      expectedArtifact: "template candidates",
+      startedAt: new Date().toISOString()
+    };
+    trace.push(templatesEntry);
+
+    const templatesResult = await this.matcherTransport("list_strategy_templates", {
+      ownerAddress: input.ownerAddress as HexString,
+      marketId: input.marketId as HexString
+    });
+    templatesEntry.output = templatesResult as Record<string, unknown>;
+    templatesEntry.completedAt = new Date().toISOString();
+    Object.assign(templatesEntry, summarizeToolProgress(templatesEntry));
+
+    let creationPlan: CreationPlan | null = null;
+    try {
+      const creationPrompt = buildCreationPlanPrompt({
+        goal: input.goal,
+        capabilities: capabilitiesResult.capabilities as Record<string, unknown>,
+        templates: Array.isArray(templatesResult.templates)
+          ? templatesResult.templates.map((template) => ({
+              id: typeof template?.id === "string" ? template.id : undefined,
+              name: typeof template?.name === "string" ? template.name : undefined,
+              description: typeof template?.description === "string" ? template.description : undefined
+            }))
+          : []
+      });
+      const response = await this.invokePlanningModel(creationPrompt);
+      creationPlan = parseCreationPlan(extractMessageText(response));
+    } catch (error) {
+      warnings.push(`Model-guided creation planning failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    if (!creationPlan) {
+      const fallback = detectBasicFastPath(input.goal);
+      if (!fallback) {
+        return null;
+      }
+      warnings.push("Creation planner did not return a usable plan. Falling back to a small deterministic starter.");
+      creationPlan = fallback.kind === "template"
+        ? {
+            mode: "clone_template",
+            templateId: fallback.templateId,
+            name: fallback.name,
+            strategyPatch: {}
+          }
+        : {
+            mode: "create_custom",
+            name: fallback.name,
+            strategyPatch: buildEmaCrossoverDraft({
+              id: "temp",
+              ownerAddress: input.ownerAddress as HexString,
+              marketId: input.marketId as HexString,
+              name: fallback.name,
+              timeframe: "15m",
+              enabledSides: ["long", "short"],
+              entryRules: { long: [], short: [] } as StrategyDefinition["entryRules"],
+              exitRules: { long: [], short: [] } as StrategyDefinition["exitRules"],
+              sizing: { mode: "percent_of_equity", value: 25 },
+              riskRules: { stopLossPct: 2, takeProfitPct: 4, trailingStopPct: 1, maxBarsInTrade: 40 },
+              costModel: { feeBps: 10, slippageBps: 5, startingEquity: 10_000 },
+              status: "draft",
+              schemaVersion: "1.0.0",
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            } as StrategyDefinition)
+          };
+    }
+
+    let activeStrategy: StrategyDefinition;
+
+    if (creationPlan.mode === "clone_template" && creationPlan.templateId) {
+      const cloneEntry: AgentToolTraceEntry = {
+        step: trace.length + 1,
+        tool: "clone_strategy_template",
+        input: {
+          ownerAddress: input.ownerAddress,
+          marketId: input.marketId,
+          templateId: creationPlan.templateId
+        },
+        reason: "Creation fast path: clone the template selected by the model",
+        expectedArtifact: "strategy draft",
+        startedAt: new Date().toISOString()
+      };
+      trace.push(cloneEntry);
+
+      const cloned = await this.matcherTransport("clone_strategy_template", {
+        ownerAddress: input.ownerAddress as HexString,
+        marketId: input.marketId as HexString,
+        templateId: creationPlan.templateId
+      });
+      cloneEntry.output = cloned as Record<string, unknown>;
+      cloneEntry.completedAt = new Date().toISOString();
+      Object.assign(cloneEntry, summarizeToolProgress(cloneEntry));
+
+      if (!cloned.strategy || typeof cloned.strategy !== "object") {
+        return null;
+      }
+      activeStrategy = cloned.strategy as StrategyDefinition;
+    } else {
+      const createEntry: AgentToolTraceEntry = {
+        step: trace.length + 1,
+        tool: "create_strategy_draft",
+        input: {
+          ownerAddress: input.ownerAddress,
+          marketId: input.marketId,
+          name: creationPlan.name ?? "Strategy Draft"
+        },
+        reason: "Creation fast path: create a custom draft selected by the model",
+        expectedArtifact: "strategy draft",
+        startedAt: new Date().toISOString()
+      };
+      trace.push(createEntry);
+
+      const created = await this.matcherTransport("create_strategy_draft", {
+        ownerAddress: input.ownerAddress as HexString,
+        marketId: input.marketId as HexString,
+        name: creationPlan.name ?? "Strategy Draft"
+      });
+      createEntry.output = created as Record<string, unknown>;
+      createEntry.completedAt = new Date().toISOString();
+      Object.assign(createEntry, summarizeToolProgress(createEntry));
+
+      if (!created.strategy || typeof created.strategy !== "object") {
+        return null;
+      }
+      activeStrategy = created.strategy as StrategyDefinition;
+    }
+
+    const strategyPatch = creationPlan.strategyPatch ?? {};
+    const nextStrategy: StrategyDefinition = {
+      ...activeStrategy,
+      ...(creationPlan.name ? { name: creationPlan.name } : {}),
+      ...strategyPatch,
+      id: activeStrategy.id,
+      ownerAddress: activeStrategy.ownerAddress,
+      marketId: activeStrategy.marketId,
+      status: activeStrategy.status,
+      schemaVersion: activeStrategy.schemaVersion,
+      createdAt: activeStrategy.createdAt,
+      updatedAt: activeStrategy.updatedAt
+    };
+
+    const updateEntry: AgentToolTraceEntry = {
+      step: trace.length + 1,
+      tool: "update_strategy_draft",
+      input: {
+        ownerAddress: input.ownerAddress,
+        strategy: nextStrategy
+      },
+      reason: "Creation fast path: apply the model-selected strategy structure",
+      expectedArtifact: "updated strategy draft",
+      startedAt: new Date().toISOString()
+    };
+    trace.push(updateEntry);
+
+    const updated = await this.matcherTransport("update_strategy_draft", {
+      ownerAddress: input.ownerAddress as HexString,
+      strategy: nextStrategy
+    });
+    updateEntry.output = updated as Record<string, unknown>;
+    updateEntry.completedAt = new Date().toISOString();
+    Object.assign(updateEntry, summarizeToolProgress(updateEntry));
+
+    activeStrategy = (updated.strategy && typeof updated.strategy === "object"
+      ? updated.strategy
+      : nextStrategy) as StrategyDefinition;
+
+    const strategyId = activeStrategy.id;
+
+    const validateEntry: AgentToolTraceEntry = {
+      step: trace.length + 1,
+      tool: "validate_strategy_draft",
+      input: {
+        ownerAddress: input.ownerAddress,
+        strategyId
+      },
+      reason: "Fast path: validate once before finishing",
+      expectedArtifact: "validation result",
+      startedAt: new Date().toISOString()
+    };
+    trace.push(validateEntry);
+
+    const validationResult = await this.matcherTransport("validate_strategy_draft", {
+      ownerAddress: input.ownerAddress as HexString,
+      strategyId
+    });
+    validateEntry.output = validationResult as Record<string, unknown>;
+    validateEntry.completedAt = new Date().toISOString();
+    Object.assign(validateEntry, summarizeToolProgress(validateEntry));
+
+    let validationOk = (validationResult.validation as { ok?: boolean } | undefined)?.ok === true;
+    let finalStrategy = activeStrategy;
+
+    if (!validationOk && validationResult.validation) {
+      const repair = attemptValidationRepair(
+        activeStrategy,
+        validationResult.validation as { ok: boolean; issues: Array<{ path: string; code: string; message: string; suggestion?: string }> },
+        {
+          ownerAddress: input.ownerAddress,
+          marketId: input.marketId
+        }
+      );
+      metrics.repairsAttempted += 1;
+
+      if (repair.repaired) {
+        const repairEntry: AgentToolTraceEntry = {
+          step: trace.length + 1,
+          tool: "update_strategy_draft",
+          input: {
+            ownerAddress: input.ownerAddress,
+            strategy: repair.patchedStrategy
+          },
+          reason: "Fast path: apply one rule-based repair pass",
+          expectedArtifact: "repaired strategy draft",
+          startedAt: new Date().toISOString()
+        };
+        trace.push(repairEntry);
+
+        const repaired = await this.matcherTransport("update_strategy_draft", {
+          ownerAddress: input.ownerAddress as HexString,
+          strategy: repair.patchedStrategy
+        });
+        repairEntry.output = repaired as Record<string, unknown>;
+        repairEntry.completedAt = new Date().toISOString();
+        Object.assign(repairEntry, summarizeToolProgress(repairEntry));
+
+        finalStrategy = (repaired.strategy && typeof repaired.strategy === "object"
+          ? repaired.strategy
+          : repair.patchedStrategy) as StrategyDefinition;
+
+        const revalidateEntry: AgentToolTraceEntry = {
+          step: trace.length + 1,
+          tool: "validate_strategy_draft",
+          input: {
+            ownerAddress: input.ownerAddress,
+            strategyId: finalStrategy.id
+          },
+          reason: "Fast path: revalidate after repair",
+          expectedArtifact: "validation result",
+          startedAt: new Date().toISOString()
+        };
+        trace.push(revalidateEntry);
+
+        const revalidated = await this.matcherTransport("validate_strategy_draft", {
+          ownerAddress: input.ownerAddress as HexString,
+          strategyId: finalStrategy.id
+        });
+        revalidateEntry.output = revalidated as Record<string, unknown>;
+        revalidateEntry.completedAt = new Date().toISOString();
+        Object.assign(revalidateEntry, summarizeToolProgress(revalidateEntry));
+
+        validationOk = (revalidated.validation as { ok?: boolean } | undefined)?.ok === true;
+        if (validationOk) {
+          metrics.repairsSucceeded += 1;
+        }
+      }
+    }
+
+    const artifacts = collectArtifactsFromTrace(trace);
+
+    if (goalRequestsBacktest(input.goal) && validationOk) {
+      const backtestEntry: AgentToolTraceEntry = {
+        step: trace.length + 1,
+        tool: "run_strategy_backtest",
+        input: {
+          ownerAddress: input.ownerAddress,
+          strategyId: finalStrategy.id
+        },
+        reason: "Fast path: run requested backtest",
+        expectedArtifact: "backtest summary",
+        startedAt: new Date().toISOString()
+      };
+      trace.push(backtestEntry);
+
+      const backtest = await this.matcherTransport("run_strategy_backtest", {
+        ownerAddress: input.ownerAddress as HexString,
+        strategyId: finalStrategy.id
+      });
+      backtestEntry.output = backtest as Record<string, unknown>;
+      backtestEntry.completedAt = new Date().toISOString();
+      Object.assign(backtestEntry, summarizeToolProgress(backtestEntry));
+
+      const summary = backtest.summary as { netPnl?: number; winRate?: number; tradeCount?: number; maxDrawdownPct?: number; profitFactor?: number } | undefined;
+
+      return {
+        finalMessage: summary
+          ? `Created and validated ${activeStrategy.name}, then ran the backtest. Net PnL: ${summary.netPnl ?? "n/a"}, win rate: ${summary.winRate ?? "n/a"}, trades: ${summary.tradeCount ?? "n/a"}, max drawdown: ${summary.maxDrawdownPct ?? "n/a"}, profit factor: ${summary.profitFactor ?? "n/a"}.`
+          : `Created, validated, and backtested ${activeStrategy.name}.`,
+        artifacts: collectArtifactsFromTrace(trace, artifacts)
+      };
+    }
+
+    return {
+      finalMessage: validationOk
+        ? `Created and validated ${activeStrategy.name}.`
+        : `Created ${activeStrategy.name}, but validation still has issues after one quick repair pass.`,
+      artifacts
+    };
+  }
+
+  private async tryRunOptimizationFastPath(
+    input: AgentStrategyRequest,
+    trace: AgentToolTraceEntry[],
+    warnings: string[],
+    metrics: AgentResponse["metrics"]
+  ): Promise<{ finalMessage: string; artifacts: AgentResponse["artifacts"] } | null> {
+    if (!input.strategyId || !goalLooksLikeOptimization(input.goal)) {
+      return null;
+    }
+
+    const getEntry: AgentToolTraceEntry = {
+      step: trace.length + 1,
+      tool: "get_strategy",
+      input: {
+        ownerAddress: input.ownerAddress,
+        strategyId: input.strategyId
+      },
+      reason: "Optimization fast path: inspect the current strategy before tuning",
+      expectedArtifact: "strategy payload",
+      startedAt: new Date().toISOString()
+    };
+    trace.push(getEntry);
+
+    const existing = await this.matcherTransport("get_strategy", {
+      ownerAddress: input.ownerAddress as HexString,
+      strategyId: input.strategyId
+    });
+    getEntry.output = existing as Record<string, unknown>;
+    getEntry.completedAt = new Date().toISOString();
+    Object.assign(getEntry, summarizeToolProgress(getEntry));
+
+    if (!existing.strategy || typeof existing.strategy !== "object") {
+      return null;
+    }
+
+    const baseStrategy = existing.strategy as StrategyDefinition;
+    const strategyKind = classifyBasicStrategy(baseStrategy);
+    if (!strategyKind) {
+      return null;
+    }
+
+    warnings.push(`Used model-guided optimization fast path for existing ${baseStrategy.name}.`);
+    metrics.enforcementTriggered = true;
+    metrics.finalizationGuardrailsApplied.push(`model_optimize_fast_path_${strategyKind}`);
+
+    let currentSummary: Record<string, unknown> | undefined;
+    try {
+      const baselineEntry: AgentToolTraceEntry = {
+        step: trace.length + 1,
+        tool: "run_strategy_backtest",
+        input: {
+          ownerAddress: input.ownerAddress,
+          strategyId: baseStrategy.id
+        },
+        reason: "Optimization fast path: get current baseline before proposing changes",
+        expectedArtifact: "backtest summary",
+        startedAt: new Date().toISOString()
+      };
+      trace.push(baselineEntry);
+
+      const baseline = await this.matcherTransport("run_strategy_backtest", {
+        ownerAddress: input.ownerAddress as HexString,
+        strategyId: baseStrategy.id
+      });
+      baselineEntry.output = baseline as Record<string, unknown>;
+      baselineEntry.completedAt = new Date().toISOString();
+      Object.assign(baselineEntry, summarizeToolProgress(baselineEntry));
+      currentSummary = baseline.summary as Record<string, unknown> | undefined;
+    } catch (error) {
+      warnings.push(`Baseline backtest for optimization failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    let candidateConfigs: OptimizationCandidate[] = [];
+    try {
+      const optimizationPrompt = buildOptimizationPlanPrompt({
+        goal: input.goal,
+        strategyKind,
+        strategy: baseStrategy as unknown as Record<string, unknown>,
+        currentSummary
+      });
+      const response = await this.invokePlanningModel(optimizationPrompt);
+      candidateConfigs = parseOptimizationCandidates(extractMessageText(response));
+    } catch (error) {
+      warnings.push(`Model-guided optimization planning failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    if (candidateConfigs.length === 0) {
+      warnings.push("Model did not return optimization candidates. Using a small deterministic fallback set.");
+      candidateConfigs = (() => {
+        switch (strategyKind) {
+          case "ema":
+            return [
+              { label: "ema-5-20-long", params: { fast: 5, slow: 20, timeframe: "15m", longOnly: true, stopLossPct: 1.5, takeProfitPct: 3 } },
+              { label: "ema-7-21-long", params: { fast: 7, slow: 21, timeframe: "15m", longOnly: true, stopLossPct: 2, takeProfitPct: 4 } },
+              { label: "ema-9-30-long", params: { fast: 9, slow: 30, timeframe: "15m", longOnly: true, stopLossPct: 2, takeProfitPct: 5 } }
+            ];
+          case "rsi-mean-reversion":
+            return [
+              { label: "rsi-14-28-58", params: { timeframe: "15m", period: 14, entry: 28, exit: 58, stopLossPct: 2, takeProfitPct: 4 } }
+            ];
+          case "range-breakout":
+            return [
+              { label: "breakout-20-10", params: { timeframe: "15m", lookback: 20, exitEma: 10, stopLossPct: 2, takeProfitPct: 4 } }
+            ];
+          case "bollinger-reversion":
+            return [
+              { label: "boll-20-2", params: { timeframe: "15m", period: 20, stdDev: 2, stopLossPct: 2, takeProfitPct: 4 } }
+            ];
+        }
+      })();
+    }
+
+    const candidates: StrategyDefinition[] = candidateConfigs.map((candidate) => {
+      const params = candidate.params ?? {};
+      switch (strategyKind) {
+        case "ema":
+          return buildEmaVariant(baseStrategy, {
+            fast: typeof params.fast === "number" ? params.fast : 9,
+            slow: typeof params.slow === "number" ? params.slow : 21,
+            timeframe: typeof params.timeframe === "string" ? params.timeframe as StrategyDefinition["timeframe"] : "15m",
+            longOnly: Boolean(params.longOnly),
+            stopLossPct: typeof params.stopLossPct === "number" ? params.stopLossPct : undefined,
+            takeProfitPct: typeof params.takeProfitPct === "number" ? params.takeProfitPct : undefined,
+            trailingStopPct: typeof params.trailingStopPct === "number" ? params.trailingStopPct : undefined,
+            maxBarsInTrade: typeof params.maxBarsInTrade === "number" ? params.maxBarsInTrade : undefined
+          });
+        case "rsi-mean-reversion":
+          return buildRsiVariant(baseStrategy, {
+            timeframe: typeof params.timeframe === "string" ? params.timeframe as StrategyDefinition["timeframe"] : "15m",
+            period: typeof params.period === "number" ? params.period : 14,
+            entry: typeof params.entry === "number" ? params.entry : 30,
+            exit: typeof params.exit === "number" ? params.exit : 55,
+            stopLossPct: typeof params.stopLossPct === "number" ? params.stopLossPct : undefined,
+            takeProfitPct: typeof params.takeProfitPct === "number" ? params.takeProfitPct : undefined
+          });
+        case "range-breakout":
+          return buildBreakoutVariant(baseStrategy, {
+            timeframe: typeof params.timeframe === "string" ? params.timeframe as StrategyDefinition["timeframe"] : "15m",
+            lookback: typeof params.lookback === "number" ? params.lookback : 20,
+            exitEma: typeof params.exitEma === "number" ? params.exitEma : 10,
+            stopLossPct: typeof params.stopLossPct === "number" ? params.stopLossPct : undefined,
+            takeProfitPct: typeof params.takeProfitPct === "number" ? params.takeProfitPct : undefined
+          });
+        case "bollinger-reversion":
+          return buildBollingerVariant(baseStrategy, {
+            timeframe: typeof params.timeframe === "string" ? params.timeframe as StrategyDefinition["timeframe"] : "15m",
+            period: typeof params.period === "number" ? params.period : 20,
+            stdDev: typeof params.stdDev === "number" ? params.stdDev : 2,
+            stopLossPct: typeof params.stopLossPct === "number" ? params.stopLossPct : undefined,
+            takeProfitPct: typeof params.takeProfitPct === "number" ? params.takeProfitPct : undefined
+          });
+      }
+    });
+
+    let bestStrategy = baseStrategy;
+    let bestSummary: Record<string, unknown> | null = null;
+    let bestPnl = Number.NEGATIVE_INFINITY;
+
+    for (const candidate of candidates) {
+      const updateEntry: AgentToolTraceEntry = {
+        step: trace.length + 1,
+        tool: "update_strategy_draft",
+        input: {
+          ownerAddress: input.ownerAddress,
+          strategy: candidate
+        },
+        reason: "Optimization fast path: apply a candidate parameter set",
+        expectedArtifact: "updated strategy draft",
+        startedAt: new Date().toISOString()
+      };
+      trace.push(updateEntry);
+
+      const updated = await this.matcherTransport("update_strategy_draft", {
+        ownerAddress: input.ownerAddress as HexString,
+        strategy: candidate
+      });
+      updateEntry.output = updated as Record<string, unknown>;
+      updateEntry.completedAt = new Date().toISOString();
+      Object.assign(updateEntry, summarizeToolProgress(updateEntry));
+
+      const validateEntry: AgentToolTraceEntry = {
+        step: trace.length + 1,
+        tool: "validate_strategy_draft",
+        input: {
+          ownerAddress: input.ownerAddress,
+          strategyId: candidate.id
+        },
+        reason: "Optimization fast path: validate candidate before backtest",
+        expectedArtifact: "validation result",
+        startedAt: new Date().toISOString()
+      };
+      trace.push(validateEntry);
+
+      const validation = await this.matcherTransport("validate_strategy_draft", {
+        ownerAddress: input.ownerAddress as HexString,
+        strategyId: candidate.id
+      });
+      validateEntry.output = validation as Record<string, unknown>;
+      validateEntry.completedAt = new Date().toISOString();
+      Object.assign(validateEntry, summarizeToolProgress(validateEntry));
+
+      if ((validation.validation as { ok?: boolean } | undefined)?.ok !== true) {
+        continue;
+      }
+
+      const backtestEntry: AgentToolTraceEntry = {
+        step: trace.length + 1,
+        tool: "run_strategy_backtest",
+        input: {
+          ownerAddress: input.ownerAddress,
+          strategyId: candidate.id
+        },
+        reason: "Optimization fast path: score candidate by backtest result",
+        expectedArtifact: "backtest summary",
+        startedAt: new Date().toISOString()
+      };
+      trace.push(backtestEntry);
+
+      const backtest = await this.matcherTransport("run_strategy_backtest", {
+        ownerAddress: input.ownerAddress as HexString,
+        strategyId: candidate.id
+      });
+      backtestEntry.output = backtest as Record<string, unknown>;
+      backtestEntry.completedAt = new Date().toISOString();
+      Object.assign(backtestEntry, summarizeToolProgress(backtestEntry));
+
+      const pnl = typeof backtest.summary?.netPnl === "number" ? backtest.summary.netPnl : Number.NEGATIVE_INFINITY;
+      if (pnl > bestPnl) {
+        bestPnl = pnl;
+        bestStrategy = (updated.strategy && typeof updated.strategy === "object" ? updated.strategy : candidate) as StrategyDefinition;
+        bestSummary = backtest.summary as Record<string, unknown>;
+      }
+      if (pnl > 0) {
+        break;
+      }
+    }
+
+    const artifacts = collectArtifactsFromTrace(trace);
+    const best = bestSummary as { netPnl?: number; winRate?: number; tradeCount?: number; maxDrawdownPct?: number; profitFactor?: number } | null;
+
+    if (!best) {
+      return {
+        finalMessage: `Reviewed ${baseStrategy.name}, but none of the quick tuning candidates completed with a usable backtest result.`,
+        artifacts
+      };
+    }
+
+    return {
+      finalMessage:
+        (typeof best.netPnl === "number" && best.netPnl > 0)
+          ? `Optimized ${bestStrategy.name} and found a positive 15m result. Net PnL: ${best.netPnl}, win rate: ${best.winRate ?? "n/a"}, trades: ${best.tradeCount ?? "n/a"}, max drawdown: ${best.maxDrawdownPct ?? "n/a"}, profit factor: ${best.profitFactor ?? "n/a"}.`
+          : `Optimized ${bestStrategy.name}, but none of the quick candidates reached positive PnL. Best result found: net PnL ${best.netPnl ?? "n/a"}, win rate ${best.winRate ?? "n/a"}, trades ${best.tradeCount ?? "n/a"}, max drawdown ${best.maxDrawdownPct ?? "n/a"}, profit factor ${best.profitFactor ?? "n/a"}.`,
+      artifacts
     };
   }
 }

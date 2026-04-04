@@ -95,6 +95,65 @@ export function finalMessageMentionsRealArtifacts(message: string, trace: AgentT
   return hasBacktestTrace ? /backtest|PnL|drawdown|profit factor|win rate|trade/i.test(message) : true;
 }
 
+export function summarizeTraceEntryForPrompt(entry: AgentToolTraceEntry): {
+  tool: string;
+  output?: Record<string, unknown>;
+  error?: { message: string };
+} {
+  if (entry.error) {
+    return { tool: entry.tool, error: { message: entry.error.message } };
+  }
+
+  const output = entry.output ?? {};
+
+  if (entry.tool === "run_strategy_backtest" && typeof output.summary === "object" && output.summary) {
+    const summary = output.summary as Record<string, unknown>;
+    const compact: Record<string, unknown> = {
+      summaryType: "backtest",
+      runId: summary.runId,
+      totalTrades: summary.totalTrades ?? summary.numTrades,
+      winRate: summary.winRate,
+      netPnl: summary.netPnl ?? summary.pnl,
+      maxDrawdown: summary.maxDrawdown,
+      profitFactor: summary.profitFactor,
+      sharpeRatio: summary.sharpeRatio
+    };
+    return { tool: entry.tool, output: compact };
+  }
+
+  if (entry.tool === "validate_strategy_draft" && typeof output.validation === "object" && output.validation) {
+    const validation = output.validation as { ok?: boolean; issues?: Array<{ path: string; code: string; message: string; suggestion?: string }> };
+    const compact: Record<string, unknown> = {
+      ok: validation.ok,
+      issueCount: validation.issues?.length ?? 0,
+      issues: validation.ok
+        ? undefined
+        : (validation.issues ?? []).slice(0, 5).map((issue) => ({
+            path: issue.path,
+            code: issue.code,
+            message: issue.message
+          }))
+    };
+    return { tool: entry.tool, output: compact };
+  }
+
+  if (entry.tool === "list_strategy_capabilities" && typeof output.capabilities === "object" && output.capabilities) {
+    const caps = output.capabilities as Record<string, unknown>;
+    return {
+      tool: entry.tool,
+      output: {
+        summaryType: "capabilities",
+        indicators: caps.indicators,
+        operators: caps.operators,
+        timeframes: caps.timeframes,
+        limits: caps.limits
+      }
+    };
+  }
+
+  return { tool: entry.tool, output };
+}
+
 export function finalizeMetrics(base: AgentExecutionMetrics, trace: AgentToolTraceEntry[]) {
   const toolCalls = trace.length;
   const successfulToolCalls = trace.filter((entry) => entry.output && !entry.error).length;

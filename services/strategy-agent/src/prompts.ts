@@ -16,169 +16,72 @@ At every step, you must be explicit about the decision you are making:
 
 When a user asks you to create a strategy and run a backtest, follow ALL of these steps IN ORDER:
 
-1. **list_strategy_capabilities** — Learn which indicators, operators, timeframes and limits are available. ALWAYS call this first when building from scratch.
-2. **create_strategy_draft** (or **clone_strategy_template** if a template matches) — Create the initial strategy draft for the specified market.
+1. **list_strategy_capabilities** — ALWAYS call this first when building from scratch.
+2. **create_strategy_draft** (or **clone_strategy_template** if a template matches) — Create the initial draft.
 3. **update_strategy_draft** — Set entry rules, exit rules, sizing, risk rules and cost model using ONLY indicators and operators from capabilities.
 4. **validate_strategy_draft** — Check for schema or logic errors.
-5. **run_strategy_backtest** — Execute the backtest on the valid strategy. **THIS STEP IS MANDATORY** when the user requests a backtest or test. NEVER skip it.
+5. **run_strategy_backtest** — **MANDATORY** when the user requests a backtest or test. NEVER skip it.
 
 After run_strategy_backtest completes, summarize the results: net PnL, win rate, trade count, max drawdown, and profit factor.
 
 ## HOW TO USE THE TOOLS
 
 Every tool input uses a STRICT JSON schema. Unknown top-level keys are rejected.
-
-This means:
 - NEVER add extra root keys just because they exist in the session.
 - NEVER send \`marketId\` to tools that do not explicitly accept it.
 - NEVER send \`strategyId\` to tools that do not explicitly accept it.
 - For \`update_strategy_draft\`, \`marketId\` belongs inside \`strategy.marketId\`, not at the input root.
+- For \`update_strategy_draft\`, never send root-level \`marketId\` or \`strategyId\`; send only \`ownerAddress\` and \`strategy\`.
+- Treat tool schemas as authoritative. If a tool does not list a root key, do not send it.
+- Keep tool inputs compact and deterministic.
 
-Valid tool inputs:
-- \`list_strategy_capabilities\` => \`{ "ownerAddress": "0x..." }\`
-- \`list_strategy_templates\` => \`{ "ownerAddress": "0x..." }\` or \`{ "ownerAddress": "0x...", "marketId": "0x..." }\`
-- \`create_strategy_draft\` => \`{ "ownerAddress": "0x...", "marketId": "0x...", "name": "EMA Crossover" }\`
-- \`update_strategy_draft\` => \`{ "ownerAddress": "0x...", "strategy": { ...complete strategy json... } }\`
-- \`validate_strategy_draft\` => \`{ "ownerAddress": "0x...", "strategyId": "uuid" }\` OR \`{ "ownerAddress": "0x...", "strategy": { ...complete strategy json... } }\`
-- \`run_strategy_backtest\` => \`{ "ownerAddress": "0x...", "strategyId": "uuid", "bars": 250 }\`
-- \`save_strategy\` => \`{ "ownerAddress": "0x...", "strategyId": "uuid" }\`
-- \`get_strategy\` => \`{ "ownerAddress": "0x...", "strategyId": "uuid" }\`
-- \`clone_strategy_template\` => \`{ "ownerAddress": "0x...", "marketId": "0x...", "templateId": "..." }\`
+## STRATEGY STRUCTURE
 
-Invalid tool inputs that MUST be avoided:
-- \`list_strategy_capabilities\` with \`marketId\`
-- \`update_strategy_draft\` with root-level \`marketId\` or \`strategyId\`
-- \`run_strategy_backtest\` with a raw \`strategy\` object instead of \`strategyId\`
-- Any tool input that contains extra root keys not listed above
-
-Example of a valid sequence for "Create an EMA crossover strategy for this market, validate it, and run a backtest":
-
-\`\`\`json
-{ "tool": "list_strategy_capabilities", "input": { "ownerAddress": "0xabc123abc123abc123abc123abc123abc123abcd" } }
-{ "tool": "create_strategy_draft", "input": { "ownerAddress": "0xabc123abc123abc123abc123abc123abc123abcd", "marketId": "0x1111111111111111111111111111111111111111111111111111111111111111", "name": "EMA Crossover 9/21" } }
-{ "tool": "update_strategy_draft", "input": { "ownerAddress": "0xabc123abc123abc123abc123abc123abc123abcd", "strategy": { "...": "complete strategy object returned by create_strategy_draft, edited in-place" } } }
-{ "tool": "validate_strategy_draft", "input": { "ownerAddress": "0xabc123abc123abc123abc123abc123abc123abcd", "strategyId": "11111111-1111-4111-8111-111111111111" } }
-{ "tool": "run_strategy_backtest", "input": { "ownerAddress": "0xabc123abc123abc123abc123abc123abc123abcd", "strategyId": "11111111-1111-4111-8111-111111111111", "bars": 250 } }
-\`\`\`
-
-## HOW THE STRATEGY BUILDER WORKS
-
-A strategy is a JSON object with this structure:
-
-### Top-level fields
-- \`id\` (string) — auto-generated UUID, do NOT set manually
-- \`ownerAddress\` (string) — hex wallet address, use the one provided
-- \`marketId\` (string) — hex market ID, use the one provided
-- \`name\` (string) — human-readable name, 3-80 chars
-- \`timeframe\` (string) — one of: "1m", "5m", "15m", "1h", "4h", "1d"
-- \`enabledSides\` (string[]) — ["long"], ["short"], or ["long", "short"]
-- \`entryRules\` (object) — entry conditions per side
-- \`exitRules\` (object) — exit conditions per side
-- \`sizing\` (object) — position sizing config
-- \`riskRules\` (object) — stop loss, take profit, etc.
-- \`costModel\` (object) — fees, slippage, starting equity
-
-When you CREATE a draft:
-- The tool input is only \`ownerAddress\`, \`marketId\`, and optional \`name\`.
-- The server returns the full strategy object.
+A strategy is a JSON object with: id, ownerAddress, marketId, name, timeframe, enabledSides, entryRules, exitRules, sizing, riskRules, costModel.
 
 When you UPDATE a draft:
 - Send the COMPLETE strategy object returned by the server.
-- Preserve \`id\`, \`ownerAddress\`, \`marketId\`, \`status\`, \`schemaVersion\`, \`createdAt\`, and \`updatedAt\`.
-- Edit the contents of that object instead of inventing a new one.
+- Preserve id, ownerAddress, marketId, status, schemaVersion, createdAt, updatedAt.
+- Edit the contents instead of inventing a new one.
 
-### entryRules and exitRules structure
-Each side ("long" / "short") contains an array of rule groups. Each group has a "rules" array.
+### entryRules / exitRules
+Each side ("long"/"short") has an array of rule groups, each with a "rules" array.
+Each rule has: id, left (operand), operator, right (operand).
 
-Example:
-\`\`\`json
-{
-  "entryRules": {
-    "long": [
-      {
-        "id": "entry-long-1",
-        "rules": [
-          {
-            "id": "rule-1",
-            "left": { "type": "indicator_output", "indicator": "ema", "output": "value", "params": { "period": 9 } },
-            "operator": "crosses_above",
-            "right": { "type": "indicator_output", "indicator": "ema", "output": "value", "params": { "period": 21 } }
-          }
-        ]
-      }
-    ],
-    "short": []
-  }
-}
-\`\`\`
+Operand types:
+1. **price_field**: { "type": "price_field", "field": "close" } — fields: open, high, low, close, volume
+2. **indicator_output**: { "type": "indicator_output", "indicator": "ema", "output": "value", "params": { "period": 20 } }
+3. **constant**: { "type": "constant", "value": 50 }
 
-### Operand types (used in left/right of rules)
-1. **price_field**: \`{ "type": "price_field", "field": "close" }\` — fields: open, high, low, close, volume
-2. **indicator_output**: \`{ "type": "indicator_output", "indicator": "ema", "output": "value", "params": { "period": 20 } }\`
-3. **constant**: \`{ "type": "constant", "value": 50 }\`
+Operators: ">", ">=", "<", "<=", "crosses_above", "crosses_below"
 
-### Available indicators (check capabilities for the definitive list)
-- **sma**: outputs ["value"], params: { period }
-- **ema**: outputs ["value"], params: { period }
-- **rsi**: outputs ["value"], params: { period }
-- **macd**: outputs ["line", "signal", "histogram"], params: { fastPeriod, slowPeriod, signalPeriod }
-- **bollinger**: outputs ["upper", "middle", "lower"], params: { period, stdDev }
-- **vwap**: outputs ["value"], no params
-- **rolling_high**: outputs ["value"], params: { lookback }
-- **rolling_low**: outputs ["value"], params: { lookback }
-- **candle_body_pct**: outputs ["value"], no params
-- **candle_direction**: outputs ["direction"], no params
+### sizing
+{ "mode": "percent_of_equity", "value": 25 } or { "mode": "fixed_quote_notional", "value": 1000 }
 
-### Available operators
-">", ">=", "<", "<=", "crosses_above", "crosses_below"
+### riskRules
+{ "stopLossPct": 2, "takeProfitPct": 4, "trailingStopPct": 1, "maxBarsInTrade": 40 }
 
-### sizing object
-\`\`\`json
-{ "mode": "percent_of_equity", "value": 25 }
-// OR
-{ "mode": "fixed_quote_notional", "value": 1000 }
-\`\`\`
-
-### riskRules object
-\`\`\`json
-{
-  "stopLossPct": 2,
-  "takeProfitPct": 4,
-  "trailingStopPct": 1,
-  "maxBarsInTrade": 40
-}
-\`\`\`
-
-### costModel object
-\`\`\`json
-{
-  "feeBps": 10,
-  "slippageBps": 5,
-  "startingEquity": 10000
-}
-\`\`\`
+### costModel
+{ "feeBps": 10, "slippageBps": 5, "startingEquity": 10000 }
 
 ## CRITICAL RULES
 
-- **NEVER finalize without calling run_strategy_backtest** if the user asked to backtest, test, or evaluate a strategy.
-- Never invent indicators, operators, tools, fields, market IDs, or schema keys that are not in the capabilities response.
+- **NEVER finalize without calling run_strategy_backtest** if the user asked to backtest, test, or evaluate.
+- Never invent indicators, operators, tools, fields, market IDs, or schema keys not in the capabilities response.
+- **NEVER compare the same value against itself** (e.g., close crosses_above close). This produces 0 trades. Each rule MUST have different indicators or different params on left vs right.
+- For EMA crossover: use indicator_output with different periods. Example: left=ema period=9, right=ema period=21.
 - Always use the provided ownerAddress exactly as given.
-- Keep tool inputs compact and deterministic — do not add extra fields.
-- Treat tool schemas as authoritative. If a tool does not list a root key, do not send it.
-- When the session context includes an existing strategyId, REUSE it for validate/backtest instead of creating a new draft.
-- If validation fails, you will receive the structured issues as feedback. You MUST call update_strategy_draft with the corrected strategy payload, then validate_strategy_draft again. Do NOT give up — keep iterating until validation passes.
+- When the session context includes an existing strategyId, REUSE it for validate/backtest.
+- If validation fails, call update_strategy_draft with the corrected strategy, then validate_strategy_draft again. Keep iterating until it passes.
 - Each enabled side (long/short) MUST have at least one entry rule. Empty entry rules are the most common validation failure.
-- A fast/slow EMA crossover must use valid params and a valid crossover operator. Example: long uses fast EMA \`crosses_above\` slow EMA; short uses fast EMA \`crosses_below\` slow EMA, or leave short disabled.
-- Indicator params must be within their min/max ranges. Use defaults from capabilities if unsure.
-- Use ONLY allowed operands: \`price_field\`, \`indicator_output\`, and \`constant\`.
-- Use ONLY allowed price fields and indicator outputs from capabilities.
-- \`sizing.value\` must be positive. If \`mode\` is \`percent_of_equity\`, keep it within valid percent limits.
-- \`costModel.feeBps\`, \`costModel.slippageBps\`, and \`costModel.startingEquity\` must be non-negative, and starting equity must be positive.
+- EMA crossover: long uses fast EMA \`crosses_above\` slow EMA; short uses fast EMA \`crosses_below\` slow EMA, or leave short disabled.
+- Indicator params must be within min/max ranges. Use defaults from capabilities if unsure.
+- sizing.value must be positive. If percent_of_equity, keep it within valid limits.
+- costModel.feeBps, costModel.slippageBps, costModel.startingEquity must be non-negative; startingEquity must be positive.
 - Risk rule numeric values must be positive when present.
 - Do not promise live trading or paper trading; this system only supports strategy creation and backtesting.
 - When finished, summarize what was created, what was tested, and any important caveats.
-- Before calling a tool, be sure you can say when it SHOULD be used, when it SHOULD NOT be used, and what artifact it should produce.
-- If the same action would repeat without new information or without a different input, stop and explain the blocker instead of looping.
+- If the same action would repeat without new information, stop and explain the blocker instead of looping.
 `.trim();
 
 export function buildUserPrompt(input: {
@@ -270,6 +173,15 @@ ${goalMentionsBacktest && !backtestDone ? `- CRITICAL: The user requested a back
 - expected_artifact must name the concrete thing you expect back, such as capabilities, strategy draft, validation result, or backtest summary.
 - stop_condition must be specific and testable, not vague.
 - If you are not making observable progress, return type=final with a clear blocker and next step instead of repeating the same tool call.
+
+CRITICAL RULE FOR STRATEGY RULES:
+- NEVER compare the same value against itself (e.g., close crosses_above close). This produces 0 trades.
+- For EMA crossover: left must be indicator_output with ema period=9, right must be indicator_output with ema period=21.
+- Example of a CORRECT EMA crossover entry rule for long:
+  {"left":{"type":"indicator_output","indicator":"ema","output":"value","params":{"period":9}},"operator":"crosses_above","right":{"type":"indicator_output","indicator":"ema","output":"value","params":{"period":21}}}
+- Example of a CORRECT exit rule for long:
+  {"left":{"type":"indicator_output","indicator":"ema","output":"value","params":{"period":9}},"operator":"crosses_below","right":{"type":"indicator_output","indicator":"ema","output":"value","params":{"period":21}}}
+- Each rule MUST have different indicators or different params on left vs right.
 `.trim();
 }
 
@@ -315,6 +227,102 @@ Return a COMPLETE corrected strategy JSON that fixes ALL the issues above. The s
 
 Return ONLY valid JSON with this shape:
 {"correctedStrategy": <complete strategy object>}
+`.trim();
+}
+
+export function buildOptimizationPlanPrompt(input: {
+  goal: string;
+  strategyKind: string;
+  strategy: Record<string, unknown>;
+  currentSummary?: Record<string, unknown>;
+}) {
+  return `
+You are optimizing an existing trading strategy. Propose a SMALL set of candidate parameter changes.
+
+Goal:
+${input.goal}
+
+Strategy kind:
+${input.strategyKind}
+
+Current strategy:
+${JSON.stringify(input.strategy, null, 2)}
+
+Current backtest summary:
+${JSON.stringify(input.currentSummary ?? {}, null, 2)}
+
+Rules:
+- Return ONLY valid JSON.
+- Return at most 3 candidates.
+- Prefer 15m variants unless a different timeframe is strongly justified.
+- Keep the strategy family the same. Do not invent a brand-new strategy.
+- Use small, plausible changes aimed at improving net PnL.
+- Be concise.
+
+Allowed knobs by strategy kind:
+- ema: timeframe, longOnly, fast, slow, stopLossPct, takeProfitPct, trailingStopPct, maxBarsInTrade
+- rsi-mean-reversion: timeframe, period, entry, exit, stopLossPct, takeProfitPct
+- range-breakout: timeframe, lookback, exitEma, stopLossPct, takeProfitPct
+- bollinger-reversion: timeframe, period, stdDev, stopLossPct, takeProfitPct
+
+Return JSON with this exact shape:
+{
+  "analysis": "short explanation",
+  "candidates": [
+    {
+      "label": "short name",
+      "params": { ...allowed knobs for the strategy kind... }
+    }
+  ]
+}
+`.trim();
+}
+
+export function buildCreationPlanPrompt(input: {
+  goal: string;
+  capabilities: Record<string, unknown>;
+  templates: Array<{ id?: string; name?: string; description?: string }>;
+}) {
+  return `
+You are creating a trading strategy from scratch.
+
+User goal:
+${input.goal}
+
+Capabilities:
+${JSON.stringify(input.capabilities, null, 2)}
+
+Available templates:
+${JSON.stringify(input.templates, null, 2)}
+
+You must decide whether to:
+- clone a template and optionally adjust it, or
+- create a custom draft and fill it in.
+
+Rules:
+- Return ONLY valid JSON.
+- Use only indicators, operators, timeframes, price fields, and limits present in capabilities.
+- If a template already fits the request closely, prefer it.
+- If the request is specific enough to require a custom strategy, use a custom draft.
+- Keep the strategy coherent with the user's prompt. Do not default to EMA unless the goal suggests it.
+- Use compact, schema-safe values.
+
+Return JSON with exactly this shape:
+{
+  "analysis": "short explanation",
+  "mode": "clone_template" | "create_custom",
+  "templateId": "optional-template-id",
+  "name": "strategy name",
+  "strategyPatch": {
+    "timeframe": "1m|5m|15m|1h|4h|1d",
+    "enabledSides": ["long"] | ["long","short"] | ["short"],
+    "entryRules": { "long": [], "short": [] },
+    "exitRules": { "long": [], "short": [] },
+    "sizing": { "mode": "percent_of_equity" | "fixed_quote_notional", "value": 25 },
+    "riskRules": { "stopLossPct": 2, "takeProfitPct": 4, "trailingStopPct": 1, "maxBarsInTrade": 40 },
+    "costModel": { "feeBps": 10, "slippageBps": 5, "startingEquity": 10000 }
+  }
+}
 `.trim();
 }
 

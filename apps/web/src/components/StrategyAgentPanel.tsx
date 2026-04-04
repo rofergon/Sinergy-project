@@ -532,6 +532,13 @@ export function StrategyAgentPanel({
               </label>
               <button
                 type="button"
+                onClick={startNewSession}
+                disabled={busy !== null}
+              >
+                New Session
+              </button>
+              <button
+                type="button"
                 className="strategy-primary-btn strategy-agent-submit-btn"
                 onClick={() => void submit(planModeEnabled ? "plan" : "run")}
                 disabled={busy !== null || !prompt.trim()}

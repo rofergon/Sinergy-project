@@ -3,7 +3,7 @@ import type { StrategyToolName, StrategyDefinition } from "@sinergy/shared";
 import { strategyToolDefinitions } from "@sinergy/shared";
 import type { AgentArtifacts, AgentExecutionMetrics, AgentSessionSnapshot, AgentToolTraceEntry } from "../types.js";
 import { buildFallbackPlannerPrompt } from "../prompts.js";
-import { createEmptyMetrics, hasSemanticStall, summarizeToolProgress, type AgentDecision } from "./runtimePolicy.js";
+import { createEmptyMetrics, hasSemanticStall, summarizeToolProgress, summarizeTraceEntryForPrompt, type AgentDecision } from "./runtimePolicy.js";
 import { attemptValidationRepair } from "./validationRepairLoop.js";
 import { mergeToolContext } from "./toolInputContext.js";
 
@@ -90,6 +90,10 @@ export async function runFallbackJsonLoop(options: {
   let remainingValidationIssues: Array<{ path: string; code: string; message: string; suggestion?: string }> = [];
 
   for (let index = 0; index < options.maxSteps; index += 1) {
+    const summarizedTrace = options.trace
+      .slice(-8)
+      .map(summarizeTraceEntryForPrompt);
+
     const prompt = buildFallbackPlannerPrompt({
       goal: options.goal,
       ownerAddress: options.ownerAddress,
@@ -98,21 +102,20 @@ export async function runFallbackJsonLoop(options: {
       runId: activeRunId,
       session: options.session,
       toolsCatalog,
-      priorTrace: options.trace.map((entry) => ({
-        tool: entry.tool,
-        output: entry.output,
-        error: entry.error
-      })),
+      priorTrace: summarizedTrace,
       maxStepsRemaining: options.maxSteps - index,
       remainingValidationIssues: remainingValidationIssues.length > 0 ? remainingValidationIssues : undefined
     });
 
     const message = await options.model.invoke(prompt);
     const rawText = extractTextContent(message);
+    console.log(`[FALLBACK] Step ${index + 1}/${options.maxSteps} LLM response:`, rawText.slice(0, 500));
     let decision: AgentDecision;
     try {
       decision = extractJsonObject(rawText);
+      console.log(`[FALLBACK] Step ${index + 1} decision: tool=${decision.next_tool}`);
     } catch (error) {
+      console.log(`[FALLBACK] Step ${index + 1} parse error:`, error instanceof Error ? error.message : String(error));
       warnings.push(error instanceof Error ? error.message : String(error));
       metrics.stalledTurns += 1;
       continue;
@@ -120,6 +123,7 @@ export async function runFallbackJsonLoop(options: {
 
     if (decision.next_tool === "final") {
       finalMessage = decision.message ?? "Completed strategy task.";
+      console.log(`[FALLBACK] Step ${index + 1} final: ${finalMessage}`);
       artifacts = decision.artifacts ?? artifacts;
       activeStrategyId = decision.artifacts?.strategyId ?? activeStrategyId;
       activeRunId = decision.artifacts?.runId ?? activeRunId;
@@ -127,6 +131,7 @@ export async function runFallbackJsonLoop(options: {
     }
 
     if (!strategyToolDefinitions.find((entry) => entry.name === decision.next_tool)) {
+      console.log(`[FALLBACK] Step ${index + 1} unknown tool: ${decision.next_tool}`);
       warnings.push("Fallback planner proposed an unknown tool.");
       metrics.toolMisuseCount += 1;
       continue;
@@ -137,6 +142,7 @@ export async function runFallbackJsonLoop(options: {
       marketId: options.marketId,
       strategyId: activeStrategyId
     });
+    console.log(`[FALLBACK] Step ${index + 1} invoking ${decision.next_tool} with input:`, JSON.stringify(toolInput).slice(0, 300));
     const repeatKey = `${decision.next_tool}:${JSON.stringify(toolInput)}`;
     const repeatCount = (repeatedCalls.get(repeatKey) ?? 0) + 1;
     repeatedCalls.set(repeatKey, repeatCount);
@@ -166,6 +172,7 @@ export async function runFallbackJsonLoop(options: {
       traceEntry.progressObserved = progress.progressObserved;
       traceEntry.resultSummary = progress.resultSummary;
       metrics.successfulToolCalls += 1;
+      console.log(`[FALLBACK] Step ${index + 1} ${decision.next_tool} succeeded, output keys:`, Object.keys(output ?? {}));
 
       if (typeof output.strategy === "object" && output.strategy && "id" in output.strategy) {
         activeStrategyId = String((output.strategy as { id: string }).id);
@@ -203,6 +210,7 @@ export async function runFallbackJsonLoop(options: {
       traceEntry.progressObserved = false;
       traceEntry.resultSummary = traceEntry.error.message;
       metrics.failedToolCalls += 1;
+      console.log(`[FALLBACK] Step ${index + 1} ${decision.next_tool} FAILED:`, error instanceof Error ? error.message : String(error));
       throw error;
     }
 
