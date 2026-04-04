@@ -187,57 +187,65 @@ function OperandEditor({
 
         {operand.type === "indicator_output" && indicator && (
           <>
-            <select
-              value={operand.indicator}
-              onChange={(event) => {
-                const nextIndicator = findIndicatorDefinition(capabilities, event.target.value);
-                if (!nextIndicator) return;
-                onChange({
-                  type: "indicator_output",
-                  indicator: nextIndicator.kind,
-                  output: nextIndicator.outputs[0],
-                  params: Object.fromEntries(
-                    nextIndicator.params
-                      .filter((param) => param.defaultValue !== undefined)
-                      .map((param) => [param.name, param.defaultValue as number])
-                  )
-                });
-              }}
-            >
-              {capabilities?.indicatorCatalog.map((entry) => (
-                <option key={entry.kind} value={entry.kind}>
-                  {entry.label}
-                </option>
-              ))}
-            </select>
+            <label className="strategy-operand-param">
+              <span className="strategy-inline-label">Indicator</span>
+              <select
+                value={operand.indicator}
+                onChange={(event) => {
+                  const nextIndicator = findIndicatorDefinition(capabilities, event.target.value);
+                  if (!nextIndicator) return;
+                  onChange({
+                    type: "indicator_output",
+                    indicator: nextIndicator.kind,
+                    output: nextIndicator.outputs[0],
+                    params: Object.fromEntries(
+                      nextIndicator.params
+                        .filter((param) => param.defaultValue !== undefined)
+                        .map((param) => [param.name, param.defaultValue as number])
+                    )
+                  });
+                }}
+              >
+                {capabilities?.indicatorCatalog.map((entry) => (
+                  <option key={entry.kind} value={entry.kind}>
+                    {entry.label}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-            <select
-              value={operand.output}
-              onChange={(event) => onChange({ ...operand, output: event.target.value as any })}
-            >
-              {indicator.outputs.map((output) => (
-                <option key={output} value={output}>
-                  {output}
-                </option>
-              ))}
-            </select>
+            <label className="strategy-operand-param">
+              <span className="strategy-inline-label">Output</span>
+              <select
+                value={operand.output}
+                onChange={(event) => onChange({ ...operand, output: event.target.value as any })}
+              >
+                {indicator.outputs.map((output) => (
+                  <option key={output} value={output}>
+                    {output}
+                  </option>
+                ))}
+              </select>
+            </label>
 
             {indicator.params.map((param) => (
-              <input
-                key={param.name}
-                type="number"
-                value={operand.params?.[param.name] ?? param.defaultValue ?? ""}
-                onChange={(event) =>
-                  onChange({
-                    ...operand,
-                    params: {
-                      ...(operand.params ?? {}),
-                      [param.name]: Number(event.target.value)
-                    }
-                  })
-                }
-                placeholder={param.label}
-              />
+              <label className="strategy-operand-param" key={param.name}>
+                <span className="strategy-inline-label">{param.label}</span>
+                <input
+                  type="number"
+                  value={operand.params?.[param.name] ?? param.defaultValue ?? ""}
+                  onChange={(event) =>
+                    onChange({
+                      ...operand,
+                      params: {
+                        ...(operand.params ?? {}),
+                        [param.name]: Number(event.target.value)
+                      }
+                    })
+                  }
+                  placeholder={param.label}
+                />
+              </label>
             ))}
           </>
         )}
