@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatUnits } from "viem";
 import type { Hex } from "viem";
+import type { TxPopupData } from "./TransactionPopup";
 
 type Market = {
   id: Hex;
@@ -30,6 +31,7 @@ type Props = {
     quantity: string;
     limitPrice: string;
   }) => Promise<void>;
+  showTx: (data: TxPopupData) => void;
 };
 
 export function OrderPanel({
@@ -40,6 +42,7 @@ export function OrderPanel({
   selectedMarketId,
   onSelectMarket,
   onSubmit,
+  showTx,
 }: Props) {
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
   const [orderType, setOrderType] = useState<"limit" | "market">("market");
@@ -314,8 +317,23 @@ export function OrderPanel({
               });
               setStatus("Order accepted ✓");
               setTimeout(() => setStatus(""), 3000);
+              showTx({
+                type: "success",
+                title: `${side} Order Accepted`,
+                message: `Your ${side.toLowerCase()} order for ${quantity} ${baseSymbol} has been submitted to the dark pool for execution.`,
+                amount: `${quantity} ${baseSymbol}`,
+                operation: `${side} Order`,
+              });
             } catch (err) {
-              setStatus(err instanceof Error ? err.message : String(err));
+              const errorMsg = err instanceof Error ? err.message : String(err);
+              setStatus(errorMsg);
+              showTx({
+                type: "error",
+                title: "Order Rejected",
+                message: errorMsg,
+                amount: `${quantity} ${baseSymbol}`,
+                operation: `${side} Order`,
+              });
             }
           }}
         >
