@@ -11,7 +11,7 @@ This folder explains the project from several angles. The goal of this guide is 
 
 - Read [privacy-architecture.md](/home/sari/Sinergy-project/docs/privacy-architecture.md) to understand what privacy exists today and what the target is.
 - Read [privacy-engine-design.md](/home/sari/Sinergy-project/docs/privacy-engine-design.md) if you need the more technical version of that evolution.
-- Read [zk-withdrawal-runbook.md](/home/sari/Sinergy-project/docs/zk-withdrawal-runbook.md) if you are going to run real ZK withdrawal tests.
+- Read [zk-withdrawal-runbook.md](/home/sari/Sinergy-project/docs/zk-withdrawal-runbook.md) if you are going to run the real proof-backed deposit and withdrawal flow.
 
 ## If you want to operate the network or the testnet environment
 
@@ -27,7 +27,7 @@ This folder explains the project from several angles. The goal of this guide is 
 ## Recommended reading by profile
 
 - Product or demo: [onboarding-hackathon.md](/home/sari/Sinergy-project/docs/onboarding-hackathon.md), [architecture.md](/home/sari/Sinergy-project/docs/architecture.md)
-- Backend or smart contracts: [architecture.md](/home/sari/Sinergy-project/docs/architecture.md), [privacy-architecture.md](/home/sari/Sinergy-project/docs/privacy-architecture.md), [privacy-engine-design.md](/home/sari/Sinergy-project/docs/privacy-engine-design.md)
+- Backend or smart contracts: [architecture.md](/home/sari/Sinergy-project/docs/architecture.md), [privacy-architecture.md](/home/sari/Sinergy-project/docs/privacy-architecture.md), [privacy-engine-design.md](/home/sari/Sinergy-project/docs/privacy-engine-design.md), [zk-withdrawal-runbook.md](/home/sari/Sinergy-project/docs/zk-withdrawal-runbook.md)
 - DevOps or testnet: [implementation-plan.md](/home/sari/Sinergy-project/docs/implementation-plan.md), [testnet-runbook.md](/home/sari/Sinergy-project/docs/testnet-runbook.md), [network-startup.md](/home/sari/Sinergy-project/docs/network-startup.md)
 
 ## Project idea in simple language
