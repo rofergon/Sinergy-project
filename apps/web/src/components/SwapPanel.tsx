@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { formatUnits } from "viem";
 import type { Address, Hex } from "viem";
 import { api } from "../lib/api";
+import type { TxPopupData } from "./TransactionPopup";
 
 type RoutePreference = "auto" | "local" | "dex";
 
@@ -78,6 +79,7 @@ type Props = {
   selectedMarket?: Market;
   inventory: InventoryPosition[];
   onAfterMutation: () => Promise<void>;
+  showTx: (data: TxPopupData) => void;
 };
 
 function formatAtomic(amountAtomic: string, decimals: number) {
@@ -100,7 +102,8 @@ export function SwapPanel({
   address,
   selectedMarket,
   inventory,
-  onAfterMutation
+  onAfterMutation,
+  showTx
 }: Props) {
   const [fromToken, setFromToken] = useState<Address | undefined>(selectedMarket?.quoteToken.address);
   const [amount, setAmount] = useState("100");
@@ -146,12 +149,24 @@ export function SwapPanel({
                 }
               : current
           );
+          showTx({
+            type: "success",
+            title: "Swap Completed",
+            message: "Your private router swap has been settled back to the vault inventory.",
+            operation: "Private Router Swap",
+          });
           await onAfterMutation();
           window.clearInterval(timer);
         }
 
         if (nextStatus === "failed") {
           setMessage(result.job.error ?? "Swap job failed.");
+          showTx({
+            type: "error",
+            title: "Swap Failed",
+            message: result.job.error ?? "The swap job encountered an error during rebalancing.",
+            operation: "Private Router Swap",
+          });
           await onAfterMutation();
           window.clearInterval(timer);
         }
@@ -246,11 +261,37 @@ export function SwapPanel({
           ? "Swap completed with local liquidity."
           : "Swap queued for rebalance across InitiaDEX liquidity."
       );
+      if (result.status === "completed") {
+        showTx({
+          type: "success",
+          title: "Swap Completed",
+          message: "Your swap was filled instantly using local vault liquidity.",
+          amount: `${amount} ${selectedMarket?.quoteToken.symbol ?? "TOKEN"}`,
+          operation: "Private Router Swap",
+        });
+      } else {
+        showTx({
+          type: "pending",
+          title: "Swap Queued",
+          message: "Your swap is being routed through InitiaDEX for rebalancing. This may take a moment.",
+          amount: `${amount} ${selectedMarket?.quoteToken.symbol ?? "TOKEN"}`,
+          operation: "Private Router Swap",
+          duration: 0,
+        });
+      }
       await onAfterMutation();
     } catch (error) {
       setJobId(null);
       setStatus("failed");
-      setMessage(error instanceof Error ? error.message : String(error));
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      setMessage(errorMsg);
+      showTx({
+        type: "error",
+        title: "Swap Failed",
+        message: errorMsg,
+        amount: `${amount} ${selectedMarket?.quoteToken.symbol ?? "TOKEN"}`,
+        operation: "Private Router Swap",
+      });
     } finally {
       setIsExecuting(false);
     }
