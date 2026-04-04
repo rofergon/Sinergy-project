@@ -6,6 +6,7 @@ import { formatUnits, parseUnits } from "viem";
 import { api } from "../lib/api";
 import {
   DEFAULT_SINERGY_BRIDGE_ASSET,
+  formatInitiaIdentity,
   SINERGY_BRIDGE_ID,
   SINERGY_BRIDGE_ASSETS,
   resolveBridgeAsset,
@@ -16,6 +17,7 @@ type Props = {
   connected: boolean;
   address?: Address;
   initiaAddress?: string;
+  username?: string | null;
   onConnect: () => void;
   onOpenWallet: () => void;
   onOpenBridge: () => void;
@@ -108,11 +110,6 @@ function formatMarketOnlyLabel(preview: BridgeClaimPreview | null) {
   return `${formatUnits(marketOnlyAtomic, preview.tokenDecimals)} ${preview.tokenSymbol}`;
 }
 
-function shorten(addr?: string) {
-  if (!addr) return "";
-  return `${addr.slice(0, 8)}…${addr.slice(-6)}`;
-}
-
 async function queryRollupBalance(address: string, denom: string, restUrl: string) {
   const response = await fetch(
     `${restUrl}/cosmos/bank/v1beta1/balances/${address}/by_denom?denom=${encodeURIComponent(denom)}`
@@ -135,6 +132,7 @@ export function BridgeLanding({
   connected,
   address,
   initiaAddress,
+  username,
   onConnect,
   onOpenWallet,
   onOpenBridge,
@@ -409,7 +407,7 @@ export function BridgeLanding({
           </div>
           {connected && initiaAddress ? (
             <button className="bridge-wallet-pill" onClick={onOpenWallet}>
-              Connected: {shorten(initiaAddress)}
+              Connected: {formatInitiaIdentity(username, initiaAddress, { includeAddress: true })}
             </button>
           ) : (
             <div className="bridge-note">
@@ -468,7 +466,9 @@ export function BridgeLanding({
               <label className="bridge-direct-field">
                 <span>Recipient on Sinergy</span>
                 <div className="bridge-direct-address">
-                  {initiaAddress ? shorten(initiaAddress) : "Connect your Initia wallet"}
+                  {initiaAddress
+                    ? formatInitiaIdentity(username, initiaAddress, { includeAddress: true })
+                    : "Connect your Initia wallet"}
                 </div>
               </label>
             </div>
@@ -526,8 +526,13 @@ export function BridgeLanding({
             </div>
 
             <div className="bridge-direct-meta">
-              <span>EVM recipient {address ? shorten(address) : "Not connected"}</span>
-              <span>Initia recipient {initiaAddress ? shorten(initiaAddress) : "Not connected"}</span>
+              <span>EVM recipient {address ? `${address.slice(0, 8)}…${address.slice(-6)}` : "Not connected"}</span>
+              <span>
+                Initia recipient{" "}
+                {initiaAddress
+                  ? formatInitiaIdentity(username, initiaAddress, { includeAddress: true })
+                  : "Not connected"}
+              </span>
             </div>
 
             {claimStatus ? <div className="bridge-direct-status">{claimStatus}</div> : null}
