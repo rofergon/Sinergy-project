@@ -464,6 +464,7 @@ a { color: inherit; text-decoration: none; }
   flex: 1.2;
   min-height: 0;
   overflow: hidden;
+  position: relative;
 }
 
 .tv-chart-toolbar {
@@ -504,6 +505,56 @@ a { color: inherit; text-decoration: none; }
   flex: 1;
   min-height: 0;
   background: var(--bg-primary);
+}
+
+.tv-indicator-legend {
+  position: absolute;
+  top: 46px;
+  right: 14px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(320px, calc(100% - 28px));
+  pointer-events: none;
+}
+
+.tv-indicator-chip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(63, 72, 84, 0.75);
+  background: rgba(11, 14, 17, 0.82);
+  backdrop-filter: blur(8px);
+}
+
+.tv-indicator-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  margin-top: 4px;
+  flex: 0 0 auto;
+}
+
+.tv-indicator-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tv-indicator-copy strong {
+  font-size: 11px;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.tv-indicator-copy small {
+  font-size: 10px;
+  color: var(--text-secondary);
+  line-height: 1.3;
 }
 
 /* ══════════════ BOTTOM TABS ════════════════════════════ */
@@ -870,6 +921,13 @@ a { color: inherit; text-decoration: none; }
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 8px;
+  min-width: 0;
+}
+
+.strategy-operand-param {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   min-width: 0;
 }
 
