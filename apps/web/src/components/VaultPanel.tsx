@@ -1,12 +1,14 @@
 import { useMemo, useState } from "react";
 import { MsgCallResponse } from "@initia/initia.proto/minievm/evm/v1/tx";
 import { useInterwovenKit } from "@initia/interwovenkit-react";
+import type { EncodeObject } from "@cosmjs/proto-signing";
+import type { StdFee } from "@cosmjs/amino";
 import { encodeFunctionData, encodePacked, formatUnits, keccak256, parseUnits } from "viem";
 import type { Address, Hex } from "viem";
 import { useReadContract } from "wagmi";
 import { darkPoolVaultAbi, darkVaultV2Abi, erc20Abi } from "@sinergy/shared";
 import { api } from "../lib/api";
-import { SINERGY_ROLLUP_CHAIN_ID } from "../initia";
+import { deployment, SINERGY_ROLLUP_CHAIN_ID } from "../initia";
 
 type Token = {
   symbol: string;
@@ -58,11 +60,13 @@ export function VaultPanel({
   tokens,
   onAfterMutation,
 }: Props) {
-  const { requestTxBlock } = useInterwovenKit();
+  const { autoSign, estimateGas, requestTxBlock, submitTxBlock } = useInterwovenKit();
   const [mode, setMode] = useState<"deposit" | "withdraw">("deposit");
   const [tokenAddress, setTokenAddress] = useState<Address | "">("");
   const [amount, setAmount] = useState("10");
   const [status, setStatus] = useState("");
+  const [autoSignStatus, setAutoSignStatus] = useState("");
+  const [isAutoSignPending, setIsAutoSignPending] = useState(false);
 
   const selectedToken = useMemo(
     () => tokens.find((t) => t.address === tokenAddress),
@@ -72,6 +76,7 @@ export function VaultPanel({
     Boolean(zkVaultAddress) &&
     zkVaultAddress !== "0x0000000000000000000000000000000000000000";
   const activeVaultAddress = (zkEnabled ? zkVaultAddress : vaultAddress) as Address;
+  const vaultAutoSignEnabled = autoSign.isEnabledByChain[SINERGY_ROLLUP_CHAIN_ID] ?? false;
   const walletBalance = useReadContract({
     address: selectedToken?.address,
     abi: erc20Abi,
@@ -85,33 +90,83 @@ export function VaultPanel({
 
   const disabled = !connected || !address || !initiaAddress || !selectedToken;
 
+  async function broadcastMessages(messages: EncodeObject[]) {
+    if (vaultAutoSignEnabled) {
+      const gasEstimate = await estimateGas({
+        chainId: SINERGY_ROLLUP_CHAIN_ID,
+        messages,
+      });
+      const fee: StdFee = {
+        amount: [],
+        gas: Math.ceil(gasEstimate * 1.4).toString(),
+      };
+
+      return submitTxBlock({
+        chainId: SINERGY_ROLLUP_CHAIN_ID,
+        messages,
+        fee,
+        preferredFeeDenom: deployment.network.gasDenom,
+      });
+    }
+
+    return requestTxBlock({
+      chainId: SINERGY_ROLLUP_CHAIN_ID,
+      messages,
+    });
+  }
+
   async function submitMsgCall(contractAddr: Address, input: Hex) {
     if (!initiaAddress) {
       throw new Error("Connect your Initia wallet first.");
     }
 
-    const result = await requestTxBlock({
-      chainId: SINERGY_ROLLUP_CHAIN_ID,
-      messages: [
-        {
-          typeUrl: "/minievm.evm.v1.MsgCall",
-          value: {
-            sender: initiaAddress,
-            contractAddr,
-            input,
-            value: "0",
-            accessList: [],
-            authList: [],
-          },
+    const result = await broadcastMessages([
+      {
+        typeUrl: "/minievm.evm.v1.MsgCall",
+        value: {
+          sender: initiaAddress,
+          contractAddr,
+          input,
+          value: "0",
+          accessList: [],
+          authList: [],
         },
-      ],
-    });
+      },
+    ]);
 
     if (result.code !== 0) {
       throw new Error(result.rawLog || "Transaction reverted on Sinergy.");
     }
 
     return result;
+  }
+
+  async function handleToggleAutoSign() {
+    if (!initiaAddress) {
+      setAutoSignStatus("Connect your Initia wallet first.");
+      return;
+    }
+
+    try {
+      setIsAutoSignPending(true);
+      setAutoSignStatus(
+        vaultAutoSignEnabled
+          ? "Disabling auto-sign on Sinergy..."
+          : "Opening Initia auto-sign setup..."
+      );
+
+      if (vaultAutoSignEnabled) {
+        await autoSign.disable(SINERGY_ROLLUP_CHAIN_ID);
+        setAutoSignStatus("Auto-sign disabled for Sinergy vault actions.");
+      } else {
+        await autoSign.enable(SINERGY_ROLLUP_CHAIN_ID);
+        setAutoSignStatus("Auto-sign enabled for Sinergy vault actions.");
+      }
+    } catch (err) {
+      setAutoSignStatus(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsAutoSignPending(false);
+    }
   }
 
   async function handleDeposit() {
@@ -310,6 +365,60 @@ export function VaultPanel({
       <div className="panel-head" style={{ padding: "0 0 10px", border: "none" }}>
         <span className="panel-title">{zkEnabled ? "Dark Vault ZK" : "Dark Vault"}</span>
       </div>
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          marginBottom: 12,
+          padding: "10px 12px",
+          border: "1px solid var(--border)",
+          borderRadius: 14,
+          background: "rgba(255,255,255,0.03)",
+        }}
+      >
+        <div
+          style={{
+            display: "grid",
+            gap: 4,
+          }}
+        >
+          <span
+            style={{
+              color: "var(--text-primary)",
+              fontSize: 12,
+              fontWeight: 600,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+            }}
+          >
+            Auto-sign
+          </span>
+          <span
+            style={{
+              color: "var(--text-tertiary)",
+              fontSize: 12,
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            {vaultAutoSignEnabled
+              ? "Vault MsgCall tx on Sinergy-2 can sign without extra popups."
+              : "Approve, deposit, and withdraw will still ask for wallet confirmation."}
+          </span>
+        </div>
+        <button
+          className="vault-btn"
+          type="button"
+          disabled={!connected || isAutoSignPending || autoSign.isLoading}
+          onClick={handleToggleAutoSign}
+        >
+          {vaultAutoSignEnabled ? "Disable" : "Enable"}
+        </button>
+      </div>
+
+      {autoSignStatus ? <div className="vault-status">{autoSignStatus}</div> : null}
 
       <div className="vault-tabs">
         <button
