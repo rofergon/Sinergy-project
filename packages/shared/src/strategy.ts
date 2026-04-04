@@ -53,6 +53,7 @@ export type StrategyExitReason =
 export type StrategyMarkerPosition = "aboveBar" | "belowBar" | "inBar";
 export type StrategyMarkerShape = "arrowUp" | "arrowDown" | "circle" | "square";
 export type StrategyOverlaySeriesType = "line";
+export type StrategyOverlayPane = "price" | "oscillator";
 export type StrategyToolName =
   | "list_strategy_capabilities"
   | "analyze_market_context"
@@ -220,6 +221,7 @@ export type StrategyOverlaySeries = {
   label: string;
   color: string;
   seriesType: StrategyOverlaySeriesType;
+  pane: StrategyOverlayPane;
   values: StrategyOverlayPoint[];
 };
 
