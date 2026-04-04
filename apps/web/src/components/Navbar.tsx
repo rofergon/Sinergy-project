@@ -17,7 +17,8 @@ type Props = {
   activeView: "trade" | "strategies" | "markets" | "portfolio" | "bridge";
   onNavigate: (view: "trade" | "strategies" | "markets" | "portfolio" | "bridge") => void;
   isConnected: boolean;
-  address?: string;
+  initiaAddress?: string;
+  username?: string | null;
   onConnect: () => void;
   onOpenWallet: () => void;
   onDisconnect: () => void;
@@ -25,9 +26,14 @@ type Props = {
   bridgeReady: boolean;
 };
 
+function formatInitiaUsername(username?: string | null) {
+  if (!username) return null;
+  return username.endsWith(".init") ? username : `${username}.init`;
+}
+
 function shorten(addr?: string) {
   if (!addr) return "";
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+  return `${addr.slice(0, 8)}…${addr.slice(-6)}`;
 }
 
 export function Navbar({
@@ -37,7 +43,8 @@ export function Navbar({
   activeView,
   onNavigate,
   isConnected,
-  address,
+  initiaAddress,
+  username,
   onConnect,
   onOpenWallet,
   onDisconnect,
@@ -47,6 +54,7 @@ export function Navbar({
   const [ddOpen, setDdOpen] = useState(false);
   const ddRef = useRef<HTMLDivElement>(null);
   const selected = markets.find((m) => m.id === selectedMarketId);
+  const connectedLabel = formatInitiaUsername(username) ?? shorten(initiaAddress);
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -147,7 +155,7 @@ export function Navbar({
         ) : (
           <>
             <button className="nav-wallet-btn connected" onClick={onOpenWallet}>
-              {shorten(address)}
+              {connectedLabel}
             </button>
             <button className="nav-link" onClick={onDisconnect}>
               Disconnect
