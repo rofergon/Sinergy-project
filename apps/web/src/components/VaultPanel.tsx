@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { TxPopupData } from "./TransactionPopup";
 import { MsgCallResponse } from "@initia/initia.proto/minievm/evm/v1/tx";
 import { useInterwovenKit } from "@initia/interwovenkit-react";
 import type { EncodeObject } from "@cosmjs/proto-signing";
@@ -31,6 +32,7 @@ type Props = {
   zkVaultAddress?: Address;
   tokens: Token[];
   onAfterMutation: () => Promise<void>;
+  showTx: (data: TxPopupData) => void;
 };
 
 type SyncLog = {
@@ -65,6 +67,7 @@ export function VaultPanel({
   zkVaultAddress,
   tokens,
   onAfterMutation,
+  showTx,
 }: Props) {
   const { autoSign, estimateGas, requestTxBlock, submitTxBlock } = useInterwovenKit();
   const [mode, setMode] = useState<"deposit" | "withdraw">("deposit");
@@ -276,9 +279,28 @@ export function VaultPanel({
 
       await onAfterMutation();
       await walletBalance.refetch();
-      setStatus(zkEnabled ? "ZK deposit synced ✓" : "Deposit synced ✓");
+      const successLabel = zkEnabled ? "ZK deposit synced ✓" : "Deposit synced ✓";
+      setStatus(successLabel);
+      showTx({
+        type: "success",
+        title: "Deposit Complete",
+        message: zkEnabled
+          ? "Your funds have been deposited into the ZK-shielded vault. A private commitment note was created."
+          : "Your funds have been deposited into the Dark Vault and are ready for trading.",
+        amount: `${amount} ${selectedToken.symbol}`,
+        operation: "Deposit",
+        txHash: depositTx.transactionHash,
+      });
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : String(err));
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      setStatus(errorMsg);
+      showTx({
+        type: "error",
+        title: "Deposit Failed",
+        message: errorMsg,
+        amount: `${amount} ${selectedToken?.symbol ?? "TOKEN"}`,
+        operation: "Deposit",
+      });
     }
   }
 
@@ -394,7 +416,18 @@ export function VaultPanel({
       }
 
       await onAfterMutation();
-      setStatus(zkEnabled ? "ZK withdrawal settled ✓" : "Withdrawal settled ✓");
+      const successLabel = zkEnabled ? "ZK withdrawal settled ✓" : "Withdrawal settled ✓";
+      setStatus(successLabel);
+      showTx({
+        type: "success",
+        title: "Withdrawal Complete",
+        message: zkEnabled
+          ? "Your ZK withdrawal has been settled. Funds are back in your wallet."
+          : "Your withdrawal has been settled on-chain. Funds are in your wallet.",
+        amount: `${amount} ${selectedToken.symbol}`,
+        operation: "Withdraw",
+        txHash: withdrawTx.transactionHash,
+      });
     } catch (err) {
       if (zkEnabled && !broadcasted && zkPackage && selectedToken && address) {
         try {
@@ -426,7 +459,15 @@ export function VaultPanel({
           // Preserve the original error and avoid masking the failed withdrawal reason.
         }
       }
-      setStatus(err instanceof Error ? err.message : String(err));
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      setStatus(errorMsg);
+      showTx({
+        type: "error",
+        title: "Withdrawal Failed",
+        message: errorMsg,
+        amount: `${amount} ${selectedToken?.symbol ?? "TOKEN"}`,
+        operation: "Withdraw",
+      });
     }
   }
 
