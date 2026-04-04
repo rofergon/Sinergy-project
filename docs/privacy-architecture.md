@@ -93,7 +93,7 @@ It handles:
 - deposit and withdrawal synchronization;
 - router decisions;
 - external liquidity rebalancing;
-- ZK withdrawal package serving in the current transition phase.
+- private note tracking, root anchoring, and dynamic ZK withdrawal proof generation.
 
 Relevant files:
 
@@ -204,7 +204,6 @@ What is still exposed or trusted:
 
 - the backend can still see order flow in plaintext;
 - internal balances are still operationally coordinated by the backend;
-- the current ZK integration is real for withdrawal proof flow, but backend generation is not yet fully dynamic from production note state;
 - routed liquidity on `Initia L1` is not private by itself.
 
 ### Privacy Target
@@ -420,7 +419,6 @@ The privacy roadmap is cumulative.
 ### Phase 3
 
 - stronger private state generation in backend;
-- dynamic proof generation from real notes and Merkle paths;
 - tighter integration between matching engine and committed private state.
 
 ### Phase 4
