@@ -56,6 +56,7 @@ function Dashboard() {
     address,
     initiaAddress,
     isConnected,
+    username,
     openConnect,
     openBridge,
     openWallet,
@@ -217,7 +218,8 @@ function Dashboard() {
         activeView={activeView}
         onNavigate={navigateTo}
         isConnected={isConnected}
-        address={userAddress}
+        initiaAddress={initiaAddress}
+        username={username}
         onConnect={() => {
           setError("");
           openConnect();
@@ -242,6 +244,7 @@ function Dashboard() {
           connected={isConnected}
           address={userAddress}
           initiaAddress={initiaAddress}
+          username={username}
           onConnect={() => {
             setError("");
             openConnect();
