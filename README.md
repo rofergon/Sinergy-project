@@ -32,6 +32,7 @@ That is the core hackathon story:
 Sinergy is intentionally built around Initia primitives:
 
 - `InterwovenKit` for wallet and signing UX;
+- Initia usernames (`.init`) surfaced through InterwovenKit for connected-wallet identity;
 - `MiniEVM` for EVM app logic on an Initia rollup;
 - `OPinit` executor and relayer infrastructure for cross-chain operation;
 - bridge-backed connected assets like `cINIT` and `cUSDC`;
@@ -71,6 +72,30 @@ Examples:
 
 The frontend does not depend on the public bridge UI listing the rollup. It includes a direct `Bridge to Sinergy` flow built with `InterwovenKit`, so the demo remains usable even if the public bridge directory is incomplete.
 
+Sinergy uses the Initia bridge stack in two ways:
+
+- Official `Interwoven Bridge` modal through `openBridge(...)` for the standard Initia bridge UX.
+- Direct `OPinit` deposit flow for a faster rollup-specific path into `Sinergy-2`.
+
+Where this is implemented:
+
+- Exchange app official bridge entry: [apps/web/src/App.tsx](/home/sari/Sinergy-project/apps/web/src/App.tsx)
+- Exchange bridge landing and direct deposit UI: [apps/web/src/components/BridgeLanding.tsx](/home/sari/Sinergy-project/apps/web/src/components/BridgeLanding.tsx)
+- Dedicated bridge app: [apps/bridge/src/App.tsx](/home/sari/Sinergy-project/apps/bridge/src/App.tsx)
+- Shared bridge defaults and source asset config: [apps/web/src/initia.ts](/home/sari/Sinergy-project/apps/web/src/initia.ts) and [apps/bridge/src/initia.ts](/home/sari/Sinergy-project/apps/bridge/src/initia.ts)
+- Claim and redeem backend routes: [services/matcher/src/index.ts](/home/sari/Sinergy-project/services/matcher/src/index.ts)
+
+What each part is used for:
+
+- `openBridge(buildBridgeDefaults())`
+  Opens the standard Interwoven bridge modal with the configured source chain and denom so the user starts from the correct Initia route.
+- Direct `MsgInitiateTokenDeposit`
+  Sends the OPinit bridge deposit directly from the app when we want a smoother Sinergy-specific deposit flow without relying on destination discovery in the public bridge UI.
+- `claim`
+  Converts bridged balance that arrived on the Initia address into the connected EVM-side asset used by Sinergy, such as `cINIT` or `cUSDC`.
+- `redeem`
+  Burns the connected asset and reopens the corresponding bridged balance on Sinergy so the user can move back through the bridge-native path.
+
 ### 2. Bridge-Backed Assets
 
 Sinergy exposes connected assets that are meaningful in the Initia context:
@@ -91,6 +116,8 @@ Sinergy exposes connected assets that are meaningful in the Initia context:
 ### 3. `Dark Vault`
 
 Users deposit into a private settlement layer instead of exposing their intent on-chain. This makes the visible footprint minimal while the matcher handles balances, tickets, and settlement logic off-chain.
+
+The vault UI now supports Initia `Auto-sign / Session UX` on `Sinergy-2` for `/minievm.evm.v1.MsgCall`, so repeated vault actions can skip repeated wallet popups after the user grants permission once.
 
 ### 4. `Private Router`
 
@@ -120,11 +147,11 @@ In simple terms:
 ## Main Architecture
 
 - `apps/web`
-  Main trading app and vault UX.
+  Main trading app, vault UX, and embedded bridge landing with official `Interwoven Bridge` entry plus direct OPinit deposit flow.
 - `apps/bridge`
-  Dedicated bridge and claim/redeem UX.
+  Dedicated bridge app for official bridge access, direct deposit to `Sinergy-2`, and claim/redeem of connected assets.
 - `services/matcher`
-  Private balances, routing, DEX execution, and withdrawal authorization.
+  Private balances, routing, DEX execution, withdrawal authorization, and bridge claim/redeem APIs.
 - `contracts`
   `DarkPoolVault`, `DarkPoolMarket`, connected tokens, and market contracts.
 - `packages/shared`
@@ -139,6 +166,8 @@ In simple terms:
 - Quote token: `cUSDC`
 - Connected INIT token: `cINIT`
 - Runtime deployment file: [deployments/testnet.json](/home/sari/Sinergy-project/deployments/testnet.json)
+- Auto-sign scope: enabled for vault `MsgCall` flows on `Sinergy-2`; bridge deposits on `initiation-2` still use manual confirmation
+- Username UX: connected wallets show `.init` when available, with Initia address fallback
 
 Current router-enabled markets:
 
@@ -208,6 +237,10 @@ cp apps/bridge/.env.testnet.example apps/bridge/.env.testnet
 npm run dev:web:testnet
 npm run dev:bridge:testnet
 ```
+
+In the trading app, users can enable auto-sign from the `Dark Vault` panel. The current setup only grants `MsgCall` permission on `Sinergy-2`, which covers vault interactions while keeping the L1 bridge flow explicitly confirmed.
+
+Sinergy also surfaces Initia usernames for the connected wallet. When a wallet has a registered username on `initiation-2`, the app shows `<name>.init`; otherwise it falls back to the shortened Initia address.
 
 ## What Makes The Demo Memorable
 
