@@ -19,6 +19,9 @@ const interwovenKitProps = {
   defaultChainId: SINERGY_ROLLUP_CHAIN_ID,
   customChain,
   customChains: [customChain],
+  enableAutoSign: {
+    [SINERGY_ROLLUP_CHAIN_ID]: ["/minievm.evm.v1.MsgCall"],
+  },
   theme: "dark",
 } as const;
 
