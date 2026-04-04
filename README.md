@@ -119,6 +119,13 @@ Users deposit into a private settlement layer instead of exposing their intent o
 
 The vault UI now supports Initia `Auto-sign / Session UX` on `Sinergy-2` for `/minievm.evm.v1.MsgCall`, so repeated vault actions can skip repeated wallet popups after the user grants permission once.
 
+When the deployment exposes the ZK stack, the vault flow now supports a real proof-backed path:
+
+- the web app creates a private note locally using `secret` and `blinding`;
+- the deposit commitment is derived from the same `Poseidon(secret, blinding, token, amount)` leaf used by the circuit;
+- the matcher stores the note in its private Merkle tree and anchors the resulting root on-chain;
+- withdrawals request a dynamically generated `Groth16` proof from the current committed state instead of relying on a fixed proof package.
+
 ### 4. `Private Router`
 
 The router has two personalities:
@@ -151,7 +158,7 @@ In simple terms:
 - `apps/bridge`
   Dedicated bridge app for official bridge access, direct deposit to `Sinergy-2`, and claim/redeem of connected assets.
 - `services/matcher`
-  Private balances, routing, DEX execution, withdrawal authorization, and bridge claim/redeem APIs.
+  Private balances, routing, DEX execution, proof-backed ZK withdrawals, and bridge claim/redeem APIs.
 - `contracts`
   `DarkPoolVault`, `DarkPoolMarket`, connected tokens, and market contracts.
 - `packages/shared`
@@ -228,6 +235,25 @@ Start the dedicated matcher:
 ```bash
 npm run dev:matcher
 ```
+
+If you want to exercise the ZK withdrawal path locally, compile and prepare the circuit artifacts first:
+
+```bash
+npm run zk:compile:withdrawal
+npm run zk:setup:withdrawal -- /path/to/powersOfTau.ptau
+node scripts/zk/export-withdrawal-vkey-calldata.mjs > .tmp/zk/withdrawal/vkey-calldata.json
+```
+
+Then deploy or configure the ZK stack so `deployments/local.json` contains:
+
+- `contracts.zkVault`
+- `contracts.stateAnchor`
+- `contracts.withdrawalVerifier`
+
+The matcher now expects the compiled circuit files at `.tmp/zk/withdrawal/withdrawal_js/withdrawal.wasm` and `.tmp/zk/withdrawal/withdrawal_final.zkey` unless overridden with:
+
+- `ZK_WITHDRAWAL_WASM_FILE`
+- `ZK_WITHDRAWAL_ZKEY_FILE`
 
 For testnet-oriented frontend configs:
 
