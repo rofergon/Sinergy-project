@@ -1,13 +1,19 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MsgCallResponse } from "@initia/initia.proto/minievm/evm/v1/tx";
 import { useInterwovenKit } from "@initia/interwovenkit-react";
 import type { EncodeObject } from "@cosmjs/proto-signing";
 import type { StdFee } from "@cosmjs/amino";
-import { encodeFunctionData, encodePacked, formatUnits, keccak256, parseUnits } from "viem";
+import { encodeFunctionData, formatUnits, parseUnits } from "viem";
 import type { Address, Hex } from "viem";
 import { useReadContract } from "wagmi";
 import { darkPoolVaultAbi, darkVaultV2Abi, erc20Abi } from "@sinergy/shared";
 import { api } from "../lib/api";
+import {
+  createClientZkNote,
+  listClientZkNotes,
+  markClientZkNoteSpent,
+  persistClientZkNote
+} from "../lib/zkNotes";
 import { deployment, SINERGY_ROLLUP_CHAIN_ID } from "../initia";
 
 type Token = {
@@ -67,6 +73,7 @@ export function VaultPanel({
   const [status, setStatus] = useState("");
   const [autoSignStatus, setAutoSignStatus] = useState("");
   const [isAutoSignPending, setIsAutoSignPending] = useState(false);
+  const [localZkNoteCount, setLocalZkNoteCount] = useState(0);
 
   const selectedToken = useMemo(
     () => tokens.find((t) => t.address === tokenAddress),
@@ -89,6 +96,26 @@ export function VaultPanel({
   });
 
   const disabled = !connected || !address || !initiaAddress || !selectedToken;
+  const availableLocalZkNotes = useMemo(() => {
+    if (!address || !selectedToken || !zkEnabled) {
+      return localZkNoteCount;
+    }
+
+    return listClientZkNotes(address, selectedToken.address).filter((note) => note.status === "unspent")
+      .length;
+  }, [address, localZkNoteCount, selectedToken, zkEnabled]);
+
+  useEffect(() => {
+    if (!address || !selectedToken || !zkEnabled) {
+      setLocalZkNoteCount(0);
+      return;
+    }
+
+    setLocalZkNoteCount(
+      listClientZkNotes(address, selectedToken.address).filter((note) => note.status === "unspent")
+        .length
+    );
+  }, [address, selectedToken, zkEnabled]);
 
   async function broadcastMessages(messages: EncodeObject[]) {
     if (vaultAutoSignEnabled) {
@@ -178,6 +205,14 @@ export function VaultPanel({
       if (amountAtomic <= 0n) {
         throw new Error("Enter a positive amount to deposit.");
       }
+      const preparedZkNote =
+        zkEnabled
+          ? await createClientZkNote({
+              owner: address,
+              token: selectedToken.address,
+              amountAtomic,
+            })
+          : undefined;
 
       const availableWalletBalance = walletBalance.data ?? 0n;
       if (amountAtomic > availableWalletBalance) {
@@ -199,19 +234,13 @@ export function VaultPanel({
       );
 
       setStatus(`${zkEnabled ? "Depositing into ZK vault" : `Depositing ${selectedToken.symbol}`}…`);
-      const receiverCommitment = keccak256(
-        encodePacked(
-          ["address", "address", "uint256"],
-          [address, selectedToken.address, amountAtomic]
-        )
-      );
       const depositTx = await submitMsgCall(
         activeVaultAddress,
         encodeFunctionData({
           abi: zkEnabled ? darkVaultV2Abi : darkPoolVaultAbi,
           functionName: "deposit",
           args: zkEnabled
-            ? [selectedToken.address, amountAtomic, receiverCommitment]
+            ? [selectedToken.address, amountAtomic, preparedZkNote!.commitment]
             : [selectedToken.address, amountAtomic],
         })
       );
@@ -227,8 +256,23 @@ export function VaultPanel({
           txHash: depositTx.transactionHash,
           userAddress: address,
           logs,
+          zkNote: preparedZkNote
+            ? {
+                commitment: preparedZkNote.commitment,
+                secret: preparedZkNote.secret,
+                blinding: preparedZkNote.blinding,
+              }
+            : undefined,
         }),
       });
+
+      if (preparedZkNote) {
+        persistClientZkNote({
+          ...preparedZkNote,
+          txHash: depositTx.transactionHash,
+        });
+        setLocalZkNoteCount((current) => current + 1);
+      }
 
       await onAfterMutation();
       await walletBalance.refetch();
@@ -338,9 +382,35 @@ export function VaultPanel({
         }),
       });
 
+      if (zkEnabled && activeZkPackage) {
+        const marked = await markClientZkNoteSpent({
+          owner: address,
+          recipient: address,
+          nullifier: activeZkPackage.nullifier,
+        });
+        if (marked) {
+          setLocalZkNoteCount((current) => Math.max(0, current - 1));
+        }
+      }
+
       await onAfterMutation();
       setStatus(zkEnabled ? "ZK withdrawal settled ✓" : "Withdrawal settled ✓");
     } catch (err) {
+      if (zkEnabled && !broadcasted && zkPackage && selectedToken && address) {
+        try {
+          await api("/vault/cancel-zk-withdrawal", {
+            method: "POST",
+            body: JSON.stringify({
+              userAddress: address,
+              token: selectedToken.address,
+              amountAtomic: zkPackage.amountAtomic,
+              nullifier: zkPackage.nullifier,
+            }),
+          });
+        } catch {
+          // Preserve the original error and avoid masking the failed withdrawal reason.
+        }
+      }
       if (!zkEnabled && !broadcasted && quote && selectedToken && address) {
         try {
           await api("/vault/cancel-withdrawal", {
@@ -494,6 +564,7 @@ export function VaultPanel({
                 }}
               >
                 ZK mode enabled. Deposits and withdrawals route through `DarkVaultV2`.
+                {selectedToken ? ` Local notes ready: ${availableLocalZkNotes}.` : ""}
               </div>
             ) : null}
           </>
