@@ -10,7 +10,7 @@ Read this once you already understand the general architecture and want to revie
 
 ## What To Remember
 
-- This document describes the target state, not only the current system.
+- This document describes both the current proof-backed withdrawal architecture and the target state beyond it.
 - The goal is for the backend to stop being the only source of truth for balances and withdrawals.
 - `Initia L1` remains the external liquidity source, not the place where privacy lives.
 
@@ -42,9 +42,15 @@ Today the system already has three useful building blocks:
 Current trust assumptions are still strong:
 
 - the backend maintains the private ledger in memory / local state;
-- the backend signs withdrawals directly;
 - the backend can see orders and balances in plaintext;
 - the user cannot independently verify the internal private state from the chain alone.
+
+What already improved relative to the original MVP:
+
+- `DarkVaultV2`, `DarkStateAnchor`, and `Groth16WithdrawalVerifier` exist in the repo;
+- ZK deposits and withdrawals share a note-compatible commitment model;
+- the matcher now tracks private notes, rebuilds a Merkle root, anchors it on-chain, and generates withdrawal proofs dynamically from real stored note state;
+- withdrawals in the upgraded flow are no longer limited to backend signatures.
 
 ## Design Principles
 
@@ -52,7 +58,7 @@ Current trust assumptions are still strong:
 2. `Initia L1` should remain the liquidity layer, not the private execution layer.
 3. The privacy engine should run off-chain, but its outputs should be anchored on-chain.
 4. The user should be able to withdraw against committed state, not only backend trust.
-5. The first production step should prefer `TEE / confidential compute` over full `ZK`, then evolve toward stronger proofs later.
+5. Proof-backed withdrawals are already the first trust-minimized step; the next production decision is whether broader private execution should move first through `TEE / confidential compute` or later through fuller `ZK` settlement.
 
 ## Why `MiniEVM` Still Helps
 
@@ -92,9 +98,9 @@ This means `Sinergy-2` becomes the public settlement shell around a private exec
    Existing router path that simulates and executes swaps on `Initia L1`.
 6. `Proof / Attestation Gateway`
    Produces either:
-   - TEE attestation plus signed batch commitment
-   - Merkle inclusion proof for withdrawals
-   - ZK proof in later phases
+   - dynamic `Groth16` withdrawal proof from note state
+   - TEE attestation plus signed batch commitment for broader private execution
+   - stronger ZK state-transition proof in later phases
 
 ## Architecture Diagram
 
@@ -155,7 +161,7 @@ Responsibilities:
 - prevent double-withdrawal with nullifiers;
 - optionally support emergency pause or guardian controls.
 
-Suggested interface:
+Current public interface:
 
 ```solidity
 function deposit(address token, uint256 amount, bytes32 receiverCommitment) external;
@@ -163,9 +169,15 @@ function withdraw(
     address token,
     uint256 amount,
     address recipient,
+    bytes32 root,
     bytes32 nullifier,
-    bytes calldata proofOrAttestation
+    bytes calldata proof
 ) external;
+```
+
+Potential future extension:
+
+```solidity
 function consumeSettlement(bytes32 batchId, bytes32 newRoot, bytes calldata attestation) external;
 ```
 
@@ -215,7 +227,7 @@ sequenceDiagram
     U->>W: Choose token and amount
     W->>V: deposit(token, amount, receiverCommitment)
     V-->>W: Deposit event
-    W->>P: Submit tx hash + encrypted metadata
+    W->>P: Submit tx hash + note metadata
     P->>P: Rebuild private note set
     P->>A: Anchor new stateRoot
     A-->>P: New epoch accepted
@@ -264,7 +276,7 @@ sequenceDiagram
 
 ### Withdrawal Flow
 
-This is the most important change from the current design.
+This is already implemented in the upgraded vault path.
 
 ```mermaid
 sequenceDiagram
@@ -275,10 +287,10 @@ sequenceDiagram
     participant V as DarkVaultV2
 
     U->>W: Request withdrawal
-    W->>P: Ask for withdrawal proof material
-    P->>P: Build Merkle proof or attestation
-    P-->>W: nullifier + proofOrAttestation
-    W->>V: withdraw(token, amount, recipient, nullifier, proof)
+    W->>P: Ask for withdrawal proof package
+    P->>P: Select note, build Merkle path, generate proof
+    P-->>W: root + nullifier + proof
+    W->>V: withdraw(token, amount, recipient, root, nullifier, proof)
     V->>A: Check accepted root / verifier
     A-->>V: Root valid
     V->>V: Mark nullifier spent
@@ -305,7 +317,7 @@ Cons:
 
 This mode is useful only as a transitional refactor.
 
-### Mode B: TEE Attested Engine
+### Mode B: TEE Attested Private Execution
 
 The privacy engine runs inside a confidential environment and the chain accepts outputs only from registered attesters.
 
@@ -320,7 +332,7 @@ Cons:
 - still relies on trusted hardware assumptions;
 - attestation verification must be designed carefully.
 
-This is the recommended first production target.
+This is the recommended next production target for broader private execution, not for the already-implemented withdrawal proof path.
 
 ### Mode C: ZK-Proven Settlement
 
@@ -346,15 +358,20 @@ Scope:
 
 - keep current matcher logic;
 - replace plain internal ledger authority with `stateRoot` anchoring;
-- keep withdrawals temporarily attester-backed.
+- support proof-backed note withdrawals.
 
 Deliverables:
 
 - `DarkStateAnchor`
 - batch root anchoring
 - backend refactor from balance map authority to committed state authority
+- dynamic withdrawal proof generation from stored notes and Merkle paths
 
-### Phase 2: TEE-Based Privacy Engine
+Status:
+
+- implemented in the repo for the ZK vault path
+
+### Phase 2: TEE-Based Private Execution
 
 Scope:
 
@@ -367,18 +384,18 @@ Deliverables:
 
 - encrypted payload API
 - attester registry on-chain
-- withdrawal path based on attestation + nullifier
+- broader batch execution path based on attestation + nullifier
 
-### Phase 3: Proof-Oriented Withdrawals
+### Phase 3: Proof-Oriented Private State
 
 Scope:
 
-- Merkle balance proofs or note proofs for user withdrawals;
+- proof-backed or auditable private state transitions beyond simple withdrawals;
 - challengeable or auditable batch history.
 
 Deliverables:
 
-- user-verifiable withdrawal claims
+- user-verifiable state transition claims
 - reduced backend custody trust
 
 ### Phase 4: ZK Settlement
@@ -439,7 +456,7 @@ Proposed:
 
 - deposit with `receiverCommitment`
 - encrypt order payload client-side
-- fetch withdrawal proof package instead of simple signature quote
+- fetch dynamic withdrawal proof package instead of simple signature quote
 - display batch epoch / state commitment metadata to advanced users
 
 ## Data and API Shape
@@ -483,7 +500,7 @@ Suggested endpoints:
   "recipient": "0x...",
   "nullifier": "0x...",
   "root": "0x...",
-  "proofType": "tee_attestation",
+  "proofType": "groth16_withdrawal",
   "proofPayload": "0x..."
 }
 ```
@@ -516,8 +533,8 @@ Suggested endpoints:
 ## Open Questions
 
 1. Should `DarkPoolMarket` absorb the `DarkStateAnchor` role, or should the new anchor be a separate contract?
-2. Which TEE / confidential compute provider should be used first?
-3. Do withdrawals need a challenge period, or can Sinergy accept immediate attested exits initially?
+2. Which TEE / confidential compute provider should be used first for broader private execution?
+3. Do future attested settlement batches need a challenge period, or can Sinergy accept immediate exits initially?
 4. Should private balances be note-based or account-balance-tree-based in phase 1?
 5. How much user-visible audit data should be exposed in the web app?
 
@@ -527,8 +544,8 @@ For the next implementation cycle, the best balance is:
 
 1. keep `Initia L1` as liquidity source;
 2. use `Sinergy-2` as settlement and verification layer;
-3. implement `DarkStateAnchor` plus `DarkVaultV2`;
-4. move to `TEE attested` private execution before attempting full `ZK`.
+3. build on the existing `DarkStateAnchor` plus `DarkVaultV2` proof-backed withdrawal path;
+4. move to `TEE attested` private execution before attempting full `ZK` settlement.
 
 That path significantly improves the technical quality of the protocol without forcing an all-at-once rewrite.
 
