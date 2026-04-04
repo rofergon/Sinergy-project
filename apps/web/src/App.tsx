@@ -15,6 +15,7 @@ import { BalancesPanel } from "./components/BalancesPanel";
 import { PortfolioView } from "./components/PortfolioView";
 import { BridgeLanding } from "./components/BridgeLanding";
 import { MarketsView } from "./components/MarketsView";
+import { LandingPage } from "./components/LandingPage";
 import { StrategyStudio } from "./components/StrategyStudio";
 import { buildBridgeDefaults } from "./initia";
 import type { Market, MarketSnapshot, StrategyBacktestBundle, Token } from "./types";
@@ -209,6 +210,34 @@ function Dashboard() {
     openBridge(buildBridgeDefaults());
   }
 
+  const handleConnect = () => {
+    setError("");
+    openConnect();
+  };
+
+  if (!isConnected) {
+    return (
+      <>
+        <Navbar
+          markets={marketSnapshots}
+          selectedMarketId={selectedMarket?.id}
+          onSelectMarket={setSelectedMarketId}
+          activeView={activeView}
+          onNavigate={navigateTo}
+          isConnected={isConnected}
+          initiaAddress={initiaAddress}
+          username={username}
+          onConnect={handleConnect}
+          onOpenWallet={openWallet}
+          onDisconnect={disconnect}
+          chainOk={true}
+          bridgeReady={bridgeStatus?.ready ?? false}
+        />
+        <LandingPage onConnect={handleConnect} />
+      </>
+    );
+  }
+
   return (
     <>
       <Navbar
@@ -220,10 +249,7 @@ function Dashboard() {
         isConnected={isConnected}
         initiaAddress={initiaAddress}
         username={username}
-        onConnect={() => {
-          setError("");
-          openConnect();
-        }}
+        onConnect={handleConnect}
         onOpenWallet={openWallet}
         onDisconnect={disconnect}
         chainOk={true}
@@ -245,10 +271,7 @@ function Dashboard() {
           address={userAddress}
           initiaAddress={initiaAddress}
           username={username}
-          onConnect={() => {
-            setError("");
-            openConnect();
-          }}
+          onConnect={handleConnect}
           onOpenWallet={openWallet}
           onOpenBridge={handleBridgeIn}
           onGoTrade={() => setActiveView("trade")}
