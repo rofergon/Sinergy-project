@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StrategyChartOverlay, StrategyTimeframe } from "@sinergy/shared";
 import {
   CandlestickSeries,
@@ -6,6 +6,7 @@ import {
   CrosshairMode,
   HistogramSeries,
   LineSeries,
+  LineStyle,
   createChart,
   createSeriesMarkers,
   type IChartApi,
@@ -157,6 +158,35 @@ export function TradingViewChart({ market, timeframe, onTimeframeChange, overlay
   useEffect(() => {
     loadingMoreHistoryRef.current = loadingMoreHistory;
   }, [loadingMoreHistory]);
+
+  const activeOverlay = useMemo(() => {
+    if (!overlay || !market) return null;
+    if (overlay.marketId !== market.id || overlay.timeframe !== timeframe) return null;
+    return overlay;
+  }, [market, overlay, timeframe]);
+
+  const indicatorLegendItems = useMemo(() => {
+    if (!activeOverlay) return [];
+    return activeOverlay.indicators
+      .map((indicator) => {
+        const lastPoint = indicator.values[indicator.values.length - 1];
+        if (!lastPoint) return null;
+        return {
+          id: indicator.id,
+          label: indicator.label,
+          color: indicator.color,
+          pane: indicator.pane,
+          value: lastPoint.value
+        };
+      })
+      .filter((item): item is {
+        id: string;
+        label: string;
+        color: string;
+        pane: "price" | "oscillator";
+        value: number;
+      } => item !== null);
+  }, [activeOverlay]);
 
   const loadCandles = useCallback(
     async (mode: "initial" | "refresh" | "older") => {
@@ -340,14 +370,21 @@ export function TradingViewChart({ market, timeframe, onTimeframeChange, overlay
         }))
       );
 
-      if (overlay && overlay.marketId === market.id && overlay.timeframe === timeframe) {
-        for (const indicator of overlay.indicators) {
+      if (activeOverlay) {
+        let hasOscillatorPane = false;
+        for (const indicator of activeOverlay.indicators) {
+          const paneIndex = indicator.pane === "oscillator" ? 1 : 0;
+          if (indicator.pane === "oscillator") {
+            hasOscillatorPane = true;
+          }
           const indicatorSeries = chart.addSeries(LineSeries, {
             color: indicator.color,
-            lineWidth: 2,
+            lineWidth: indicator.pane === "oscillator" ? 1 : 2,
+            lineStyle: indicator.pane === "oscillator" ? LineStyle.Dashed : LineStyle.Solid,
             lastValueVisible: false,
-            priceLineVisible: false
-          });
+            priceLineVisible: false,
+            title: indicator.label
+          }, paneIndex);
           indicatorSeries.setData(
             indicator.values.map((value) => ({
               time: value.time as UTCTimestamp,
@@ -356,10 +393,20 @@ export function TradingViewChart({ market, timeframe, onTimeframeChange, overlay
           );
         }
 
+        if (hasOscillatorPane) {
+          chart.priceScale("right", 1).applyOptions({
+            scaleMargins: { top: 0.1, bottom: 0.08 },
+            autoScale: true
+          });
+          chart.priceScale("left", 1).applyOptions({
+            visible: false
+          });
+        }
+
         if (seriesRef.current) {
           createSeriesMarkers(
             seriesRef.current,
-            overlay.markers.map((marker) => ({
+            activeOverlay.markers.map((marker) => ({
               id: marker.id,
               time: marker.time as UTCTimestamp,
               position: marker.position,
@@ -409,7 +456,7 @@ export function TradingViewChart({ market, timeframe, onTimeframeChange, overlay
 
     ro.observe(containerRef.current);
     cleanupRef.current = () => ro.disconnect();
-  }, [candles, chartType, loadCandles, market, overlay, timeframe]);
+  }, [activeOverlay, candles, chartType, loadCandles, market, timeframe]);
 
   useEffect(() => {
     buildChart();
@@ -454,6 +501,21 @@ export function TradingViewChart({ market, timeframe, onTimeframeChange, overlay
           {loadingMoreHistory ? " · loading history" : ""}
         </span>
       </div>
+      {indicatorLegendItems.length > 0 && (
+        <div className="tv-indicator-legend">
+          {indicatorLegendItems.map((item) => (
+            <div key={item.id} className="tv-indicator-chip">
+              <span className="tv-indicator-dot" style={{ backgroundColor: item.color }} />
+              <div className="tv-indicator-copy">
+                <strong>{item.label}</strong>
+                <small>
+                  {item.pane === "oscillator" ? "Oscillator" : "Price"} · {item.value.toFixed(2)}
+                </small>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="tv-chart-container" ref={containerRef} />
     </div>
   );
