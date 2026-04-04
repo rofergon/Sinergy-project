@@ -7,6 +7,14 @@ export type HexString = `0x${string}`;
 export type StrategyTimeframe = "1m" | "5m" | "15m" | "1h" | "4h" | "1d";
 export type StrategyStatus = "draft" | "saved" | "archived";
 export type StrategyEnabledSide = "long" | "short";
+export type StrategyIdeaKind =
+  | "ema"
+  | "rsi-mean-reversion"
+  | "range-breakout"
+  | "bollinger-reversion";
+export type StrategyMarketRegime = "trend" | "range" | "breakout_ready" | "high_noise";
+export type StrategyTrendBias = "bullish" | "bearish" | "sideways";
+export type StrategySideBias = "long_only" | "short_only" | "both";
 export type StrategyRuleOperator =
   | ">"
   | ">="
@@ -47,6 +55,7 @@ export type StrategyMarkerShape = "arrowUp" | "arrowDown" | "circle" | "square";
 export type StrategyOverlaySeriesType = "line";
 export type StrategyToolName =
   | "list_strategy_capabilities"
+  | "analyze_market_context"
   | "list_strategy_templates"
   | "create_strategy_draft"
   | "update_strategy_draft"
@@ -278,4 +287,57 @@ export type StrategyCapabilities = {
     maxRulesPerGroup: number;
     maxIndicatorLookback: number;
   };
+};
+
+export type StrategyMarketLevel = {
+  kind: "support" | "resistance";
+  price: number;
+  distancePct: number;
+  touches: number;
+  strength: number;
+  sourceTimeframe: StrategyTimeframe;
+};
+
+export type StrategyTimeframeAnalysis = {
+  timeframe: StrategyTimeframe;
+  candleCount: number;
+  latestClose: number;
+  atrPct: number;
+  windowRangePct: number;
+  trendBias: StrategyTrendBias;
+  trendStrength: number;
+  marketRegime: StrategyMarketRegime;
+  nearestSupport?: number;
+  nearestResistance?: number;
+  breakoutRoomUpPct?: number;
+  breakoutRoomDownPct?: number;
+  suitabilityScore: number;
+  emaSuggestion: {
+    fastPeriod: number;
+    slowPeriod: number;
+    preferred: boolean;
+    sideBias: StrategySideBias;
+  };
+  rationale: string;
+};
+
+export type StrategyMarketAnalysis = {
+  marketId: HexString;
+  generatedAt: string;
+  latestPrice: number;
+  overallRegime: StrategyMarketRegime;
+  recommendedTimeframe: StrategyTimeframe;
+  recommendedStrategyKinds: StrategyIdeaKind[];
+  supportLevels: StrategyMarketLevel[];
+  resistanceLevels: StrategyMarketLevel[];
+  emaSuggestion: {
+    timeframe: StrategyTimeframe;
+    fastPeriod: number;
+    slowPeriod: number;
+    preferred: boolean;
+    sideBias: StrategySideBias;
+    rationale: string;
+  };
+  timeframes: StrategyTimeframeAnalysis[];
+  summary: string;
 };

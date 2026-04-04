@@ -8,7 +8,8 @@ import type {
   StrategyValidationResult,
   StrategyBacktestSummary,
   StrategyBacktestTrade,
-  StrategyChartOverlay
+  StrategyChartOverlay,
+  StrategyMarketAnalysis
 } from "./strategy";
 
 export const STRATEGY_TOOL_LIMITS = {
@@ -83,6 +84,12 @@ export const strategyToolInputSchemas = {
   list_strategy_capabilities: z
     .object({
       ownerAddress: strategyOwnerAddressSchema
+    })
+    .strict(),
+  analyze_market_context: z
+    .object({
+      ownerAddress: strategyOwnerAddressSchema,
+      marketId: strategyMarketIdSchema
     })
     .strict(),
   list_strategy_templates: z
@@ -181,6 +188,7 @@ export type StrategyToolInput<TTool extends StrategyToolName> = z.infer<
 
 export type StrategyToolResultMap = {
   list_strategy_capabilities: { capabilities: StrategyCapabilities };
+  analyze_market_context: { analysis: StrategyMarketAnalysis };
   list_strategy_templates: { templates: StrategyTemplate[] };
   create_strategy_draft: { strategy: StrategyDefinition };
   update_strategy_draft: { strategy: StrategyDefinition };
@@ -214,6 +222,12 @@ export const strategyToolDefinitions = [
     description: "Discovery tool. Use first when building from scratch to learn valid indicators, operators, limits, defaults, and schema-safe choices. Do not use for validation or backtesting. Produces capabilities.",
     inputSchema: strategyToolInputSchemas.list_strategy_capabilities,
     endpoint: "/strategy-tools/list_strategy_capabilities"
+  },
+  {
+    name: "analyze_market_context",
+    description: "Discovery tool. Use after capabilities and before creating or optimizing a strategy so choices are grounded in real candles. Produces support/resistance levels, regime detection, EMA guidance, and a recommended timeframe.",
+    inputSchema: strategyToolInputSchemas.analyze_market_context,
+    endpoint: "/strategy-tools/analyze_market_context"
   },
   {
     name: "list_strategy_templates",

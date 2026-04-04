@@ -5,7 +5,9 @@ import {
   strategyToolDefinitions,
   type HexString,
   type StrategyToolName,
-  type StrategyDefinition
+  type StrategyDefinition,
+  type StrategyIdeaKind,
+  type StrategyMarketAnalysis
 } from "@sinergy/shared";
 import { STRATEGY_AGENT_SYSTEM_PROMPT, buildUserPrompt, buildValidationCorrectionPrompt, buildOptimizationPlanPrompt, buildCreationPlanPrompt } from "../prompts.js";
 import type {
@@ -40,6 +42,47 @@ type CreationPlan = {
   name?: string;
   strategyPatch?: Partial<StrategyDefinition>;
 };
+
+function defaultRiskRulesForTimeframe(timeframe: StrategyDefinition["timeframe"]) {
+  switch (timeframe) {
+    case "1m":
+      return { stopLossPct: 0.8, takeProfitPct: 1.6, trailingStopPct: 0.5, maxBarsInTrade: 24 };
+    case "5m":
+      return { stopLossPct: 1.2, takeProfitPct: 2.4, trailingStopPct: 0.8, maxBarsInTrade: 30 };
+    case "15m":
+      return { stopLossPct: 2, takeProfitPct: 4, trailingStopPct: 1, maxBarsInTrade: 40 };
+    case "1h":
+      return { stopLossPct: 2.8, takeProfitPct: 5.6, trailingStopPct: 1.5, maxBarsInTrade: 28 };
+    case "4h":
+    case "1d":
+      return { stopLossPct: 3.5, takeProfitPct: 7, trailingStopPct: 2, maxBarsInTrade: 20 };
+  }
+}
+
+function buildTemporaryStrategy(input: {
+  ownerAddress: HexString;
+  marketId: HexString;
+  name: string;
+  timeframe: StrategyDefinition["timeframe"];
+}) {
+  return {
+    id: "temp",
+    ownerAddress: input.ownerAddress,
+    marketId: input.marketId,
+    name: input.name,
+    timeframe: input.timeframe,
+    enabledSides: ["long", "short"],
+    entryRules: { long: [], short: [] } as StrategyDefinition["entryRules"],
+    exitRules: { long: [], short: [] } as StrategyDefinition["exitRules"],
+    sizing: { mode: "percent_of_equity", value: 25 },
+    riskRules: defaultRiskRulesForTimeframe(input.timeframe),
+    costModel: { feeBps: 10, slippageBps: 5, startingEquity: 10_000 },
+    status: "draft",
+    schemaVersion: "1.0.0",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  } satisfies StrategyDefinition;
+}
 
 function goalRequestsBacktest(goal: string) {
   return /backtest|test|evaluat|probar|prueba|evaluar/i.test(goal);
@@ -513,6 +556,87 @@ function parseCreationPlan(text: string): CreationPlan | null {
   if (!parsed || typeof parsed !== "object") return null;
   if (parsed.mode !== "clone_template" && parsed.mode !== "create_custom") return null;
   return parsed;
+}
+
+function isStrategyMarketAnalysis(value: unknown): value is StrategyMarketAnalysis {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "recommendedTimeframe" in value &&
+      "recommendedStrategyKinds" in value &&
+      "emaSuggestion" in value
+  );
+}
+
+function chooseFallbackKind(goal: string, marketAnalysis?: StrategyMarketAnalysis): StrategyIdeaKind {
+  if (goalLooksLikeEmaCrossover(goal)) return "ema";
+  const explicit = detectBasicFastPath(goal);
+  if (explicit?.kind === "template" && explicit.templateId) {
+    return explicit.templateId;
+  }
+  return marketAnalysis?.recommendedStrategyKinds[0] ?? "ema";
+}
+
+function buildAnalysisGuidedCreationPlan(input: {
+  goal: string;
+  ownerAddress: HexString;
+  marketId: HexString;
+  marketAnalysis?: StrategyMarketAnalysis;
+}) {
+  const timeframe = input.marketAnalysis?.recommendedTimeframe ?? "15m";
+  const sideBias = input.marketAnalysis?.emaSuggestion.sideBias ?? "both";
+  const preferredKind = chooseFallbackKind(input.goal, input.marketAnalysis);
+
+  if (preferredKind === "ema") {
+    const suggestion = input.marketAnalysis?.emaSuggestion;
+    const base = buildTemporaryStrategy({
+      ownerAddress: input.ownerAddress,
+      marketId: input.marketId,
+      name: "EMA Market-Aware Strategy",
+      timeframe
+    });
+    const draft = buildEmaVariant(base, {
+      fast: suggestion?.fastPeriod ?? 9,
+      slow: suggestion?.slowPeriod ?? 21,
+      timeframe,
+      longOnly: sideBias === "long_only",
+      ...defaultRiskRulesForTimeframe(timeframe)
+    });
+
+    if (sideBias === "short_only") {
+      draft.enabledSides = ["short"];
+      draft.entryRules.long = [];
+      draft.exitRules.long = [];
+    }
+
+    return {
+      mode: "create_custom" as const,
+      name: draft.name,
+      strategyPatch: draft
+    };
+  }
+
+  const nameByKind: Record<Exclude<StrategyIdeaKind, "ema">, string> = {
+    "rsi-mean-reversion": "RSI Mean Reversion",
+    "range-breakout": "Range Breakout",
+    "bollinger-reversion": "Bollinger Reversion"
+  };
+
+  return {
+    mode: "clone_template" as const,
+    templateId: preferredKind,
+    name: nameByKind[preferredKind as Exclude<StrategyIdeaKind, "ema">],
+    strategyPatch: {
+      timeframe,
+      riskRules: defaultRiskRulesForTimeframe(timeframe),
+      enabledSides:
+        sideBias === "long_only"
+          ? ["long"]
+          : sideBias === "short_only"
+            ? ["short"]
+            : ["long", "short"]
+    } satisfies Partial<StrategyDefinition>
+  };
 }
 
 function collectArtifactsFromTrace(
@@ -1399,6 +1523,37 @@ Return JSON like:
     capabilitiesEntry.completedAt = new Date().toISOString();
     Object.assign(capabilitiesEntry, summarizeToolProgress(capabilitiesEntry));
 
+    let marketAnalysis: StrategyMarketAnalysis | undefined;
+    const marketAnalysisEntry: AgentToolTraceEntry = {
+      step: trace.length + 1,
+      tool: "analyze_market_context",
+      input: { ownerAddress: input.ownerAddress, marketId: input.marketId },
+      reason: "Creation fast path: inspect supports, resistances, regime, and timeframe before drafting",
+      expectedArtifact: "market analysis",
+      startedAt: new Date().toISOString()
+    };
+    trace.push(marketAnalysisEntry);
+
+    try {
+      const marketAnalysisResult = await this.matcherTransport("analyze_market_context", {
+        ownerAddress: input.ownerAddress as HexString,
+        marketId: input.marketId as HexString
+      });
+      marketAnalysisEntry.output = marketAnalysisResult as Record<string, unknown>;
+      marketAnalysisEntry.completedAt = new Date().toISOString();
+      Object.assign(marketAnalysisEntry, summarizeToolProgress(marketAnalysisEntry));
+      marketAnalysis = isStrategyMarketAnalysis(marketAnalysisResult.analysis)
+        ? marketAnalysisResult.analysis
+        : undefined;
+    } catch (error) {
+      marketAnalysisEntry.error = { message: error instanceof Error ? error.message : String(error) };
+      marketAnalysisEntry.completedAt = new Date().toISOString();
+      marketAnalysisEntry.failureClass = "tool_error";
+      marketAnalysisEntry.progressObserved = false;
+      marketAnalysisEntry.resultSummary = marketAnalysisEntry.error.message;
+      warnings.push(`Market analysis failed during creation fast path: ${marketAnalysisEntry.error.message}`);
+    }
+
     const templatesEntry: AgentToolTraceEntry = {
       step: trace.length + 1,
       tool: "list_strategy_templates",
@@ -1422,6 +1577,7 @@ Return JSON like:
       const creationPrompt = buildCreationPlanPrompt({
         goal: input.goal,
         capabilities: capabilitiesResult.capabilities as Record<string, unknown>,
+        marketAnalysis: marketAnalysis as unknown as Record<string, unknown> | undefined,
         templates: Array.isArray(templatesResult.templates)
           ? templatesResult.templates.map((template) => ({
               id: typeof template?.id === "string" ? template.id : undefined,
@@ -1437,39 +1593,13 @@ Return JSON like:
     }
 
     if (!creationPlan) {
-      const fallback = detectBasicFastPath(input.goal);
-      if (!fallback) {
-        return null;
-      }
-      warnings.push("Creation planner did not return a usable plan. Falling back to a small deterministic starter.");
-      creationPlan = fallback.kind === "template"
-        ? {
-            mode: "clone_template",
-            templateId: fallback.templateId,
-            name: fallback.name,
-            strategyPatch: {}
-          }
-        : {
-            mode: "create_custom",
-            name: fallback.name,
-            strategyPatch: buildEmaCrossoverDraft({
-              id: "temp",
-              ownerAddress: input.ownerAddress as HexString,
-              marketId: input.marketId as HexString,
-              name: fallback.name,
-              timeframe: "15m",
-              enabledSides: ["long", "short"],
-              entryRules: { long: [], short: [] } as StrategyDefinition["entryRules"],
-              exitRules: { long: [], short: [] } as StrategyDefinition["exitRules"],
-              sizing: { mode: "percent_of_equity", value: 25 },
-              riskRules: { stopLossPct: 2, takeProfitPct: 4, trailingStopPct: 1, maxBarsInTrade: 40 },
-              costModel: { feeBps: 10, slippageBps: 5, startingEquity: 10_000 },
-              status: "draft",
-              schemaVersion: "1.0.0",
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString()
-            } as StrategyDefinition)
-          };
+      warnings.push("Creation planner did not return a usable plan. Falling back to market-aware deterministic guidance.");
+      creationPlan = buildAnalysisGuidedCreationPlan({
+        goal: input.goal,
+        ownerAddress: input.ownerAddress as HexString,
+        marketId: input.marketId as HexString,
+        marketAnalysis
+      });
     }
 
     let activeStrategy: StrategyDefinition;
@@ -1749,6 +1879,40 @@ Return JSON like:
     metrics.enforcementTriggered = true;
     metrics.finalizationGuardrailsApplied.push(`model_optimize_fast_path_${strategyKind}`);
 
+    let marketAnalysis: StrategyMarketAnalysis | undefined;
+    const marketAnalysisEntry: AgentToolTraceEntry = {
+      step: trace.length + 1,
+      tool: "analyze_market_context",
+      input: {
+        ownerAddress: input.ownerAddress,
+        marketId: baseStrategy.marketId
+      },
+      reason: "Optimization fast path: inspect regime and timeframe before parameter search",
+      expectedArtifact: "market analysis",
+      startedAt: new Date().toISOString()
+    };
+    trace.push(marketAnalysisEntry);
+
+    try {
+      const analysisResult = await this.matcherTransport("analyze_market_context", {
+        ownerAddress: input.ownerAddress as HexString,
+        marketId: baseStrategy.marketId
+      });
+      marketAnalysisEntry.output = analysisResult as Record<string, unknown>;
+      marketAnalysisEntry.completedAt = new Date().toISOString();
+      Object.assign(marketAnalysisEntry, summarizeToolProgress(marketAnalysisEntry));
+      marketAnalysis = isStrategyMarketAnalysis(analysisResult.analysis)
+        ? analysisResult.analysis
+        : undefined;
+    } catch (error) {
+      marketAnalysisEntry.error = { message: error instanceof Error ? error.message : String(error) };
+      marketAnalysisEntry.completedAt = new Date().toISOString();
+      marketAnalysisEntry.failureClass = "tool_error";
+      marketAnalysisEntry.progressObserved = false;
+      marketAnalysisEntry.resultSummary = marketAnalysisEntry.error.message;
+      warnings.push(`Market analysis failed during optimization fast path: ${marketAnalysisEntry.error.message}`);
+    }
+
     let currentSummary: Record<string, unknown> | undefined;
     try {
       const baselineEntry: AgentToolTraceEntry = {
@@ -1782,7 +1946,8 @@ Return JSON like:
         goal: input.goal,
         strategyKind,
         strategy: baseStrategy as unknown as Record<string, unknown>,
-        currentSummary
+        currentSummary,
+        marketAnalysis: marketAnalysis as unknown as Record<string, unknown> | undefined
       });
       const response = await this.invokePlanningModel(optimizationPrompt);
       candidateConfigs = parseOptimizationCandidates(extractMessageText(response));
@@ -1791,26 +1956,86 @@ Return JSON like:
     }
 
     if (candidateConfigs.length === 0) {
-      warnings.push("Model did not return optimization candidates. Using a small deterministic fallback set.");
+      warnings.push("Model did not return optimization candidates. Using market-aware deterministic fallback candidates.");
+      const preferredTimeframe = marketAnalysis?.recommendedTimeframe ?? "15m";
+      const emaSuggestion = marketAnalysis?.emaSuggestion;
+      const sideBias = emaSuggestion?.sideBias ?? "both";
       candidateConfigs = (() => {
         switch (strategyKind) {
           case "ema":
             return [
-              { label: "ema-5-20-long", params: { fast: 5, slow: 20, timeframe: "15m", longOnly: true, stopLossPct: 1.5, takeProfitPct: 3 } },
-              { label: "ema-7-21-long", params: { fast: 7, slow: 21, timeframe: "15m", longOnly: true, stopLossPct: 2, takeProfitPct: 4 } },
-              { label: "ema-9-30-long", params: { fast: 9, slow: 30, timeframe: "15m", longOnly: true, stopLossPct: 2, takeProfitPct: 5 } }
+              {
+                label: "ema-primary",
+                params: {
+                  fast: emaSuggestion?.fastPeriod ?? 9,
+                  slow: emaSuggestion?.slowPeriod ?? 21,
+                  timeframe: preferredTimeframe,
+                  longOnly: sideBias === "long_only",
+                  ...defaultRiskRulesForTimeframe(preferredTimeframe)
+                }
+              },
+              {
+                label: "ema-faster",
+                params: {
+                  fast: Math.max((emaSuggestion?.fastPeriod ?? 9) - 2, 5),
+                  slow: Math.max((emaSuggestion?.slowPeriod ?? 21) - 5, 13),
+                  timeframe: preferredTimeframe,
+                  longOnly: sideBias === "long_only",
+                  stopLossPct: defaultRiskRulesForTimeframe(preferredTimeframe).stopLossPct,
+                  takeProfitPct: defaultRiskRulesForTimeframe(preferredTimeframe).takeProfitPct
+                }
+              },
+              {
+                label: "ema-slower",
+                params: {
+                  fast: (emaSuggestion?.fastPeriod ?? 9) + 2,
+                  slow: (emaSuggestion?.slowPeriod ?? 21) + 8,
+                  timeframe: preferredTimeframe,
+                  longOnly: sideBias === "long_only",
+                  stopLossPct: defaultRiskRulesForTimeframe(preferredTimeframe).stopLossPct,
+                  takeProfitPct: defaultRiskRulesForTimeframe(preferredTimeframe).takeProfitPct
+                }
+              }
             ];
           case "rsi-mean-reversion":
             return [
-              { label: "rsi-14-28-58", params: { timeframe: "15m", period: 14, entry: 28, exit: 58, stopLossPct: 2, takeProfitPct: 4 } }
+              {
+                label: "rsi-market-aware",
+                params: {
+                  timeframe: preferredTimeframe,
+                  period: preferredTimeframe === "1m" || preferredTimeframe === "5m" ? 12 : 14,
+                  entry: 28,
+                  exit: 58,
+                  stopLossPct: defaultRiskRulesForTimeframe(preferredTimeframe).stopLossPct,
+                  takeProfitPct: defaultRiskRulesForTimeframe(preferredTimeframe).takeProfitPct
+                }
+              }
             ];
           case "range-breakout":
             return [
-              { label: "breakout-20-10", params: { timeframe: "15m", lookback: 20, exitEma: 10, stopLossPct: 2, takeProfitPct: 4 } }
+              {
+                label: "breakout-market-aware",
+                params: {
+                  timeframe: preferredTimeframe,
+                  lookback: preferredTimeframe === "1h" || preferredTimeframe === "4h" ? 24 : 20,
+                  exitEma: emaSuggestion?.fastPeriod ?? 10,
+                  stopLossPct: defaultRiskRulesForTimeframe(preferredTimeframe).stopLossPct,
+                  takeProfitPct: defaultRiskRulesForTimeframe(preferredTimeframe).takeProfitPct
+                }
+              }
             ];
           case "bollinger-reversion":
             return [
-              { label: "boll-20-2", params: { timeframe: "15m", period: 20, stdDev: 2, stopLossPct: 2, takeProfitPct: 4 } }
+              {
+                label: "boll-market-aware",
+                params: {
+                  timeframe: preferredTimeframe,
+                  period: preferredTimeframe === "1m" ? 18 : 20,
+                  stdDev: marketAnalysis?.overallRegime === "high_noise" ? 2.2 : 2,
+                  stopLossPct: defaultRiskRulesForTimeframe(preferredTimeframe).stopLossPct,
+                  takeProfitPct: defaultRiskRulesForTimeframe(preferredTimeframe).takeProfitPct
+                }
+              }
             ];
         }
       })();

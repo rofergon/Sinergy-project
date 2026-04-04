@@ -7,6 +7,7 @@ type MergeContextOptions = {
 };
 
 const MARKET_ROOT_TOOLS = new Set<StrategyToolName>([
+  "analyze_market_context",
   "list_strategy_templates",
   "create_strategy_draft",
   "clone_strategy_template"

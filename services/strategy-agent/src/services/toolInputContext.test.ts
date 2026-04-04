@@ -27,6 +27,18 @@ test("injects required marketId into create_strategy_draft only", () => {
   });
 });
 
+test("injects marketId into analyze_market_context", () => {
+  const merged = mergeToolContext("analyze_market_context", {}, {
+    ownerAddress: "0x00000000000000000000000000000000000000c3",
+    marketId: "0x0000000000000000000000000000000000000000000000000000000000000111"
+  });
+
+  assert.deepEqual(merged, {
+    ownerAddress: "0x00000000000000000000000000000000000000c3",
+    marketId: "0x0000000000000000000000000000000000000000000000000000000000000111"
+  });
+});
+
 test("does not inject strategyId into update_strategy_draft", () => {
   const merged = mergeToolContext(
     "update_strategy_draft",

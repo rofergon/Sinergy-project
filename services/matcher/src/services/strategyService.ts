@@ -9,6 +9,8 @@ import type {
   StrategyBacktestTrade,
   StrategyCapabilities,
   StrategyChartOverlay,
+  StrategyMarketAnalysis,
+  StrategyTimeframe,
   StrategyTemplate,
   StrategyValidationResult
 } from "@sinergy/shared";
@@ -19,6 +21,7 @@ import {
   createEmptyStrategyDraft
 } from "./strategyCatalog.js";
 import { runStrategyBacktest } from "./strategyBacktest.js";
+import { analyzeMarketContext } from "./strategyMarketAnalysis.js";
 import { normalizeStrategyDefinition, validateStrategyDefinition, ensureSavedStrategy } from "./strategyValidation.js";
 import type { PriceService } from "./priceService.js";
 import type { ResolvedMarket } from "../types.js";
@@ -54,6 +57,45 @@ export class StrategyService {
 
   listCapabilities() {
     return this.capabilities;
+  }
+
+  analyzeMarketContext(input: { ownerAddress: HexString; marketId: HexString }): StrategyMarketAnalysis {
+    this.assertOwnerAddress(input.ownerAddress);
+    this.assertKnownMarket(input.marketId);
+
+    const market = this.marketsById.get(input.marketId.toLowerCase());
+    if (!market) {
+      throw new StrategyToolError("Strategy market not found", "strategy_market_not_found", 404, {
+        marketId: input.marketId
+      });
+    }
+
+    const timeframes: StrategyTimeframe[] = ["1m", "5m", "15m", "1h", "4h", "1d"];
+    const candlesByTimeframe = Object.fromEntries(
+      timeframes.map((timeframe) => [
+        timeframe,
+        this.options.priceService.getCandles(market.baseToken.symbol, timeframe, 240).map((bar) => ({
+          ts: Number(bar.ts),
+          open: Number(bar.open),
+          high: Number(bar.high),
+          low: Number(bar.low),
+          close: Number(bar.close),
+          volume: Number(bar.volume)
+        }))
+      ])
+    ) as Record<StrategyTimeframe, Array<{
+      ts: number;
+      open: number;
+      high: number;
+      low: number;
+      close: number;
+      volume: number;
+    }>>;
+
+    return analyzeMarketContext({
+      marketId: market.id,
+      candlesByTimeframe
+    });
   }
 
   listTemplates(ownerAddress: HexString, marketId?: HexString): StrategyTemplate[] {
@@ -398,6 +440,11 @@ export class StrategyService {
         "/strategy-tools/list_strategy_capabilities": {
           post: {
             summary: "Machine-readable strategy capability catalog"
+          }
+        },
+        "/strategy-tools/analyze_market_context": {
+          post: {
+            summary: "Analyze real candles to derive regime, supports, resistances, and timeframe guidance"
           }
         },
         "/strategy-tools/list_strategy_templates": {

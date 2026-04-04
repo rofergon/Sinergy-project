@@ -40,6 +40,13 @@ export class StrategyToolApi {
         return {
           capabilities: this.strategyService.listCapabilities()
         };
+      case "analyze_market_context":
+        return {
+          analysis: this.strategyService.analyzeMarketContext({
+            ownerAddress: payload.ownerAddress as `0x${string}`,
+            marketId: payload.marketId as `0x${string}`
+          })
+        };
       case "list_strategy_templates":
         return {
           templates: this.strategyService.listTemplates(

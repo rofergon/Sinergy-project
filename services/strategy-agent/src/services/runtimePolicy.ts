@@ -33,7 +33,13 @@ export function createEmptyMetrics(): AgentExecutionMetrics {
 }
 
 export function classifyTool(tool: StrategyToolName) {
-  if (tool === "list_strategy_capabilities" || tool === "list_strategy_templates" || tool === "list_user_strategies" || tool === "get_strategy") {
+  if (
+    tool === "list_strategy_capabilities" ||
+    tool === "analyze_market_context" ||
+    tool === "list_strategy_templates" ||
+    tool === "list_user_strategies" ||
+    tool === "get_strategy"
+  ) {
     return "discovery";
   }
   if (tool === "validate_strategy_draft") {
@@ -69,6 +75,10 @@ export function summarizeToolProgress(entry: AgentToolTraceEntry) {
 
   if (typeof output.capabilities === "object" && output.capabilities) {
     return { progressObserved: true, resultSummary: "capabilities_loaded" };
+  }
+
+  if (typeof output.analysis === "object" && output.analysis) {
+    return { progressObserved: true, resultSummary: "market_analysis_loaded" };
   }
 
   if (typeof output.templates === "object" || typeof output.templates === "undefined") {
@@ -147,6 +157,20 @@ export function summarizeTraceEntryForPrompt(entry: AgentToolTraceEntry): {
         operators: caps.operators,
         timeframes: caps.timeframes,
         limits: caps.limits
+      }
+    };
+  }
+
+  if (entry.tool === "analyze_market_context" && typeof output.analysis === "object" && output.analysis) {
+    const analysis = output.analysis as Record<string, unknown>;
+    return {
+      tool: entry.tool,
+      output: {
+        summaryType: "market_analysis",
+        recommendedTimeframe: analysis.recommendedTimeframe,
+        overallRegime: analysis.overallRegime,
+        recommendedStrategyKinds: analysis.recommendedStrategyKinds,
+        summary: analysis.summary
       }
     };
   }

@@ -35,13 +35,33 @@ function makeHarness() {
     dbFile: join(root, "strategies.sqlite"),
     markets: [market],
     priceService: {
-      getCandles: () => [
-        { ts: 1, open: 10, high: 10.5, low: 9.8, close: 10, volume: 10 },
-        { ts: 2, open: 10, high: 11.2, low: 9.9, close: 11, volume: 12 },
-        { ts: 3, open: 11, high: 12.3, low: 10.8, close: 12, volume: 14 },
-        { ts: 4, open: 12, high: 13.5, low: 11.8, close: 13, volume: 13 },
-        { ts: 5, open: 13, high: 12.9, low: 11.8, close: 12, volume: 11 }
-      ]
+      getCandles: (_symbol: string, _timeframe?: string, limit = 200) => {
+        if (limit <= 5) {
+          return [
+            { ts: 1, open: 10, high: 10.5, low: 9.8, close: 10, volume: 10 },
+            { ts: 2, open: 10, high: 11.2, low: 9.9, close: 11, volume: 12 },
+            { ts: 3, open: 11, high: 12.3, low: 10.8, close: 12, volume: 14 },
+            { ts: 4, open: 12, high: 13.5, low: 11.8, close: 13, volume: 13 },
+            { ts: 5, open: 13, high: 12.9, low: 11.8, close: 12, volume: 11 }
+          ];
+        }
+
+        return Array.from({ length: Math.min(limit, 90) }, (_, index) => {
+          const basePrice = 10 + index * 0.18 + Math.sin(index / 6) * 0.4;
+          const close = Number(basePrice.toFixed(4));
+          const open = Number((close - 0.08).toFixed(4));
+          const high = Number((close + 0.22).toFixed(4));
+          const low = Number((close - 0.24).toFixed(4));
+          return {
+            ts: index + 1,
+            open,
+            high,
+            low,
+            close,
+            volume: 10 + (index % 7)
+          };
+        });
+      }
     } as any
   });
 
@@ -183,6 +203,26 @@ test("capabilities and templates are exposed for agents", async () => {
     }) as { strategy: import("@sinergy/shared").StrategyDefinition };
     assert.equal(cloned.strategy.ownerAddress, ownerAddress);
     assert.equal(cloned.strategy.marketId, harness.market.id);
+  } finally {
+    harness.cleanup();
+  }
+});
+
+test("market analysis exposes timeframe, regime, and support resistance hints", async () => {
+  const harness = makeHarness();
+  const ownerAddress = "0x00000000000000000000000000000000000000c3" as HexString;
+
+  try {
+    const analysis = await harness.api.execute("analyze_market_context", {
+      ownerAddress,
+      marketId: harness.market.id
+    }) as { analysis: import("@sinergy/shared").StrategyMarketAnalysis };
+
+    assert.equal(typeof analysis.analysis.recommendedTimeframe, "string");
+    assert.equal(analysis.analysis.timeframes.length >= 3, true);
+    assert.equal(analysis.analysis.recommendedStrategyKinds.length > 0, true);
+    assert.equal(typeof analysis.analysis.emaSuggestion.fastPeriod, "number");
+    assert.equal(typeof analysis.analysis.summary, "string");
   } finally {
     harness.cleanup();
   }

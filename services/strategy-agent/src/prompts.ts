@@ -17,10 +17,11 @@ At every step, you must be explicit about the decision you are making:
 When a user asks you to create a strategy and run a backtest, follow ALL of these steps IN ORDER:
 
 1. **list_strategy_capabilities** — ALWAYS call this first when building from scratch.
-2. **create_strategy_draft** (or **clone_strategy_template** if a template matches) — Create the initial draft.
-3. **update_strategy_draft** — Set entry rules, exit rules, sizing, risk rules and cost model using ONLY indicators and operators from capabilities.
-4. **validate_strategy_draft** — Check for schema or logic errors.
-5. **run_strategy_backtest** — **MANDATORY** when the user requests a backtest or test. NEVER skip it.
+2. **analyze_market_context** — ALWAYS call this before choosing timeframe, EMA periods, or strategy family when marketId is available.
+3. **create_strategy_draft** (or **clone_strategy_template** if a template matches) — Create the initial draft.
+4. **update_strategy_draft** — Set entry rules, exit rules, sizing, risk rules and cost model using ONLY indicators and operators from capabilities and aligning with market analysis.
+5. **validate_strategy_draft** — Check for schema or logic errors.
+6. **run_strategy_backtest** — **MANDATORY** when the user requests a backtest or test. NEVER skip it.
 
 After run_strategy_backtest completes, summarize the results: net PnL, win rate, trade count, max drawdown, and profit factor.
 
@@ -34,6 +35,7 @@ Every tool input uses a STRICT JSON schema. Unknown top-level keys are rejected.
 - For \`update_strategy_draft\`, never send root-level \`marketId\` or \`strategyId\`; send only \`ownerAddress\` and \`strategy\`.
 - Treat tool schemas as authoritative. If a tool does not list a root key, do not send it.
 - Keep tool inputs compact and deterministic.
+- \`analyze_market_context\` accepts only \`ownerAddress\` and \`marketId\`.
 
 ## STRATEGY STRUCTURE
 
@@ -68,6 +70,9 @@ Operators: ">", ">=", "<", "<=", "crosses_above", "crosses_below"
 
 - **NEVER finalize without calling run_strategy_backtest** if the user asked to backtest, test, or evaluate.
 - Never invent indicators, operators, tools, fields, market IDs, or schema keys not in the capabilities response.
+- Use \`analyze_market_context\` to justify timeframe choice, EMA periods, and whether to prefer trend, range, or breakout logic.
+- If supports and resistances are tight and trend strength is weak, prefer mean-reversion templates over EMA crossover.
+- If trend strength is strong and breakout room exists, prefer EMA crossover or range-breakout on the recommended timeframe.
 - **NEVER compare the same value against itself** (e.g., close crosses_above close). This produces 0 trades. Each rule MUST have different indicators or different params on left vs right.
 - For EMA crossover: use indicator_output with different periods. Example: left=ema period=9, right=ema period=21.
 - Always use the provided ownerAddress exactly as given.
@@ -159,12 +164,14 @@ Constraints:
 - Always include ownerAddress in tool input when relevant.
 - Tool input contracts are strict:
   - list_strategy_capabilities accepts only ownerAddress.
+  - analyze_market_context accepts ownerAddress and marketId.
   - create_strategy_draft accepts ownerAddress, marketId, and optional name.
   - update_strategy_draft accepts ownerAddress and strategy only.
   - validate_strategy_draft accepts ownerAddress plus strategyId or strategy.
   - run_strategy_backtest accepts ownerAddress, strategyId, and optional bars.
 - Never add root-level marketId or strategyId to tools that do not accept them.
 - If creating a strategy from scratch, capabilities should be consulted first.
+- If marketId is available and you are choosing or modifying a strategy, call analyze_market_context before selecting timeframe, EMA parameters, or template family.
 - If validation errors exist, the system will attempt automatic rule-based repair. Prefer calling validate_strategy_draft again after seeing repair results.
 - When remainingValidationIssues are shown above, you MUST call update_strategy_draft with the corrected strategy payload before validating again.
 - Reuse the active strategyId from the session when a newly-created draft already exists.
@@ -235,6 +242,7 @@ export function buildOptimizationPlanPrompt(input: {
   strategyKind: string;
   strategy: Record<string, unknown>;
   currentSummary?: Record<string, unknown>;
+  marketAnalysis?: Record<string, unknown>;
 }) {
   return `
 You are optimizing an existing trading strategy. Propose a SMALL set of candidate parameter changes.
@@ -251,10 +259,13 @@ ${JSON.stringify(input.strategy, null, 2)}
 Current backtest summary:
 ${JSON.stringify(input.currentSummary ?? {}, null, 2)}
 
+Market analysis:
+${JSON.stringify(input.marketAnalysis ?? {}, null, 2)}
+
 Rules:
 - Return ONLY valid JSON.
 - Return at most 3 candidates.
-- Prefer 15m variants unless a different timeframe is strongly justified.
+- Follow the market analysis if it recommends a different timeframe or signals that EMA should not be primary.
 - Keep the strategy family the same. Do not invent a brand-new strategy.
 - Use small, plausible changes aimed at improving net PnL.
 - Be concise.
@@ -282,6 +293,7 @@ export function buildCreationPlanPrompt(input: {
   goal: string;
   capabilities: Record<string, unknown>;
   templates: Array<{ id?: string; name?: string; description?: string }>;
+  marketAnalysis?: Record<string, unknown>;
 }) {
   return `
 You are creating a trading strategy from scratch.
@@ -295,6 +307,9 @@ ${JSON.stringify(input.capabilities, null, 2)}
 Available templates:
 ${JSON.stringify(input.templates, null, 2)}
 
+Market analysis:
+${JSON.stringify(input.marketAnalysis ?? {}, null, 2)}
+
 You must decide whether to:
 - clone a template and optionally adjust it, or
 - create a custom draft and fill it in.
@@ -302,6 +317,8 @@ You must decide whether to:
 Rules:
 - Return ONLY valid JSON.
 - Use only indicators, operators, timeframes, price fields, and limits present in capabilities.
+- Use market analysis to choose timeframe, strategy family, and EMA periods instead of defaulting blindly.
+- Respect supports/resistances and regime: range -> mean reversion, trend -> EMA, breakout_ready -> breakout or EMA.
 - If a template already fits the request closely, prefer it.
 - If the request is specific enough to require a custom strategy, use a custom draft.
 - Keep the strategy coherent with the user's prompt. Do not default to EMA unless the goal suggests it.
