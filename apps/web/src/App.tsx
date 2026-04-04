@@ -216,26 +216,7 @@ function Dashboard() {
   };
 
   if (!isConnected) {
-    return (
-      <>
-        <Navbar
-          markets={marketSnapshots}
-          selectedMarketId={selectedMarket?.id}
-          onSelectMarket={setSelectedMarketId}
-          activeView={activeView}
-          onNavigate={navigateTo}
-          isConnected={isConnected}
-          initiaAddress={initiaAddress}
-          username={username}
-          onConnect={handleConnect}
-          onOpenWallet={openWallet}
-          onDisconnect={disconnect}
-          chainOk={true}
-          bridgeReady={bridgeStatus?.ready ?? false}
-        />
-        <LandingPage onConnect={handleConnect} />
-      </>
-    );
+    return <LandingPage onConnect={handleConnect} />;
   }
 
   return (

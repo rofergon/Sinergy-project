@@ -208,6 +208,20 @@ export function LandingPage({ onConnect }: Props) {
       <div className="landing-orb landing-orb-3" />
 
       <div className={`landing-content ${visible ? "landing-visible" : ""}`}>
+        {/* Minimal landing header */}
+        <nav className="landing-navbar">
+          <div className="landing-nav-logo">
+            <div className="nav-logo-icon">S</div>
+            <span>Sinergy</span>
+          </div>
+          <div className="landing-nav-right">
+            <span className="landing-nav-testnet">Testnet</span>
+            <button className="landing-nav-connect" onClick={onConnect} id="landing-nav-connect-btn">
+              Connect Wallet
+            </button>
+          </div>
+        </nav>
+
         {/* Hero */}
         <section className="landing-hero">
           <div className="landing-badge">
