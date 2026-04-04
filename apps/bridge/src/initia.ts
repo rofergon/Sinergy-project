@@ -178,3 +178,37 @@ export function buildInterwovenCustomChain() {
 export function resolveRollupRestUrl() {
   return import.meta.env.VITE_REST_URL ?? runtimeHttpUrl(1317, "rest");
 }
+
+function shortenInitiaAddress(addr?: string) {
+  if (!addr) return "";
+  return `${addr.slice(0, 8)}…${addr.slice(-6)}`;
+}
+
+export function formatInitiaUsername(username?: string | null) {
+  if (!username) {
+    return null;
+  }
+
+  return username.endsWith(".init") ? username : `${username}.init`;
+}
+
+export function formatInitiaIdentity(
+  username?: string | null,
+  initiaAddress?: string,
+  options?: { includeAddress?: boolean }
+) {
+  const formattedUsername = formatInitiaUsername(username);
+  if (formattedUsername && initiaAddress && options?.includeAddress) {
+    return `${formattedUsername} (${shortenInitiaAddress(initiaAddress)})`;
+  }
+
+  if (formattedUsername) {
+    return formattedUsername;
+  }
+
+  if (initiaAddress) {
+    return shortenInitiaAddress(initiaAddress);
+  }
+
+  return "";
+}

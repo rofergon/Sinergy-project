@@ -9,6 +9,7 @@ import { buildPublicSubdomainHost, isDirectHost } from "@sinergy/shared";
 import {
   buildBridgeDefaults,
   DEFAULT_SINERGY_BRIDGE_ASSET,
+  formatInitiaIdentity,
   resolveRollupRestUrl,
   SINERGY_BRIDGE_ID,
   SINERGY_BRIDGE_ASSETS,
@@ -153,6 +154,7 @@ export default function App() {
     address,
     isConnected,
     initiaAddress,
+    username,
     openConnect,
     openWallet,
     openBridge,
@@ -426,7 +428,7 @@ export default function App() {
         <div className="bridge-nav-actions">
           {isConnected && initiaAddress ? (
             <button className="wallet-pill" onClick={openWallet}>
-              {shorten(initiaAddress)}
+              {formatInitiaIdentity(username, initiaAddress, { includeAddress: true })}
             </button>
           ) : (
             <button className="ghost-btn" onClick={openConnect}>
@@ -532,7 +534,9 @@ export default function App() {
                 <label className="direct-field">
                   <span>Recipient on Sinergy</span>
                   <div className="direct-address">
-                    {initiaAddress ?? "Connect your Initia wallet"}
+                    {initiaAddress
+                      ? formatInitiaIdentity(username, initiaAddress, { includeAddress: true })
+                      : "Connect your Initia wallet"}
                   </div>
                 </label>
               </div>
@@ -586,7 +590,12 @@ export default function App() {
               </div>
               <div className="direct-meta">
                 <span>EVM recipient {address ? shorten(address) : "Not connected"}</span>
-                <span>Initia recipient {initiaAddress ? shorten(initiaAddress) : "Not connected"}</span>
+                <span>
+                  Initia recipient{" "}
+                  {initiaAddress
+                    ? formatInitiaIdentity(username, initiaAddress, { includeAddress: true })
+                    : "Not connected"}
+                </span>
               </div>
               {claimStatus ? <div className="direct-status">{claimStatus}</div> : null}
             </section>
