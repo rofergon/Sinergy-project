@@ -5,6 +5,7 @@ import type { ResolvedMarket, StoredOrder } from "../types.js";
 import { StateStore } from "./state.js";
 import { PriceService } from "./priceService.js";
 import { darkPoolMarketAbi } from "./deployment.js";
+import { getZkMerkleRoot } from "./zkState.js";
 
 type MatcherDeps = {
   store: StateStore;
@@ -251,7 +252,10 @@ export class MatchingService {
       createHash("sha256")
         .update(`${buy.id}:${sell.id}:${Date.now()}`)
         .digest("hex")) as Hex;
-    const stateRoot = zeroHash;
+    const stateRoot =
+      this.deps.store.get().zkNotes.length > 0
+        ? await getZkMerkleRoot(this.deps.store.get())
+        : zeroHash;
     const settlementRoot = ("0x" +
       createHash("sha256")
         .update(

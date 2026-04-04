@@ -11,6 +11,7 @@ const EMPTY_STATE: AppState = {
   processedWithdrawals: [],
   pendingWithdrawals: [],
   withdrawalNonces: {},
+  zkNotes: [],
   routerInventory: {},
   swapJobs: [],
   rebalanceJobs: []

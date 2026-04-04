@@ -140,7 +140,14 @@ const rebalanceWorker = new RebalanceWorker({
   markets
 });
 rebalanceWorker.start();
-const zkProofService = new ZkProofService(env.ZK_WITHDRAWAL_PACKAGE_FILE);
+const zkProofService = new ZkProofService({
+  store,
+  publicClient,
+  proofPackageFile: env.ZK_WITHDRAWAL_PACKAGE_FILE,
+  wasmFile: env.ZK_WITHDRAWAL_WASM_FILE,
+  zkeyFile: env.ZK_WITHDRAWAL_ZKEY_FILE,
+  stateAnchorAddress: deployment.contracts.stateAnchor
+});
 const strategyService = new StrategyService({
   dbFile: env.STRATEGY_DB_FILE,
   markets,
@@ -392,12 +399,17 @@ app.get("/swap/status/:id", async (request, reply) => {
 });
 
 app.post("/vault/sync-deposit", async (request) => {
-  const { txHash, userAddress, logs } = request.body as {
+  const { txHash, userAddress, logs, zkNote } = request.body as {
     txHash: string;
     userAddress: Address;
     logs?: Array<{ address: Address; topics: Hex[]; data: Hex }>;
+    zkNote?: {
+      commitment: Hex;
+      secret: string;
+      blinding: string;
+    };
   };
-  return await vaultService.syncDeposit(txHash, userAddress, logs);
+  return await vaultService.syncDeposit(txHash, userAddress, logs, zkNote);
 });
 
 app.post("/vault/withdrawal-quote", async (request) => {
@@ -427,7 +439,7 @@ app.post("/vault/zk-withdrawal-package", async (request) => {
     throw new Error("Insufficient internal balance");
   }
 
-  return zkProofService.loadWithdrawalPackage({
+  return zkProofService.prepareWithdrawalPackage({
     recipient: userAddress,
     token,
     amountAtomic: requestedAmountAtomic
@@ -454,6 +466,22 @@ app.post("/vault/cancel-withdrawal", async (request) => {
     userAddress,
     token,
     nonce
+  });
+});
+
+app.post("/vault/cancel-zk-withdrawal", async (request) => {
+  const { userAddress, token, amountAtomic, nullifier } = request.body as {
+    userAddress: Address;
+    token: Address;
+    amountAtomic: string;
+    nullifier?: Hex;
+  };
+
+  return zkProofService.cancelPendingWithdrawal({
+    recipient: userAddress,
+    token,
+    amountAtomic: BigInt(amountAtomic),
+    nullifier
   });
 });
 

@@ -45,6 +45,26 @@ export type PendingWithdrawal = {
   deadline: number;
 };
 
+export type ZkNoteStatus = "unspent" | "pending" | "spent";
+
+export type StoredZkNote = {
+  id: string;
+  userAddress: `0x${string}`;
+  token: `0x${string}`;
+  amountAtomic: string;
+  commitment: `0x${string}`;
+  secret: string;
+  blinding: string;
+  txHash: string;
+  createdAt: string;
+  status: ZkNoteStatus;
+  pendingRecipient?: `0x${string}`;
+  pendingNullifier?: `0x${string}`;
+  pendingSince?: number;
+  spentAt?: string;
+  spentNullifier?: `0x${string}`;
+};
+
 export type CanonicalAssetConfig = {
   localSymbol: string;
   l1Symbol: string;
@@ -140,6 +160,7 @@ export type AppState = {
   processedWithdrawals: string[];
   pendingWithdrawals: PendingWithdrawal[];
   withdrawalNonces: Record<string, number>;
+  zkNotes: StoredZkNote[];
   routerInventory: Record<string, string>;
   swapJobs: SwapJob[];
   rebalanceJobs: RebalanceJob[];

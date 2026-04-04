@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Account, Address, Hex, PublicClient, WalletClient } from "viem";
 import {
   createPublicClient,
@@ -9,10 +10,18 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { SinergyDeployment } from "@sinergy/shared";
-import { createSinergyChain, darkVaultV2Abi, erc20Abi } from "@sinergy/shared";
+import {
+  computeNoteCommitment,
+  createSinergyChain,
+  darkPoolMarketAbi,
+  darkStateAnchorAbi,
+  darkVaultV2Abi,
+  erc20Abi
+} from "@sinergy/shared";
 import type { PendingWithdrawal, ResolvedMarket, ResolvedToken } from "../types.js";
 import { StateStore } from "./state.js";
 import { darkPoolVaultAbi } from "./deployment.js";
+import { getZkMerkleRoot, nowIso, releaseExpiredZkNoteLocks } from "./zkState.js";
 
 function keyOf(value: string): string {
   return value.toLowerCase();
@@ -69,6 +78,45 @@ export class VaultService {
 
   getAvailableBalance(userAddress: Address, token: Address) {
     return BigInt(readBucket(this.store.get().balances, userAddress)[keyOf(token)] ?? "0");
+  }
+
+  async getCurrentZkRoot() {
+    return getZkMerkleRoot(this.store.get());
+  }
+
+  releaseExpiredZkWithdrawals(now = Date.now()) {
+    this.store.mutate((state) => {
+      releaseExpiredZkNoteLocks(state, now);
+    });
+  }
+
+  private async anchorZkRoot(stateRoot: Hex, settlementRoot: Hex) {
+    const stateAnchor = this.deployment.contracts.stateAnchor;
+    if (!stateAnchor || stateAnchor === "0x0000000000000000000000000000000000000000") {
+      throw new Error("State anchor address is not configured");
+    }
+
+    const batchId = (`0x${randomUUID().replace(/-/g, "").padEnd(64, "0").slice(0, 64)}`) as Hex;
+    await this.sendMatcherTransaction(
+      stateAnchor,
+      encodeFunctionData({
+        abi: darkStateAnchorAbi,
+        functionName: "anchorBatch",
+        args: [batchId, stateRoot, settlementRoot, 1n]
+      })
+    );
+
+    const marketAddress = this.deployment.contracts.market;
+    if (marketAddress && marketAddress !== "0x0000000000000000000000000000000000000000") {
+      await this.sendMatcherTransaction(
+        marketAddress,
+        encodeFunctionData({
+          abi: darkPoolMarketAbi,
+          functionName: "anchorBatch",
+          args: [batchId, stateRoot, settlementRoot, 1n]
+        })
+      );
+    }
   }
 
   private async sendMatcherTransaction(to: Address, data: Hex) {
@@ -210,6 +258,7 @@ export class VaultService {
   releaseExpiredWithdrawals(now = Math.floor(Date.now() / 1000)): void {
     this.store.mutate((state) => {
       const pending: PendingWithdrawal[] = [];
+      releaseExpiredZkNoteLocks(state);
 
       for (const item of state.pendingWithdrawals) {
         if (item.deadline <= now) {
@@ -240,52 +289,129 @@ export class VaultService {
   async syncDeposit(
     txHash: string,
     userAddress: Address,
-    logs?: Array<{ address: Address; topics: Hex[]; data: Hex }>
+    logs?: Array<{ address: Address; topics: Hex[]; data: Hex }>,
+    zkNote?: {
+      commitment: Hex;
+      secret: string;
+      blinding: string;
+    }
   ) {
-    const vault = this.deployment.contracts.vault;
-    if (vault === "0x0000000000000000000000000000000000000000") {
-      throw new Error("Vault address not configured");
+    const txKey = keyOf(txHash);
+    if (this.store.get().processedDeposits.includes(txKey)) {
+      return { alreadyProcessed: true };
     }
 
-    return this.store.mutateAsync(async (state) => {
-      const txKey = keyOf(txHash);
+    const executionLogs = await this.resolveExecutionLogs(txHash, logs);
+    const parsedLegacyLogs = parseEventLogs({
+      abi: darkPoolVaultAbi,
+      eventName: "Deposit",
+      logs: executionLogs as any
+    });
+    const parsedZkLogs = parseEventLogs({
+      abi: darkVaultV2Abi,
+      eventName: "Deposit",
+      logs: executionLogs as any
+    });
+
+    const legacyDepositLog = parsedLegacyLogs.find((log) =>
+      isAddressEqual(log.args.user!, userAddress)
+    );
+    const zkDepositLog = parsedZkLogs.find((log) =>
+      isAddressEqual(log.args.depositor!, userAddress)
+    );
+    const token = legacyDepositLog?.args.token ?? zkDepositLog?.args.token;
+    const amount = legacyDepositLog?.args.amount ?? zkDepositLog?.args.amount;
+
+    if (!token || amount === undefined) {
+      throw new Error("No vault deposit event found for this user");
+    }
+
+    const amountAtomic = BigInt(amount.toString());
+    if (zkDepositLog) {
+      if (!zkNote) {
+        throw new Error("Missing ZK note payload for deposit sync");
+      }
+
+      const expectedCommitment = await computeNoteCommitment({
+        secret: zkNote.secret,
+        blinding: zkNote.blinding,
+        token,
+        amountAtomic
+      });
+      const receiverCommitment = zkDepositLog.args.receiverCommitment!;
+      if (expectedCommitment.toLowerCase() !== zkNote.commitment.toLowerCase()) {
+        throw new Error("Provided ZK note commitment does not match the supplied note");
+      }
+      if (expectedCommitment.toLowerCase() !== receiverCommitment.toLowerCase()) {
+        throw new Error("Provided ZK note does not match the on-chain deposit commitment");
+      }
+
+      const draft = structuredClone(this.store.get());
+      if (draft.processedDeposits.includes(txKey)) {
+        return { alreadyProcessed: true };
+      }
+
+      addAtomic(draft.balances, userAddress, token, amountAtomic);
+      draft.processedDeposits.push(txKey);
+      draft.zkNotes.push({
+        id: randomUUID(),
+        userAddress,
+        token,
+        amountAtomic: amountAtomic.toString(),
+        commitment: expectedCommitment,
+        secret: zkNote.secret,
+        blinding: zkNote.blinding,
+        txHash,
+        createdAt: nowIso(),
+        status: "unspent"
+      });
+
+      const nextRoot = await getZkMerkleRoot(draft);
+      await this.anchorZkRoot(nextRoot, zkDepositLog.args.receiverCommitment!);
+
+      return this.store.mutate((state) => {
+        if (state.processedDeposits.includes(txKey)) {
+          return { alreadyProcessed: true };
+        }
+
+        addAtomic(state.balances, userAddress, token, amountAtomic);
+        state.processedDeposits.push(txKey);
+        state.zkNotes.push({
+          id: randomUUID(),
+          userAddress,
+          token,
+          amountAtomic: amountAtomic.toString(),
+          commitment: expectedCommitment,
+          secret: zkNote.secret,
+          blinding: zkNote.blinding,
+          txHash,
+          createdAt: nowIso(),
+          status: "unspent"
+        });
+
+        return {
+          alreadyProcessed: false,
+          token: this.tokens.get(token.toLowerCase())?.symbol ?? token,
+          amountAtomic: amount.toString(),
+          mode: "zk" as const,
+          root: nextRoot
+        };
+      });
+    }
+
+    return this.store.mutate((state) => {
       if (state.processedDeposits.includes(txKey)) {
         return { alreadyProcessed: true };
       }
 
-      const executionLogs = await this.resolveExecutionLogs(txHash, logs);
-      const parsedLegacyLogs = parseEventLogs({
-        abi: darkPoolVaultAbi,
-        eventName: "Deposit",
-        logs: executionLogs as any
-      });
-      const parsedZkLogs = parseEventLogs({
-        abi: darkVaultV2Abi,
-        eventName: "Deposit",
-        logs: executionLogs as any
-      });
-
-      const legacyDepositLog = parsedLegacyLogs.find((log) =>
-        isAddressEqual(log.args.user!, userAddress)
-      );
-      const zkDepositLog = parsedZkLogs.find((log) =>
-        isAddressEqual(log.args.depositor!, userAddress)
-      );
-      const token = legacyDepositLog?.args.token ?? zkDepositLog?.args.token;
-      const amount = legacyDepositLog?.args.amount ?? zkDepositLog?.args.amount;
-
-      if (!token || amount === undefined) {
-        throw new Error("No vault deposit event found for this user");
-      }
-
-      addAtomic(state.balances, userAddress, token, BigInt(amount.toString()));
+      addAtomic(state.balances, userAddress, token, amountAtomic);
       state.processedDeposits.push(txKey);
 
       return {
         alreadyProcessed: false,
         token: this.tokens.get(token.toLowerCase())?.symbol ?? token,
         amountAtomic: amount.toString(),
-        mode: zkDepositLog ? "zk" : "legacy"
+        mode: "legacy" as const
       };
     });
   }
@@ -446,6 +572,16 @@ export class VaultService {
 
         addAtomic(state.balances, userAddress, token, -amount);
         nullifier = zkWithdrawLog.args.nullifier!;
+
+        const note = state.zkNotes.find((entry) => entry.pendingNullifier === nullifier);
+        if (note) {
+          note.status = "spent";
+          note.spentNullifier = nullifier;
+          note.spentAt = nowIso();
+          delete note.pendingRecipient;
+          delete note.pendingNullifier;
+          delete note.pendingSince;
+        }
       }
 
       state.processedWithdrawals.push(txKey);

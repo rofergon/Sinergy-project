@@ -2,6 +2,8 @@ import "dotenv/config";
 import { resolve } from "node:path";
 import { z } from "zod";
 
+const zkBuildDir = resolve(process.cwd(), "../../.tmp/zk/withdrawal");
+
 const envSchema = z.object({
   PORT: z.coerce.number().default(8787),
   DEPLOYMENT_FILE: z.string().default(resolve(process.cwd(), "../../deployments/local.json")),
@@ -37,7 +39,9 @@ const envSchema = z.object({
   ROUTER_CANONICAL_ASSETS_JSON: z.string().default("{}"),
   ROUTER_MARKETS_JSON: z.string().default("{}"),
   ROUTER_BOOTSTRAP_INVENTORY_JSON: z.string().default("{}"),
-  ZK_WITHDRAWAL_PACKAGE_FILE: z.string().optional()
+  ZK_WITHDRAWAL_PACKAGE_FILE: z.string().optional(),
+  ZK_WITHDRAWAL_WASM_FILE: z.string().default(resolve(zkBuildDir, "withdrawal_js/withdrawal.wasm")),
+  ZK_WITHDRAWAL_ZKEY_FILE: z.string().default(resolve(zkBuildDir, "withdrawal_final.zkey"))
 });
 
 export const env = envSchema.parse(process.env);

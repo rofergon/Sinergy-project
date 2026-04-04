@@ -370,6 +370,9 @@ async function claimAndDepositQuote(
   );
 
   assert.equal(syncDeposit.alreadyProcessed, false);
+  if (syncDeposit.alreadyProcessed || !("token" in syncDeposit) || !("amountAtomic" in syncDeposit)) {
+    throw new Error("Deposit should not be marked as already processed in the harness");
+  }
   assert.equal(syncDeposit.token, "cUSDC");
   assert.equal(syncDeposit.amountAtomic, amountAtomic.toString());
 }
