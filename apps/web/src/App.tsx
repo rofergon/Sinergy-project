@@ -17,6 +17,7 @@ import { BridgeLanding } from "./components/BridgeLanding";
 import { MarketsView } from "./components/MarketsView";
 import { LandingPage } from "./components/LandingPage";
 import { StrategyStudio } from "./components/StrategyStudio";
+import { TransactionPopup, useTransactionPopup } from "./components/TransactionPopup";
 import { buildBridgeDefaults } from "./initia";
 import type { Market, MarketSnapshot, StrategyBacktestBundle, Token } from "./types";
 import "./styles.css";
@@ -79,6 +80,7 @@ function Dashboard() {
   const [strategyWorkspaceMode, setStrategyWorkspaceMode] = useState<"manual" | "agentic">("manual");
   const [chartTimeframe, setChartTimeframe] = useState<StrategyTimeframe>("15m");
   const [strategyBacktest, setStrategyBacktest] = useState<StrategyBacktestBundle | null>(null);
+  const { popup, showTx, closeTx } = useTransactionPopup();
 
   const userAddress = address as Address | undefined;
   const tokens: Token[] = useMemo(() => deployment?.tokens ?? [], [deployment]);
@@ -350,6 +352,7 @@ function Dashboard() {
                 });
                 await refreshUser();
               }}
+              showTx={showTx}
             />
 
             <SwapPanel
@@ -358,6 +361,7 @@ function Dashboard() {
               selectedMarket={selectedMarket}
               inventory={inventory}
               onAfterMutation={refreshUser}
+              showTx={showTx}
             />
 
             <VaultPanel
@@ -368,12 +372,15 @@ function Dashboard() {
               zkVaultAddress={zkVaultAddress}
               tokens={tokens}
               onAfterMutation={refreshUser}
+              showTx={showTx}
             />
 
             <BalancesPanel tokens={tokens} balances={balances} />
           </div>
         </div>
       )}
+
+      <TransactionPopup data={popup} onClose={closeTx} />
     </>
   );
 }
