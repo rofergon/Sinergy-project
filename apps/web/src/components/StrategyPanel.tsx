@@ -61,6 +61,10 @@ function formatTimeframe(value: StrategyTimeframe) {
   return value === "1h" ? "1H" : value === "4h" ? "4H" : value === "1d" ? "1D" : value;
 }
 
+function formatSideLabel(side: RuleSide) {
+  return side === "long" ? "Long" : "Short";
+}
+
 function setRuleGroups(
   draft: StrategyDefinition,
   scope: RuleScope,
@@ -120,120 +124,124 @@ function OperandEditor({
 
   return (
     <div className="strategy-operand">
-      <span className="strategy-inline-label">{label}</span>
-      <select
-        value={operand.type}
-        onChange={(event) => {
-          const nextType = event.target.value as StrategyOperand["type"];
-          if (nextType === "constant") {
-            onChange({ type: "constant", value: 0 });
-            return;
-          }
-          if (nextType === "indicator_output") {
-            const defaultIndicator = capabilities?.indicatorCatalog[0];
-            if (!defaultIndicator) {
-              onChange({ type: "price_field", field: "close" });
+      <div className="strategy-operand-head">
+        <span className="strategy-inline-label">{label}</span>
+      </div>
+      <div className="strategy-operand-fields">
+        <select
+          value={operand.type}
+          onChange={(event) => {
+            const nextType = event.target.value as StrategyOperand["type"];
+            if (nextType === "constant") {
+              onChange({ type: "constant", value: 0 });
               return;
             }
-            onChange({
-              type: "indicator_output",
-              indicator: defaultIndicator.kind,
-              output: defaultIndicator.outputs[0],
-              params: Object.fromEntries(
-                defaultIndicator.params
-                  .filter((param) => param.defaultValue !== undefined)
-                  .map((param) => [param.name, param.defaultValue as number])
-              )
-            });
-            return;
-          }
-          onChange({ type: "price_field", field: "close" });
-        }}
-      >
-        <option value="price_field">Price</option>
-        <option value="indicator_output">Indicator</option>
-        <option value="constant">Constant</option>
-      </select>
-
-      {operand.type === "price_field" && (
-        <select
-          value={operand.field}
-          onChange={(event) =>
-            onChange({ type: "price_field", field: event.target.value as StrategyPriceField })
-          }
-        >
-          {capabilities?.priceFields.map((field) => (
-            <option key={field} value={field}>
-              {field}
-            </option>
-          ))}
-        </select>
-      )}
-
-      {operand.type === "constant" && (
-        <input
-          type="number"
-          value={operand.value}
-          onChange={(event) => onChange({ type: "constant", value: Number(event.target.value) })}
-        />
-      )}
-
-      {operand.type === "indicator_output" && indicator && (
-        <>
-          <select
-            value={operand.indicator}
-            onChange={(event) => {
-              const nextIndicator = findIndicatorDefinition(capabilities, event.target.value);
-              if (!nextIndicator) return;
+            if (nextType === "indicator_output") {
+              const defaultIndicator = capabilities?.indicatorCatalog[0];
+              if (!defaultIndicator) {
+                onChange({ type: "price_field", field: "close" });
+                return;
+              }
               onChange({
                 type: "indicator_output",
-                indicator: nextIndicator.kind,
-                output: nextIndicator.outputs[0],
+                indicator: defaultIndicator.kind,
+                output: defaultIndicator.outputs[0],
                 params: Object.fromEntries(
-                  nextIndicator.params
+                  defaultIndicator.params
                     .filter((param) => param.defaultValue !== undefined)
                     .map((param) => [param.name, param.defaultValue as number])
                 )
               });
-            }}
-          >
-            {capabilities?.indicatorCatalog.map((entry) => (
-              <option key={entry.kind} value={entry.kind}>
-                {entry.label}
-              </option>
-            ))}
-          </select>
+              return;
+            }
+            onChange({ type: "price_field", field: "close" });
+          }}
+        >
+          <option value="price_field">Price</option>
+          <option value="indicator_output">Indicator</option>
+          <option value="constant">Constant</option>
+        </select>
 
+        {operand.type === "price_field" && (
           <select
-            value={operand.output}
-            onChange={(event) => onChange({ ...operand, output: event.target.value as any })}
+            value={operand.field}
+            onChange={(event) =>
+              onChange({ type: "price_field", field: event.target.value as StrategyPriceField })
+            }
           >
-            {indicator.outputs.map((output) => (
-              <option key={output} value={output}>
-                {output}
+            {capabilities?.priceFields.map((field) => (
+              <option key={field} value={field}>
+                {field}
               </option>
             ))}
           </select>
+        )}
 
-          {indicator.params.map((param) => (
-            <input
-              key={param.name}
-              type="number"
-              value={operand.params?.[param.name] ?? param.defaultValue ?? ""}
-              onChange={(event) =>
+        {operand.type === "constant" && (
+          <input
+            type="number"
+            value={operand.value}
+            onChange={(event) => onChange({ type: "constant", value: Number(event.target.value) })}
+          />
+        )}
+
+        {operand.type === "indicator_output" && indicator && (
+          <>
+            <select
+              value={operand.indicator}
+              onChange={(event) => {
+                const nextIndicator = findIndicatorDefinition(capabilities, event.target.value);
+                if (!nextIndicator) return;
                 onChange({
-                  ...operand,
-                  params: {
-                    ...(operand.params ?? {}),
-                    [param.name]: Number(event.target.value)
-                  }
-                })
-              }
-              placeholder={param.label}
-            />
-          ))}
-        </>
-      )}
+                  type: "indicator_output",
+                  indicator: nextIndicator.kind,
+                  output: nextIndicator.outputs[0],
+                  params: Object.fromEntries(
+                    nextIndicator.params
+                      .filter((param) => param.defaultValue !== undefined)
+                      .map((param) => [param.name, param.defaultValue as number])
+                  )
+                });
+              }}
+            >
+              {capabilities?.indicatorCatalog.map((entry) => (
+                <option key={entry.kind} value={entry.kind}>
+                  {entry.label}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={operand.output}
+              onChange={(event) => onChange({ ...operand, output: event.target.value as any })}
+            >
+              {indicator.outputs.map((output) => (
+                <option key={output} value={output}>
+                  {output}
+                </option>
+              ))}
+            </select>
+
+            {indicator.params.map((param) => (
+              <input
+                key={param.name}
+                type="number"
+                value={operand.params?.[param.name] ?? param.defaultValue ?? ""}
+                onChange={(event) =>
+                  onChange({
+                    ...operand,
+                    params: {
+                      ...(operand.params ?? {}),
+                      [param.name]: Number(event.target.value)
+                    }
+                  })
+                }
+                placeholder={param.label}
+              />
+            ))}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -252,7 +260,10 @@ function RuleBuilder({
   return (
     <div className="strategy-rule-builder">
       <div className="strategy-section-head">
-        <strong>{title}</strong>
+        <div className="strategy-section-copy">
+          <strong>{title}</strong>
+          <small>Any block can trigger. Inside each block, every rule must match.</small>
+        </div>
         <button type="button" onClick={() => onChange([...groups, emptyGroup()])}>
           Add Block
         </button>
@@ -264,7 +275,10 @@ function RuleBuilder({
         groups.map((group, groupIndex) => (
           <div className="strategy-rule-group" key={group.id}>
             <div className="strategy-rule-group-head">
-              <span>Block #{groupIndex + 1} (ANY)</span>
+              <div className="strategy-section-copy">
+                <span className="strategy-rule-group-title">Block #{groupIndex + 1}</span>
+                <small>Use another block for an alternative setup.</small>
+              </div>
               <button
                 type="button"
                 onClick={() => onChange(groups.filter((entry) => entry.id !== group.id))}
@@ -275,94 +289,101 @@ function RuleBuilder({
 
             {group.rules.map((rule, ruleIndex) => (
               <div className="strategy-rule-row" key={rule.id}>
-                <div className="strategy-rule-meta">
-                  <span>{ruleIndex === 0 ? "IF" : "AND"}</span>
-                </div>
-                <div className="strategy-rule-fields">
-                  <OperandEditor
-                    label="Left"
-                    operand={rule.left}
-                    capabilities={capabilities}
-                    onChange={(next) => {
+                <div className="strategy-rule-row-head">
+                  <div className="strategy-rule-meta">
+                    <span>{ruleIndex === 0 ? "IF" : "AND"}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="strategy-remove-rule"
+                    onClick={() => {
                       const nextGroups = groups.map((entry) =>
                         entry.id !== group.id
                           ? entry
                           : {
                               ...entry,
-                              rules: entry.rules.map((existing) =>
-                                existing.id === rule.id
-                                  ? { ...existing, left: applyOperandDefaults(capabilities, next) }
-                                  : existing
-                              )
-                            }
-                      );
-                      onChange(nextGroups);
-                    }}
-                  />
-
-                  <select
-                    value={rule.operator}
-                    onChange={(event) => {
-                      const nextGroups = groups.map((entry) =>
-                        entry.id !== group.id
-                          ? entry
-                          : {
-                              ...entry,
-                              rules: entry.rules.map((existing) =>
-                                existing.id === rule.id
-                                  ? { ...existing, operator: event.target.value as StrategyRule["operator"] }
-                                  : existing
-                              )
+                              rules: entry.rules.filter((existing) => existing.id !== rule.id)
                             }
                       );
                       onChange(nextGroups);
                     }}
                   >
-                    {capabilities?.operators.map((operator) => (
-                      <option key={operator} value={operator}>
-                        {operator}
-                      </option>
-                    ))}
-                  </select>
-
-                  <OperandEditor
-                    label="Right"
-                    operand={rule.right}
-                    capabilities={capabilities}
-                    onChange={(next) => {
-                      const nextGroups = groups.map((entry) =>
-                        entry.id !== group.id
-                          ? entry
-                          : {
-                              ...entry,
-                              rules: entry.rules.map((existing) =>
-                                existing.id === rule.id
-                                  ? { ...existing, right: applyOperandDefaults(capabilities, next) }
-                                  : existing
-                              )
-                            }
-                      );
-                      onChange(nextGroups);
-                    }}
-                  />
+                    Remove Rule
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  className="strategy-remove-rule"
-                  onClick={() => {
-                    const nextGroups = groups.map((entry) =>
-                      entry.id !== group.id
-                        ? entry
-                        : {
-                            ...entry,
-                            rules: entry.rules.filter((existing) => existing.id !== rule.id)
-                          }
-                    );
-                    onChange(nextGroups);
-                  }}
-                >
-                  Remove
-                </button>
+                <div className="strategy-rule-fields">
+                  <div className="strategy-compare-grid">
+                    <OperandEditor
+                      label="Left"
+                      operand={rule.left}
+                      capabilities={capabilities}
+                      onChange={(next) => {
+                        const nextGroups = groups.map((entry) =>
+                          entry.id !== group.id
+                            ? entry
+                            : {
+                                ...entry,
+                                rules: entry.rules.map((existing) =>
+                                  existing.id === rule.id
+                                    ? { ...existing, left: applyOperandDefaults(capabilities, next) }
+                                    : existing
+                                )
+                              }
+                        );
+                        onChange(nextGroups);
+                      }}
+                    />
+
+                    <label className="strategy-operator-field">
+                      <span className="strategy-inline-label">Condition</span>
+                      <select
+                        value={rule.operator}
+                        onChange={(event) => {
+                          const nextGroups = groups.map((entry) =>
+                            entry.id !== group.id
+                              ? entry
+                              : {
+                                  ...entry,
+                                  rules: entry.rules.map((existing) =>
+                                    existing.id === rule.id
+                                      ? { ...existing, operator: event.target.value as StrategyRule["operator"] }
+                                      : existing
+                                  )
+                                }
+                          );
+                          onChange(nextGroups);
+                        }}
+                      >
+                        {capabilities?.operators.map((operator) => (
+                          <option key={operator} value={operator}>
+                            {operator}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <OperandEditor
+                      label="Right"
+                      operand={rule.right}
+                      capabilities={capabilities}
+                      onChange={(next) => {
+                        const nextGroups = groups.map((entry) =>
+                          entry.id !== group.id
+                            ? entry
+                            : {
+                                ...entry,
+                                rules: entry.rules.map((existing) =>
+                                  existing.id === rule.id
+                                    ? { ...existing, right: applyOperandDefaults(capabilities, next) }
+                                    : existing
+                                )
+                              }
+                        );
+                        onChange(nextGroups);
+                      }}
+                    />
+                  </div>
+                </div>
               </div>
             ))}
 
@@ -636,12 +657,9 @@ export function StrategyPanel({
       <div className="strategy-panel-head">
         <div>
           <span className="panel-title">Strategy Builder</span>
-          <p>Builder visual no-code sobre la API de herramientas del matcher.</p>
+          <p>Configura el borrador por secciones: origen, ejecución, riesgo y reglas por lado.</p>
         </div>
         <div className="strategy-head-actions">
-          <button type="button" onClick={() => void createDraft()} disabled={busy !== null}>
-            New Draft
-          </button>
           <button type="button" onClick={() => void refreshData()} disabled={busy !== null}>
             Refresh
           </button>
@@ -649,280 +667,345 @@ export function StrategyPanel({
       </div>
 
       <div className="strategy-panel-body">
-        <div className="strategy-row strategy-actions-row">
-          <label>
-            Strategy
-            <select
-              value={selectedStrategyId}
-              onChange={(event) => void selectStrategy(event.target.value)}
-            >
-              <option value="">Select draft</option>
-              {strategies.map((strategy) => (
-                <option key={strategy.id} value={strategy.id}>
-                  {strategy.name}
-                </option>
-              ))}
-            </select>
-          </label>
+        <div className="strategy-toolbar-grid">
+          <div className="strategy-subsection">
+            <div className="strategy-section-head">
+              <div className="strategy-section-copy">
+                <strong>Draft Workspace</strong>
+                <small>Abre un borrador existente o empieza uno nuevo.</small>
+              </div>
+              <button type="button" onClick={() => void createDraft()} disabled={busy !== null}>
+                New Draft
+              </button>
+            </div>
+            <label>
+              Strategy
+              <select
+                value={selectedStrategyId}
+                onChange={(event) => void selectStrategy(event.target.value)}
+              >
+                <option value="">Select draft</option>
+                {strategies.map((strategy) => (
+                  <option key={strategy.id} value={strategy.id}>
+                    {strategy.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
 
-          <label>
-            Template
-            <select value={templateId} onChange={(event) => setTemplateId(event.target.value)}>
-              <option value="">Select template</option>
-              {templates.map((template) => (
-                <option key={template.id} value={template.id}>
-                  {template.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <button type="button" onClick={() => void cloneTemplate()} disabled={!templateId || busy !== null}>
-            Clone Template
-          </button>
+          <div className="strategy-subsection">
+            <div className="strategy-section-head">
+              <div className="strategy-section-copy">
+                <strong>Template Starter</strong>
+                <small>Usa una base prehecha y luego ajústala.</small>
+              </div>
+              <button type="button" onClick={() => void cloneTemplate()} disabled={!templateId || busy !== null}>
+                Clone Template
+              </button>
+            </div>
+            <label>
+              Template
+              <select value={templateId} onChange={(event) => setTemplateId(event.target.value)}>
+                <option value="">Select template</option>
+                {templates.map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
         </div>
 
         {!draft ? (
           <div className="strategy-empty-state">Create a draft or clone a template to start.</div>
         ) : (
           <>
-            <div className="strategy-card-grid">
-              <label>
-                Name
-                <input
-                  type="text"
-                  value={draft.name}
-                  onChange={(event) =>
-                    setDraft({ ...cloneStrategy(draft), name: event.target.value, updatedAt: new Date().toISOString() })
-                  }
-                />
-              </label>
-
-              <label>
-                Market
-                <select
-                  value={draft.marketId}
-                  onChange={(event) => {
-                    const nextMarketId = event.target.value as HexString;
-                    setDraft({ ...cloneStrategy(draft), marketId: nextMarketId, updatedAt: new Date().toISOString() });
-                    onSelectMarket(nextMarketId);
-                    onBacktestResult(null);
-                  }}
-                >
-                  {markets.map((market) => (
-                    <option key={market.id} value={market.id}>
-                      {market.symbol}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                Timeframe
-                <select
-                  value={timeframe}
-                  onChange={(event) => {
-                    onTimeframeChange(event.target.value as StrategyTimeframe);
-                    onBacktestResult(null);
-                  }}
-                >
-                  {capabilities?.timeframes.map((value) => (
-                    <option key={value} value={value}>
-                      {formatTimeframe(value)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
             <div className="strategy-subsection">
               <div className="strategy-section-head">
-                <strong>Sides</strong>
+                <div className="strategy-section-copy">
+                  <strong>Strategy Basics</strong>
+                  <small>Define nombre, mercado y periodicidad principal.</small>
+                </div>
               </div>
-              <div className="strategy-checkboxes">
-                {(["long", "short"] as const).map((side) => (
-                  <label key={side} className="strategy-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={draft.enabledSides.includes(side)}
-                      onChange={(event) => {
-                        const nextSides = event.target.checked
-                          ? [...draft.enabledSides, side]
-                          : draft.enabledSides.filter((entry) => entry !== side);
+              <div className="strategy-card-grid">
+                <label>
+                  Name
+                  <input
+                    type="text"
+                    value={draft.name}
+                    onChange={(event) =>
+                      setDraft({ ...cloneStrategy(draft), name: event.target.value, updatedAt: new Date().toISOString() })
+                    }
+                  />
+                </label>
+
+                <label>
+                  Market
+                  <select
+                    value={draft.marketId}
+                    onChange={(event) => {
+                      const nextMarketId = event.target.value as HexString;
+                      setDraft({ ...cloneStrategy(draft), marketId: nextMarketId, updatedAt: new Date().toISOString() });
+                      onSelectMarket(nextMarketId);
+                      onBacktestResult(null);
+                    }}
+                  >
+                    {markets.map((market) => (
+                      <option key={market.id} value={market.id}>
+                        {market.symbol}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  Timeframe
+                  <select
+                    value={timeframe}
+                    onChange={(event) => {
+                      onTimeframeChange(event.target.value as StrategyTimeframe);
+                      onBacktestResult(null);
+                    }}
+                  >
+                    {capabilities?.timeframes.map((value) => (
+                      <option key={value} value={value}>
+                        {formatTimeframe(value)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div className="strategy-layout-split">
+              <div className="strategy-subsection">
+                <div className="strategy-section-head">
+                  <div className="strategy-section-copy">
+                    <strong>Position Setup</strong>
+                    <small>Elige lados activos, tamaño y capital de prueba.</small>
+                  </div>
+                </div>
+                <div className="strategy-checkboxes">
+                  {(["long", "short"] as const).map((side) => (
+                    <label key={side} className="strategy-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={draft.enabledSides.includes(side)}
+                        onChange={(event) => {
+                          const nextSides = event.target.checked
+                            ? [...draft.enabledSides, side]
+                            : draft.enabledSides.filter((entry) => entry !== side);
+                          setDraft({
+                            ...cloneStrategy(draft),
+                            enabledSides: Array.from(new Set(nextSides)),
+                            updatedAt: new Date().toISOString()
+                          });
+                        }}
+                      />
+                      {formatSideLabel(side)}
+                    </label>
+                  ))}
+                </div>
+                <div className="strategy-card-grid strategy-card-grid-compact">
+                  <label>
+                    Sizing Mode
+                    <select
+                      value={draft.sizing.mode}
+                      onChange={(event) =>
                         setDraft({
                           ...cloneStrategy(draft),
-                          enabledSides: Array.from(new Set(nextSides)),
+                          sizing: {
+                            ...draft.sizing,
+                            mode: event.target.value as StrategyDefinition["sizing"]["mode"]
+                          },
                           updatedAt: new Date().toISOString()
-                        });
-                      }}
-                    />
-                    {side}
+                        })
+                      }
+                    >
+                      {capabilities?.sizingModes.map((mode) => (
+                        <option key={mode.mode} value={mode.mode}>
+                          {mode.label}
+                        </option>
+                      ))}
+                    </select>
                   </label>
-                ))}
+                  <label>
+                    Sizing Value
+                    <input
+                      type="number"
+                      value={draft.sizing.value}
+                      onChange={(event) =>
+                        setDraft({
+                          ...cloneStrategy(draft),
+                          sizing: { ...draft.sizing, value: Number(event.target.value) },
+                          updatedAt: new Date().toISOString()
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Starting Equity
+                    <input
+                      type="number"
+                      value={draft.costModel.startingEquity}
+                      onChange={(event) =>
+                        setDraft({
+                          ...cloneStrategy(draft),
+                          costModel: { ...draft.costModel, startingEquity: Number(event.target.value) },
+                          updatedAt: new Date().toISOString()
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="strategy-subsection">
+                <div className="strategy-section-head">
+                  <div className="strategy-section-copy">
+                    <strong>Risk And Costs</strong>
+                    <small>Costes de ejecución y salidas automáticas del backtest.</small>
+                  </div>
+                </div>
+                <div className="strategy-card-grid strategy-card-grid-compact">
+                  <label>
+                    Fee Bps
+                    <input
+                      type="number"
+                      value={draft.costModel.feeBps}
+                      onChange={(event) =>
+                        setDraft({
+                          ...cloneStrategy(draft),
+                          costModel: { ...draft.costModel, feeBps: Number(event.target.value) },
+                          updatedAt: new Date().toISOString()
+                        })
+                      }
+                    />
+                  </label>
+
+                  <label>
+                    Slippage Bps
+                    <input
+                      type="number"
+                      value={draft.costModel.slippageBps}
+                      onChange={(event) =>
+                        setDraft({
+                          ...cloneStrategy(draft),
+                          costModel: { ...draft.costModel, slippageBps: Number(event.target.value) },
+                          updatedAt: new Date().toISOString()
+                        })
+                      }
+                    />
+                  </label>
+
+                  <label>
+                    Stop Loss %
+                    <input
+                      type="number"
+                      value={draft.riskRules.stopLossPct ?? ""}
+                      onChange={(event) =>
+                        setDraft({
+                          ...cloneStrategy(draft),
+                          riskRules: { ...draft.riskRules, stopLossPct: Number(event.target.value) },
+                          updatedAt: new Date().toISOString()
+                        })
+                      }
+                    />
+                  </label>
+
+                  <label>
+                    Take Profit %
+                    <input
+                      type="number"
+                      value={draft.riskRules.takeProfitPct ?? ""}
+                      onChange={(event) =>
+                        setDraft({
+                          ...cloneStrategy(draft),
+                          riskRules: { ...draft.riskRules, takeProfitPct: Number(event.target.value) },
+                          updatedAt: new Date().toISOString()
+                        })
+                      }
+                    />
+                  </label>
+
+                  <label>
+                    Trailing Stop %
+                    <input
+                      type="number"
+                      value={draft.riskRules.trailingStopPct ?? ""}
+                      onChange={(event) =>
+                        setDraft({
+                          ...cloneStrategy(draft),
+                          riskRules: { ...draft.riskRules, trailingStopPct: Number(event.target.value) },
+                          updatedAt: new Date().toISOString()
+                        })
+                      }
+                    />
+                  </label>
+
+                  <label>
+                    Max Bars In Trade
+                    <input
+                      type="number"
+                      value={draft.riskRules.maxBarsInTrade ?? ""}
+                      onChange={(event) =>
+                        setDraft({
+                          ...cloneStrategy(draft),
+                          riskRules: { ...draft.riskRules, maxBarsInTrade: Number(event.target.value) },
+                          updatedAt: new Date().toISOString()
+                        })
+                      }
+                    />
+                  </label>
+                </div>
               </div>
             </div>
 
-            <div className="strategy-card-grid">
-              <label>
-                Sizing Mode
-                <select
-                  value={draft.sizing.mode}
-                  onChange={(event) =>
-                    setDraft({
-                      ...cloneStrategy(draft),
-                      sizing: {
-                        ...draft.sizing,
-                        mode: event.target.value as StrategyDefinition["sizing"]["mode"]
-                      },
-                      updatedAt: new Date().toISOString()
-                    })
-                  }
-                >
-                  {capabilities?.sizingModes.map((mode) => (
-                    <option key={mode.mode} value={mode.mode}>
-                      {mode.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Sizing Value
-                <input
-                  type="number"
-                  value={draft.sizing.value}
-                  onChange={(event) =>
-                    setDraft({
-                      ...cloneStrategy(draft),
-                      sizing: { ...draft.sizing, value: Number(event.target.value) },
-                      updatedAt: new Date().toISOString()
-                    })
-                  }
-                />
-              </label>
-              <label>
-                Starting Equity
-                <input
-                  type="number"
-                  value={draft.costModel.startingEquity}
-                  onChange={(event) =>
-                    setDraft({
-                      ...cloneStrategy(draft),
-                      costModel: { ...draft.costModel, startingEquity: Number(event.target.value) },
-                      updatedAt: new Date().toISOString()
-                    })
-                  }
-                />
-              </label>
-              <label>
-                Fee Bps
-                <input
-                  type="number"
-                  value={draft.costModel.feeBps}
-                  onChange={(event) =>
-                    setDraft({
-                      ...cloneStrategy(draft),
-                      costModel: { ...draft.costModel, feeBps: Number(event.target.value) },
-                      updatedAt: new Date().toISOString()
-                    })
-                  }
-                />
-              </label>
-              <label>
-                Slippage Bps
-                <input
-                  type="number"
-                  value={draft.costModel.slippageBps}
-                  onChange={(event) =>
-                    setDraft({
-                      ...cloneStrategy(draft),
-                      costModel: { ...draft.costModel, slippageBps: Number(event.target.value) },
-                      updatedAt: new Date().toISOString()
-                    })
-                  }
-                />
-              </label>
-              <label>
-                Stop Loss %
-                <input
-                  type="number"
-                  value={draft.riskRules.stopLossPct ?? ""}
-                  onChange={(event) =>
-                    setDraft({
-                      ...cloneStrategy(draft),
-                      riskRules: { ...draft.riskRules, stopLossPct: Number(event.target.value) },
-                      updatedAt: new Date().toISOString()
-                    })
-                  }
-                />
-              </label>
-              <label>
-                Take Profit %
-                <input
-                  type="number"
-                  value={draft.riskRules.takeProfitPct ?? ""}
-                  onChange={(event) =>
-                    setDraft({
-                      ...cloneStrategy(draft),
-                      riskRules: { ...draft.riskRules, takeProfitPct: Number(event.target.value) },
-                      updatedAt: new Date().toISOString()
-                    })
-                  }
-                />
-              </label>
-              <label>
-                Trailing Stop %
-                <input
-                  type="number"
-                  value={draft.riskRules.trailingStopPct ?? ""}
-                  onChange={(event) =>
-                    setDraft({
-                      ...cloneStrategy(draft),
-                      riskRules: { ...draft.riskRules, trailingStopPct: Number(event.target.value) },
-                      updatedAt: new Date().toISOString()
-                    })
-                  }
-                />
-              </label>
-              <label>
-                Max Bars In Trade
-                <input
-                  type="number"
-                  value={draft.riskRules.maxBarsInTrade ?? ""}
-                  onChange={(event) =>
-                    setDraft({
-                      ...cloneStrategy(draft),
-                      riskRules: { ...draft.riskRules, maxBarsInTrade: Number(event.target.value) },
-                      updatedAt: new Date().toISOString()
-                    })
-                  }
-                />
-              </label>
-            </div>
+            <div className="strategy-rules-stack">
+              {(["long", "short"] as const).map((side) => {
+                const sideEnabled = draft.enabledSides.includes(side);
+                return (
+                  <div key={side} className={`strategy-side-section ${sideEnabled ? "" : "is-disabled"}`}>
+                    <div className="strategy-section-head">
+                      <div className="strategy-section-copy">
+                        <strong>{formatSideLabel(side)} Side</strong>
+                        <small>
+                          {sideEnabled
+                            ? `Define cuándo abrir y cerrar posiciones ${formatSideLabel(side).toLowerCase()}.`
+                            : `Activa ${formatSideLabel(side)} arriba para editar estas reglas.`}
+                        </small>
+                      </div>
+                      <span className={`strategy-side-badge ${sideEnabled ? "enabled" : "disabled"}`}>
+                        {sideEnabled ? "Enabled" : "Disabled"}
+                      </span>
+                    </div>
 
-            <RuleBuilder
-              title="Long Entry Rules"
-              groups={draft.entryRules.long}
-              capabilities={capabilities}
-              onChange={(next) => setDraft(setRuleGroups(cloneStrategy(draft), "entryRules", "long", next))}
-            />
-            <RuleBuilder
-              title="Long Exit Rules"
-              groups={draft.exitRules.long}
-              capabilities={capabilities}
-              onChange={(next) => setDraft(setRuleGroups(cloneStrategy(draft), "exitRules", "long", next))}
-            />
-            <RuleBuilder
-              title="Short Entry Rules"
-              groups={draft.entryRules.short}
-              capabilities={capabilities}
-              onChange={(next) => setDraft(setRuleGroups(cloneStrategy(draft), "entryRules", "short", next))}
-            />
-            <RuleBuilder
-              title="Short Exit Rules"
-              groups={draft.exitRules.short}
-              capabilities={capabilities}
-              onChange={(next) => setDraft(setRuleGroups(cloneStrategy(draft), "exitRules", "short", next))}
-            />
+                    {sideEnabled ? (
+                      <>
+                        <RuleBuilder
+                          title="Entry Rules"
+                          groups={draft.entryRules[side]}
+                          capabilities={capabilities}
+                          onChange={(next) => setDraft(setRuleGroups(cloneStrategy(draft), "entryRules", side, next))}
+                        />
+                        <RuleBuilder
+                          title="Exit Rules"
+                          groups={draft.exitRules[side]}
+                          capabilities={capabilities}
+                          onChange={(next) => setDraft(setRuleGroups(cloneStrategy(draft), "exitRules", side, next))}
+                        />
+                      </>
+                    ) : (
+                      <div className="strategy-empty-state">
+                        Enable {formatSideLabel(side)} in Position Setup to configure these rules.
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
 
             <div className="strategy-panel-footer">
               <button type="button" onClick={() => void validateDraft()} disabled={busy !== null}>

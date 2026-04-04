@@ -19,6 +19,7 @@ type AssetFeedConfig = {
   providerSymbol: string;
   fallbackPrice: string;
   supportsBackfill: boolean;
+  historicalProviderSymbol?: string;
   coingeckoId?: string;
 };
 
@@ -57,7 +58,17 @@ type BackfillOptions = {
   chunkDays?: number;
 };
 
+type CandleQueryOptions = {
+  beforeTs?: number;
+};
+
+type CandleQueryResult = {
+  candles: StoredBarRow[];
+  hasMore: boolean;
+};
+
 const DEFAULT_INTERVAL: CandleInterval = "1m";
+const TWELVE_DATA_SAFE_1M_CHUNK_DAYS = 3;
 
 function normalizeInterval(input?: string): CandleInterval {
   switch ((input ?? DEFAULT_INTERVAL).toLowerCase()) {
@@ -99,6 +110,48 @@ function intervalSeconds(interval: CandleInterval) {
     case "1d":
       return 86_400;
   }
+}
+
+function maxContinuityGapSeconds(interval: CandleInterval) {
+  return intervalSeconds(interval) * 3;
+}
+
+function trimToContiguousTail(
+  candles: StoredBarRow[],
+  interval: CandleInterval,
+  limit: number
+): CandleQueryResult {
+  if (candles.length === 0) {
+    return {
+      candles: [],
+      hasMore: false
+    };
+  }
+
+  const recentWindow = candles.slice(-Math.max(limit + 1, 2));
+  const maxGap = maxContinuityGapSeconds(interval);
+  let contiguousStart = 0;
+
+  for (let index = recentWindow.length - 1; index > 0; index -= 1) {
+    const gapSeconds = recentWindow[index].ts - recentWindow[index - 1].ts;
+    if (gapSeconds > maxGap) {
+      contiguousStart = index;
+      break;
+    }
+  }
+
+  const contiguousWindow = recentWindow.slice(contiguousStart);
+  if (contiguousWindow.length > limit) {
+    return {
+      candles: contiguousWindow.slice(-limit),
+      hasMore: true
+    };
+  }
+
+  return {
+    candles: contiguousWindow,
+    hasMore: contiguousStart === 0 && candles.length > recentWindow.length
+  };
 }
 
 function parseProviderTime(datetime: string) {
@@ -166,6 +219,7 @@ export class PriceService {
         providerSymbol: "BTC/USD",
         fallbackPrice: "85000.00",
         supportsBackfill: true,
+        historicalProviderSymbol: "BTC/USD",
         coingeckoId: "bitcoin"
       },
       cETH: {
@@ -173,6 +227,7 @@ export class PriceService {
         providerSymbol: "ETH/USD",
         fallbackPrice: "1900.00",
         supportsBackfill: true,
+        historicalProviderSymbol: "ETH/USD",
         coingeckoId: "ethereum"
       },
       cSOL: {
@@ -180,6 +235,7 @@ export class PriceService {
         providerSymbol: "SOL/USD",
         fallbackPrice: "120.00",
         supportsBackfill: true,
+        historicalProviderSymbol: "SOL/USD",
         coingeckoId: "solana"
       },
       cINIT: {
@@ -211,15 +267,36 @@ export class PriceService {
   }
 
   async backfill(options: BackfillOptions = {}) {
-    const days = options.days ?? 60;
+    const days = options.days ?? 90;
     const chunkDays = options.chunkDays ?? 7;
+    const providerChunkDays = Math.max(1, Math.min(chunkDays, TWELVE_DATA_SAFE_1M_CHUNK_DAYS));
     const endDate = new Date();
     const startDate = new Date(endDate.getTime() - days * 24 * 60 * 60 * 1000);
 
     for (const [assetSymbol, config] of Object.entries(this.assetConfigs)) {
       if (!config.supportsBackfill) continue;
 
-       if (config.source === "initia-connect") {
+      if (config.source === "initia-connect") {
+        if (this.providerApiKey && config.historicalProviderSymbol) {
+          let cursor = new Date(startDate);
+          while (cursor < endDate) {
+            const chunkEnd = new Date(
+              Math.min(cursor.getTime() + providerChunkDays * 24 * 60 * 60 * 1000, endDate.getTime())
+            );
+
+            await this.runRateLimited(() =>
+              this.syncTwelveDataRange(assetSymbol, config.historicalProviderSymbol as string, {
+                startDate: cursor,
+                endDate: chunkEnd,
+                order: "asc"
+              })
+            );
+
+            cursor = new Date(chunkEnd.getTime() + 60_000);
+          }
+          continue;
+        }
+
         if (!this.coingeckoDemoApiKey || !config.coingeckoId) {
           console.warn(`[pricing] Skipping crypto backfill for ${assetSymbol}; CoinGecko demo key is not configured.`);
           continue;
@@ -237,7 +314,7 @@ export class PriceService {
       let cursor = new Date(startDate);
       while (cursor < endDate) {
         const chunkEnd = new Date(
-          Math.min(cursor.getTime() + chunkDays * 24 * 60 * 60 * 1000, endDate.getTime())
+          Math.min(cursor.getTime() + providerChunkDays * 24 * 60 * 60 * 1000, endDate.getTime())
         );
 
         await this.runRateLimited(() =>
@@ -271,11 +348,16 @@ export class PriceService {
     return this.getCandles(symbol, "1m", limit).map((bar) => Number(bar.close.toFixed(2)));
   }
 
-  getCandles(symbol: string, inputInterval?: string, limit = 200) {
+  getCandles(symbol: string, inputInterval?: string, limit = 200, options?: CandleQueryOptions) {
+    return this.getCandlesPage(symbol, inputInterval, limit, options).candles;
+  }
+
+  getCandlesPage(symbol: string, inputInterval?: string, limit = 200, options?: CandleQueryOptions): CandleQueryResult {
     const interval = normalizeInterval(inputInterval);
     const bucketSeconds = intervalSeconds(interval);
-    const fetchLimit = Math.max(limit * Math.max(bucketSeconds / 60, 1), limit);
+    const fetchLimit = Math.max((limit + 1) * Math.max(bucketSeconds / 60, 1), limit + 1);
     const hasLiveRows = this.hasLiveRows(symbol);
+    const beforeTs = options?.beforeTs;
 
     const rows = this.db
       .prepare(
@@ -284,37 +366,41 @@ export class PriceService {
           FROM price_bars
           WHERE asset_symbol = ?
             AND (? = 0 OR source != 'fallback')
+            AND (? IS NULL OR ts < ?)
           ORDER BY ts DESC
           LIMIT ?
         `
       )
-      .all(symbol, hasLiveRows ? 1 : 0, fetchLimit) as StoredBarRow[];
+      .all(symbol, hasLiveRows ? 1 : 0, beforeTs ?? null, beforeTs ?? null, fetchLimit) as StoredBarRow[];
 
     const ascending = rows.reverse();
     if (ascending.length === 0) {
-      return [formatFallbackBar(this.getReferencePrice(symbol))];
+      return {
+        candles: [formatFallbackBar(this.getReferencePrice(symbol))],
+        hasMore: false
+      };
     }
 
     if (interval === "1m") {
-      // Post-process: synthesize OHLC for flat bars (where open==high==low==close)
-      // by using the previous bar's close as the open
-      const result = ascending.slice(-limit);
-      for (let i = 1; i < result.length; i++) {
-        const bar = result[i];
-        const prevClose = result[i - 1].close;
+      const recentRows = ascending.slice(-Math.max(limit + 1, 2));
+      const maxGap = maxContinuityGapSeconds(interval);
+      // Only synthesize flat OHLC when the surrounding bars are truly consecutive.
+      for (let i = 1; i < recentRows.length; i++) {
+        const bar = recentRows[i];
+        const previousBar = recentRows[i - 1];
+        if (bar.ts - previousBar.ts > maxGap) continue;
+        const prevClose = previousBar.close;
         if (bar.open === bar.high && bar.open === bar.low && bar.open === bar.close) {
-          // Flat bar from legacy data: synthesize OHLC
           bar.open = prevClose;
           bar.high = Math.max(prevClose, bar.close);
           bar.low = Math.min(prevClose, bar.close);
         } else if (bar.open === bar.close && bar.high === bar.close && bar.low === bar.close) {
-          // Another flat bar pattern
           bar.open = prevClose;
           bar.high = Math.max(prevClose, bar.close);
           bar.low = Math.min(prevClose, bar.close);
         }
       }
-      return result;
+      return trimToContiguousTail(recentRows, interval, limit);
     }
 
     const aggregated: StoredBarRow[] = [];
@@ -348,7 +434,7 @@ export class PriceService {
     }
 
     if (current) aggregated.push(current);
-    return aggregated.slice(-limit);
+    return trimToContiguousTail(aggregated, interval, limit);
   }
 
   getStatus() {
@@ -477,13 +563,33 @@ export class PriceService {
       return;
     }
 
+    await this.syncTwelveDataRange(assetSymbol, config.providerSymbol, options);
+  }
+
+  private async syncTwelveDataRange(
+    assetSymbol: string,
+    providerSymbol: string,
+    options?: {
+      startDate?: Date;
+      endDate?: Date;
+      outputsize?: number;
+      order?: "asc" | "desc";
+    }
+  ) {
+    if (!this.providerApiKey) {
+      return;
+    }
+
     const url = new URL("https://api.twelvedata.com/time_series");
-    url.searchParams.set("symbol", config.providerSymbol);
+    url.searchParams.set("symbol", providerSymbol);
     url.searchParams.set("interval", "1min");
-    url.searchParams.set("outputsize", String(options?.outputsize ?? 180));
     url.searchParams.set("timezone", "UTC");
     url.searchParams.set("order", options?.order ?? "desc");
     url.searchParams.set("apikey", this.providerApiKey);
+
+    if (!(options?.startDate && options?.endDate)) {
+      url.searchParams.set("outputsize", String(options?.outputsize ?? 180));
+    }
 
     if (options?.startDate) {
       url.searchParams.set("start_date", formatProviderDate(options.startDate));
@@ -494,17 +600,17 @@ export class PriceService {
 
     const response = await fetch(url, { headers: { Accept: "application/json" } });
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status} while fetching ${config.providerSymbol}`);
+      throw new Error(`HTTP ${response.status} while fetching ${providerSymbol}`);
     }
 
     const payload = (await response.json()) as TwelveDataResponse;
     if (payload.status === "error") {
-      throw new Error(payload.message ?? `Provider error for ${config.providerSymbol}`);
+      throw new Error(payload.message ?? `Provider error for ${providerSymbol}`);
     }
 
     const values = Array.isArray(payload.values) ? payload.values : [];
     if (values.length === 0) {
-      throw new Error(`No values returned for ${config.providerSymbol}`);
+      throw new Error(`No values returned for ${providerSymbol}`);
     }
 
     const insert = this.db.prepare(`
@@ -535,7 +641,7 @@ export class PriceService {
       for (const row of rows) {
         insert.run(
           assetSymbol,
-          config.providerSymbol,
+          providerSymbol,
           parseProviderTime(row.datetime),
           Number(row.open),
           Number(row.high),

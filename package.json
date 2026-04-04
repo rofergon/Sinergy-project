@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "backfill:prices": "npm run backfill -w @sinergy/matcher",
+    "backfill:prices:90d": "bash scripts/backfill-prices-90d.sh",
     "build": "npm run build -w @sinergy/shared && npm run build -w @sinergy/matcher && npm run build -w @sinergy/strategy-agent && npm run build -w @sinergy/web && npm run build -w @sinergy/bridge",
     "dev:bridge": "npm run dev -w @sinergy/bridge",
     "dev:bridge:testnet": "npm run dev:testnet -w @sinergy/bridge",

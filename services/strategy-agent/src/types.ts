@@ -5,6 +5,7 @@ export const agentStrategyRequestSchema = z.object({
   ownerAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
   goal: z.string().min(1),
   marketId: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
+  preferredTimeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).optional(),
   strategyId: z.string().uuid().optional(),
   sessionId: z.string().uuid().optional(),
   mode: z.enum(["run", "plan"]).default("run")

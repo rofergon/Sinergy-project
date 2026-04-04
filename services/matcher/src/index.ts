@@ -317,15 +317,23 @@ app.post("/bridge/redeem", async (request) => {
 
 app.get("/prices/:symbol/candles", async (request) => {
   const { symbol } = request.params as { symbol: string };
-  const { interval = "15m", limit = "200" } = request.query as {
+  const { interval = "15m", limit = "200", before } = request.query as {
     interval?: string;
     limit?: string;
+    before?: string;
   };
+  const page = priceService.getCandlesPage(
+    symbol,
+    interval,
+    Number(limit),
+    before ? { beforeTs: Number(before) } : undefined
+  );
 
   return {
     symbol,
     interval,
-    candles: priceService.getCandles(symbol, interval, Number(limit))
+    candles: page.candles,
+    hasMore: page.hasMore
   };
 });
 

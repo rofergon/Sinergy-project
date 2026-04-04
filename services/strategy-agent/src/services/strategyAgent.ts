@@ -7,7 +7,8 @@ import {
   type StrategyToolName,
   type StrategyDefinition,
   type StrategyIdeaKind,
-  type StrategyMarketAnalysis
+  type StrategyMarketAnalysis,
+  type StrategySideBias
 } from "@sinergy/shared";
 import { STRATEGY_AGENT_SYSTEM_PROMPT, buildUserPrompt, buildValidationCorrectionPrompt, buildOptimizationPlanPrompt, buildCreationPlanPrompt } from "../prompts.js";
 import type {
@@ -84,6 +85,52 @@ function buildTemporaryStrategy(input: {
   } satisfies StrategyDefinition;
 }
 
+function resolvePreferredTimeframe(
+  preferredTimeframe?: StrategyDefinition["timeframe"],
+  marketAnalysis?: StrategyMarketAnalysis
+) {
+  return preferredTimeframe ?? marketAnalysis?.recommendedTimeframe ?? "15m";
+}
+
+function extractRequestedSideBias(goal: string): StrategySideBias | undefined {
+  if (/(long only|only long|solo long|solo compras)/i.test(goal)) return "long_only";
+  if (/(short only|only short|solo short|solo ventas)/i.test(goal)) return "short_only";
+  if (/(long and short|both sides|ambos lados|long\/short|largos y cortos)/i.test(goal)) return "both";
+  return undefined;
+}
+
+function extractRequestedStopLossPct(goal: string) {
+  const match = goal.match(/(?:stop[\s-]?loss|sl)[^0-9]{0,12}(\d+(?:[.,]\d+)?)\s*%/i);
+  if (!match) return undefined;
+  const value = Number(match[1].replace(",", "."));
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function goalRequestsNoStopLoss(goal: string) {
+  return /(?:sin|no)\s+(?:stop[\s-]?loss|sl)|(?:stop[\s-]?loss|sl)\s+(?:off|none|ninguno)/i.test(goal);
+}
+
+function resolveRiskRulesForGoal(timeframe: StrategyDefinition["timeframe"], goal: string) {
+  const defaults = defaultRiskRulesForTimeframe(timeframe);
+  const requestedStopLossPct = extractRequestedStopLossPct(goal);
+
+  if (requestedStopLossPct !== undefined) {
+    return {
+      ...defaults,
+      stopLossPct: requestedStopLossPct
+    };
+  }
+
+  if (goalRequestsNoStopLoss(goal)) {
+    return {
+      ...defaults,
+      stopLossPct: undefined
+    };
+  }
+
+  return defaults;
+}
+
 function goalRequestsBacktest(goal: string) {
   return /backtest|test|evaluat|probar|prueba|evaluar/i.test(goal);
 }
@@ -130,6 +177,10 @@ function goalLooksLikeOptimization(goal: string) {
 
 function goalLooksLikeFreshCreation(goal: string) {
   return /create|build|make|new strategy|from scratch|crea|construye|nueva estrategia/i.test(goal);
+}
+
+function goalLooksLikeAnalysisDrivenCreation(goal: string) {
+  return /analy|analiza|analysis|support|resistance|soporte|resistencia|timeframe|periodicidad|periodicity/i.test(goal);
 }
 
 function classifyBasicStrategy(strategy: StrategyDefinition): BasicStrategyKind | null {
@@ -517,6 +568,41 @@ function buildBollingerVariant(strategy: StrategyDefinition, input: {
   }, `Bollinger Reversion ${input.period}/${input.stdDev}`);
 }
 
+function applyRequestedSidePreference(strategy: StrategyDefinition, goal: string) {
+  const sideBias = extractRequestedSideBias(goal);
+  if (sideBias === "long_only") {
+    return {
+      ...strategy,
+      enabledSides: ["long"],
+      entryRules: {
+        ...strategy.entryRules,
+        short: []
+      },
+      exitRules: {
+        ...strategy.exitRules,
+        short: []
+      }
+    } satisfies StrategyDefinition;
+  }
+
+  if (sideBias === "short_only") {
+    return {
+      ...strategy,
+      enabledSides: ["short"],
+      entryRules: {
+        ...strategy.entryRules,
+        long: []
+      },
+      exitRules: {
+        ...strategy.exitRules,
+        long: []
+      }
+    } satisfies StrategyDefinition;
+  }
+
+  return strategy;
+}
+
 function extractMessageText(output: unknown) {
   if (!output || typeof output !== "object") return "";
 
@@ -581,10 +667,12 @@ function buildAnalysisGuidedCreationPlan(input: {
   goal: string;
   ownerAddress: HexString;
   marketId: HexString;
+  preferredTimeframe?: StrategyDefinition["timeframe"];
   marketAnalysis?: StrategyMarketAnalysis;
 }) {
-  const timeframe = input.marketAnalysis?.recommendedTimeframe ?? "15m";
-  const sideBias = input.marketAnalysis?.emaSuggestion.sideBias ?? "both";
+  const timeframe = resolvePreferredTimeframe(input.preferredTimeframe, input.marketAnalysis);
+  const sideBias = extractRequestedSideBias(input.goal) ?? "both";
+  const riskRules = resolveRiskRulesForGoal(timeframe, input.goal);
   const preferredKind = chooseFallbackKind(input.goal, input.marketAnalysis);
 
   if (preferredKind === "ema") {
@@ -600,7 +688,7 @@ function buildAnalysisGuidedCreationPlan(input: {
       slow: suggestion?.slowPeriod ?? 21,
       timeframe,
       longOnly: sideBias === "long_only",
-      ...defaultRiskRulesForTimeframe(timeframe)
+      ...riskRules
     });
 
     if (sideBias === "short_only") {
@@ -628,7 +716,7 @@ function buildAnalysisGuidedCreationPlan(input: {
     name: nameByKind[preferredKind as Exclude<StrategyIdeaKind, "ema">],
     strategyPatch: {
       timeframe,
-      riskRules: defaultRiskRulesForTimeframe(timeframe),
+      riskRules,
       enabledSides:
         sideBias === "long_only"
           ? ["long"]
@@ -1199,6 +1287,7 @@ ${JSON.stringify(capabilities.capabilities, null, 2)}
 User request:
 ${buildUserPrompt({
   ...input,
+  preferredTimeframe: input.preferredTimeframe,
   strategyId: input.strategyId ?? session.strategyId,
   session: this.sessions.snapshot(session)
 })}
@@ -1259,9 +1348,15 @@ Return JSON like:
     });
     const sessionSnapshot = this.sessions.snapshot(session);
     const preferFreshCreation = goalLooksLikeFreshCreation(input.goal) && !goalLooksLikeOptimization(input.goal);
+    const preferAnalysisDrivenCreation =
+      !goalLooksLikeOptimization(input.goal) &&
+      goalLooksLikeAnalysisDrivenCreation(input.goal);
     const activeInput = {
       ...input,
-      strategyId: preferFreshCreation ? input.strategyId : (input.strategyId ?? sessionSnapshot.strategyId)
+      strategyId:
+        preferFreshCreation || preferAnalysisDrivenCreation
+          ? input.strategyId
+          : (input.strategyId ?? sessionSnapshot.strategyId)
     };
 
     const fastPathResult = await this.tryRunFastPath(activeInput, trace, warnings, metrics);
@@ -1380,20 +1475,91 @@ Return JSON like:
       }
     }
 
-    const fallbackResult = await runFallbackJsonLoop({
-      model: this.model,
+    let fallbackResult: Awaited<ReturnType<typeof runFallbackJsonLoop>>;
+    try {
+      fallbackResult = await runFallbackJsonLoop({
+        model: this.model,
       goal: activeInput.goal,
       ownerAddress: activeInput.ownerAddress,
       marketId: activeInput.marketId,
+      preferredTimeframe: activeInput.preferredTimeframe,
       strategyId: activeInput.strategyId,
       session: sessionSnapshot,
-      maxSteps: this.options.maxSteps,
-      trace,
-      metrics,
-      invokeTool: async (toolName, rawInput) => {
-        return this.matcherTransport(toolName, rawInput as never) as Promise<Record<string, unknown>>;
+        maxSteps: this.options.maxSteps,
+        trace,
+        metrics,
+        invokeTool: async (toolName, rawInput) => {
+          return this.matcherTransport(toolName, rawInput as never) as Promise<Record<string, unknown>>;
+        }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      warnings.push(`Fallback planner failed: ${message}`);
+
+      const emergencyFastPath = await this.tryRunFastPath(
+        {
+          ...activeInput,
+          strategyId: input.strategyId
+        },
+        trace,
+        warnings,
+        metrics
+      );
+
+      if (emergencyFastPath) {
+        artifacts = collectArtifactsFromTrace(trace, emergencyFastPath.artifacts);
+        metrics = finalizeMetrics(metrics, trace);
+
+        this.sessions.applyArtifacts(session, artifacts);
+        this.sessions.applyRunDiagnostics(session, { mode: "fallback-json", metrics });
+        this.sessions.appendTrace(session, trace);
+        this.sessions.addTurn(session, {
+          role: "assistant",
+          mode: "run",
+          text: emergencyFastPath.finalMessage,
+          usedTools: Array.from(new Set(trace.map((entry) => entry.tool))),
+          warnings
+        });
+
+        return {
+          requestId,
+          finalMessage: emergencyFastPath.finalMessage,
+          usedTools: Array.from(new Set(trace.map((entry) => entry.tool))),
+          toolTrace: trace,
+          artifacts,
+          session: this.sessions.snapshot(session),
+          modelModeUsed: "fallback-json",
+          warnings,
+          metrics
+        };
       }
-    });
+
+      const finalMessage =
+        "The planning model timed out before the agent could finish. Retrying should work, but if this keeps happening lower the model timeout pressure or start a fresh strategy request.";
+      metrics = finalizeMetrics(metrics, trace);
+      this.sessions.applyArtifacts(session, artifacts);
+      this.sessions.applyRunDiagnostics(session, { mode: "fallback-json", metrics });
+      this.sessions.appendTrace(session, trace);
+      this.sessions.addTurn(session, {
+        role: "assistant",
+        mode: "run",
+        text: finalMessage,
+        usedTools: Array.from(new Set(trace.map((entry) => entry.tool))),
+        warnings
+      });
+
+      return {
+        requestId,
+        finalMessage,
+        usedTools: Array.from(new Set(trace.map((entry) => entry.tool))),
+        toolTrace: trace,
+        artifacts,
+        session: this.sessions.snapshot(session),
+        modelModeUsed: "fallback-json",
+        warnings,
+        metrics
+      };
+    }
     artifacts = collectArtifactsFromTrace(trace, fallbackResult.artifacts);
 
     const capabilities = await this.matcherTransport("list_strategy_capabilities", {
@@ -1577,6 +1743,7 @@ Return JSON like:
       const creationPrompt = buildCreationPlanPrompt({
         goal: input.goal,
         capabilities: capabilitiesResult.capabilities as Record<string, unknown>,
+        preferredTimeframe: input.preferredTimeframe,
         marketAnalysis: marketAnalysis as unknown as Record<string, unknown> | undefined,
         templates: Array.isArray(templatesResult.templates)
           ? templatesResult.templates.map((template) => ({
@@ -1598,6 +1765,7 @@ Return JSON like:
         goal: input.goal,
         ownerAddress: input.ownerAddress as HexString,
         marketId: input.marketId as HexString,
+        preferredTimeframe: input.preferredTimeframe,
         marketAnalysis
       });
     }
@@ -1667,6 +1835,10 @@ Return JSON like:
       ...activeStrategy,
       ...(creationPlan.name ? { name: creationPlan.name } : {}),
       ...strategyPatch,
+      timeframe:
+        typeof strategyPatch.timeframe === "string"
+          ? strategyPatch.timeframe
+          : (input.preferredTimeframe ?? activeStrategy.timeframe),
       id: activeStrategy.id,
       ownerAddress: activeStrategy.ownerAddress,
       marketId: activeStrategy.marketId,
@@ -1947,6 +2119,7 @@ Return JSON like:
         strategyKind,
         strategy: baseStrategy as unknown as Record<string, unknown>,
         currentSummary,
+        preferredTimeframe: input.preferredTimeframe,
         marketAnalysis: marketAnalysis as unknown as Record<string, unknown> | undefined
       });
       const response = await this.invokePlanningModel(optimizationPrompt);
@@ -1957,9 +2130,10 @@ Return JSON like:
 
     if (candidateConfigs.length === 0) {
       warnings.push("Model did not return optimization candidates. Using market-aware deterministic fallback candidates.");
-      const preferredTimeframe = marketAnalysis?.recommendedTimeframe ?? "15m";
+      const preferredTimeframe = resolvePreferredTimeframe(input.preferredTimeframe, marketAnalysis);
       const emaSuggestion = marketAnalysis?.emaSuggestion;
-      const sideBias = emaSuggestion?.sideBias ?? "both";
+      const sideBias = extractRequestedSideBias(input.goal) ?? "both";
+      const riskRules = resolveRiskRulesForGoal(preferredTimeframe, input.goal);
       candidateConfigs = (() => {
         switch (strategyKind) {
           case "ema":
@@ -1971,7 +2145,7 @@ Return JSON like:
                   slow: emaSuggestion?.slowPeriod ?? 21,
                   timeframe: preferredTimeframe,
                   longOnly: sideBias === "long_only",
-                  ...defaultRiskRulesForTimeframe(preferredTimeframe)
+                  ...riskRules
                 }
               },
               {
@@ -1981,8 +2155,8 @@ Return JSON like:
                   slow: Math.max((emaSuggestion?.slowPeriod ?? 21) - 5, 13),
                   timeframe: preferredTimeframe,
                   longOnly: sideBias === "long_only",
-                  stopLossPct: defaultRiskRulesForTimeframe(preferredTimeframe).stopLossPct,
-                  takeProfitPct: defaultRiskRulesForTimeframe(preferredTimeframe).takeProfitPct
+                  stopLossPct: riskRules.stopLossPct,
+                  takeProfitPct: riskRules.takeProfitPct
                 }
               },
               {
@@ -1992,8 +2166,8 @@ Return JSON like:
                   slow: (emaSuggestion?.slowPeriod ?? 21) + 8,
                   timeframe: preferredTimeframe,
                   longOnly: sideBias === "long_only",
-                  stopLossPct: defaultRiskRulesForTimeframe(preferredTimeframe).stopLossPct,
-                  takeProfitPct: defaultRiskRulesForTimeframe(preferredTimeframe).takeProfitPct
+                  stopLossPct: riskRules.stopLossPct,
+                  takeProfitPct: riskRules.takeProfitPct
                 }
               }
             ];
@@ -2006,8 +2180,8 @@ Return JSON like:
                   period: preferredTimeframe === "1m" || preferredTimeframe === "5m" ? 12 : 14,
                   entry: 28,
                   exit: 58,
-                  stopLossPct: defaultRiskRulesForTimeframe(preferredTimeframe).stopLossPct,
-                  takeProfitPct: defaultRiskRulesForTimeframe(preferredTimeframe).takeProfitPct
+                  stopLossPct: riskRules.stopLossPct,
+                  takeProfitPct: riskRules.takeProfitPct
                 }
               }
             ];
@@ -2019,8 +2193,8 @@ Return JSON like:
                   timeframe: preferredTimeframe,
                   lookback: preferredTimeframe === "1h" || preferredTimeframe === "4h" ? 24 : 20,
                   exitEma: emaSuggestion?.fastPeriod ?? 10,
-                  stopLossPct: defaultRiskRulesForTimeframe(preferredTimeframe).stopLossPct,
-                  takeProfitPct: defaultRiskRulesForTimeframe(preferredTimeframe).takeProfitPct
+                  stopLossPct: riskRules.stopLossPct,
+                  takeProfitPct: riskRules.takeProfitPct
                 }
               }
             ];
@@ -2032,8 +2206,8 @@ Return JSON like:
                   timeframe: preferredTimeframe,
                   period: preferredTimeframe === "1m" ? 18 : 20,
                   stdDev: marketAnalysis?.overallRegime === "high_noise" ? 2.2 : 2,
-                  stopLossPct: defaultRiskRulesForTimeframe(preferredTimeframe).stopLossPct,
-                  takeProfitPct: defaultRiskRulesForTimeframe(preferredTimeframe).takeProfitPct
+                  stopLossPct: riskRules.stopLossPct,
+                  takeProfitPct: riskRules.takeProfitPct
                 }
               }
             ];
@@ -2043,7 +2217,8 @@ Return JSON like:
 
     const candidates: StrategyDefinition[] = candidateConfigs.map((candidate) => {
       const params = candidate.params ?? {};
-      switch (strategyKind) {
+      const built = (() => {
+        switch (strategyKind) {
         case "ema":
           return buildEmaVariant(baseStrategy, {
             fast: typeof params.fast === "number" ? params.fast : 9,
@@ -2080,7 +2255,10 @@ Return JSON like:
             stopLossPct: typeof params.stopLossPct === "number" ? params.stopLossPct : undefined,
             takeProfitPct: typeof params.takeProfitPct === "number" ? params.takeProfitPct : undefined
           });
-      }
+        }
+      })();
+
+      return applyRequestedSidePreference(built, input.goal);
     });
 
     let bestStrategy = baseStrategy;

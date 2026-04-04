@@ -71,6 +71,8 @@ Operators: ">", ">=", "<", "<=", "crosses_above", "crosses_below"
 - **NEVER finalize without calling run_strategy_backtest** if the user asked to backtest, test, or evaluate.
 - Never invent indicators, operators, tools, fields, market IDs, or schema keys not in the capabilities response.
 - Use \`analyze_market_context\` to justify timeframe choice, EMA periods, and whether to prefer trend, range, or breakout logic.
+- If a user-selected chart timeframe is provided, treat it as the default strategy timeframe unless there is a strong reason not to.
+- If the user specifies allowed sides or stop-loss preferences, treat them as hard execution constraints.
 - If supports and resistances are tight and trend strength is weak, prefer mean-reversion templates over EMA crossover.
 - If trend strength is strong and breakout room exists, prefer EMA crossover or range-breakout on the recommended timeframe.
 - **NEVER compare the same value against itself** (e.g., close crosses_above close). This produces 0 trades. Each rule MUST have different indicators or different params on left vs right.
@@ -93,12 +95,14 @@ export function buildUserPrompt(input: {
   ownerAddress: string;
   goal: string;
   marketId?: string;
+  preferredTimeframe?: string;
   strategyId?: string;
   session?: AgentSessionSnapshot;
 }) {
   const context = [
     `ownerAddress: ${input.ownerAddress}`,
     input.marketId ? `marketId: ${input.marketId}` : null,
+    input.preferredTimeframe ? `preferredTimeframe: ${input.preferredTimeframe}` : null,
     input.strategyId ? `strategyId: ${input.strategyId}` : null,
     `goal: ${input.goal}`
   ]
@@ -114,6 +118,7 @@ export function buildFallbackPlannerPrompt(input: {
   goal: string;
   ownerAddress: string;
   marketId?: string;
+  preferredTimeframe?: string;
   strategyId?: string;
   runId?: string;
   toolsCatalog: Array<{ name: string; description: string }>;
@@ -143,6 +148,7 @@ ${input.toolsCatalog.map((tool) => `- ${tool.name}: ${tool.description}`).join("
 User context:
 - ownerAddress: ${input.ownerAddress}
 - marketId: ${input.marketId ?? "not provided"}
+- preferredTimeframe: ${input.preferredTimeframe ?? "not provided"}
 - strategyId: ${input.strategyId ?? "not provided"}
 - runId: ${input.runId ?? "not provided"}
 - goal: ${input.goal}
@@ -172,6 +178,7 @@ Constraints:
 - Never add root-level marketId or strategyId to tools that do not accept them.
 - If creating a strategy from scratch, capabilities should be consulted first.
 - If marketId is available and you are choosing or modifying a strategy, call analyze_market_context before selecting timeframe, EMA parameters, or template family.
+- Strongly prefer the user-selected preferredTimeframe when provided, unless there is a clear reason to choose differently.
 - If validation errors exist, the system will attempt automatic rule-based repair. Prefer calling validate_strategy_draft again after seeing repair results.
 - When remainingValidationIssues are shown above, you MUST call update_strategy_draft with the corrected strategy payload before validating again.
 - Reuse the active strategyId from the session when a newly-created draft already exists.
@@ -243,6 +250,7 @@ export function buildOptimizationPlanPrompt(input: {
   strategy: Record<string, unknown>;
   currentSummary?: Record<string, unknown>;
   marketAnalysis?: Record<string, unknown>;
+  preferredTimeframe?: string;
 }) {
   return `
 You are optimizing an existing trading strategy. Propose a SMALL set of candidate parameter changes.
@@ -262,9 +270,13 @@ ${JSON.stringify(input.currentSummary ?? {}, null, 2)}
 Market analysis:
 ${JSON.stringify(input.marketAnalysis ?? {}, null, 2)}
 
+User-selected chart timeframe:
+${input.preferredTimeframe ?? "not provided"}
+
 Rules:
 - Return ONLY valid JSON.
 - Return at most 3 candidates.
+- Treat the user-selected chart timeframe as the default working timeframe unless the market analysis strongly argues otherwise.
 - Follow the market analysis if it recommends a different timeframe or signals that EMA should not be primary.
 - Keep the strategy family the same. Do not invent a brand-new strategy.
 - Use small, plausible changes aimed at improving net PnL.
@@ -294,6 +306,7 @@ export function buildCreationPlanPrompt(input: {
   capabilities: Record<string, unknown>;
   templates: Array<{ id?: string; name?: string; description?: string }>;
   marketAnalysis?: Record<string, unknown>;
+  preferredTimeframe?: string;
 }) {
   return `
 You are creating a trading strategy from scratch.
@@ -310,6 +323,9 @@ ${JSON.stringify(input.templates, null, 2)}
 Market analysis:
 ${JSON.stringify(input.marketAnalysis ?? {}, null, 2)}
 
+User-selected chart timeframe:
+${input.preferredTimeframe ?? "not provided"}
+
 You must decide whether to:
 - clone a template and optionally adjust it, or
 - create a custom draft and fill it in.
@@ -317,6 +333,7 @@ You must decide whether to:
 Rules:
 - Return ONLY valid JSON.
 - Use only indicators, operators, timeframes, price fields, and limits present in capabilities.
+- Treat the user-selected chart timeframe as the primary timeframe preference when provided.
 - Use market analysis to choose timeframe, strategy family, and EMA periods instead of defaulting blindly.
 - Respect supports/resistances and regime: range -> mean reversion, trend -> EMA, breakout_ready -> breakout or EMA.
 - If a template already fits the request closely, prefer it.

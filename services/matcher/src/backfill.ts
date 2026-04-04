@@ -8,8 +8,8 @@ function parsePositiveInt(input: string | undefined, fallback: number) {
 }
 
 async function main() {
-  const days = parsePositiveInt(process.env.BACKFILL_DAYS, 60);
-  const chunkDays = parsePositiveInt(process.env.BACKFILL_CHUNK_DAYS, 7);
+  const days = parsePositiveInt(process.env.BACKFILL_DAYS, 90);
+  const chunkDays = parsePositiveInt(process.env.BACKFILL_CHUNK_DAYS, 3);
 
   const priceService = new PriceService({
     dbFile: env.PRICE_DB_FILE,

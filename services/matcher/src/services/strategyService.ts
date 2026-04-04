@@ -41,6 +41,23 @@ function isoNow() {
   return new Date().toISOString();
 }
 
+function defaultBacktestBarsForTimeframe(timeframe: StrategyTimeframe) {
+  switch (timeframe) {
+    case "1m":
+      return 129_600;
+    case "5m":
+      return 25_920;
+    case "15m":
+      return 8_640;
+    case "1h":
+      return 2_160;
+    case "4h":
+      return 540;
+    case "1d":
+      return 90;
+  }
+}
+
 export class StrategyService {
   private readonly db: DatabaseSync;
   private readonly capabilities: StrategyCapabilities;
@@ -307,7 +324,7 @@ export class StrategyService {
       });
     }
 
-    const bars = input.bars ?? this.capabilities.defaults.backtestBars;
+    const bars = input.bars ?? defaultBacktestBarsForTimeframe(strategy.timeframe);
     if (!Number.isInteger(bars) || bars <= 0 || bars > STRATEGY_TOOL_LIMITS.maxBarsPerBacktest) {
       throw new StrategyToolError(
         "bars must be a positive integer within the supported backtest limit.",

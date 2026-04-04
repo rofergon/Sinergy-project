@@ -253,7 +253,7 @@ test("strategy tool API rejects invalid owner addresses and oversized backtests 
         harness.api.execute("run_strategy_backtest", {
           ownerAddress,
           strategyId: created.strategy.id,
-          bars: 20_000
+          bars: 500_000
         }),
       (error: unknown) =>
         error instanceof StrategyToolError &&

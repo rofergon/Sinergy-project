@@ -66,6 +66,7 @@ export async function runFallbackJsonLoop(options: {
   goal: string;
   ownerAddress: string;
   marketId?: string;
+  preferredTimeframe?: string;
   strategyId?: string;
   session?: AgentSessionSnapshot;
   maxSteps: number;
@@ -98,6 +99,7 @@ export async function runFallbackJsonLoop(options: {
       goal: options.goal,
       ownerAddress: options.ownerAddress,
       marketId: options.marketId,
+      preferredTimeframe: options.preferredTimeframe,
       strategyId: activeStrategyId,
       runId: activeRunId,
       session: options.session,

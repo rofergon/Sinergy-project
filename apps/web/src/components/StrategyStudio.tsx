@@ -97,7 +97,7 @@ export function StrategyStudio({
           </div>
         </div>
 
-        <div className={`strategy-studio-grid ${workspaceMode === "agentic" ? "agentic-mode" : ""}`}>
+        <div className={`strategy-studio-grid ${workspaceMode === "agentic" ? "agentic-mode" : "manual-mode"}`}>
           <div className="strategy-studio-chart-col">
             <TradingViewChart
               market={selectedMarket}
@@ -133,6 +133,7 @@ export function StrategyStudio({
               <StrategyAgentPanel
                 address={address}
                 selectedMarket={selectedMarket}
+                selectedTimeframe={timeframe}
                 onBacktestResult={onBacktestResult}
                 onTimeframeChange={onTimeframeChange}
                 onReviewStrategy={reviewStrategy}

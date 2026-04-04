@@ -21,6 +21,7 @@ import type {
 type Props = {
   address?: HexString;
   selectedMarket?: MarketSnapshot;
+  selectedTimeframe: StrategyTimeframe;
   onBacktestResult: (result: StrategyBacktestBundle | null) => void;
   onTimeframeChange: (timeframe: StrategyTimeframe) => void;
   onReviewStrategy: (strategyId: string, bundle: StrategyBacktestBundle | null) => void;
@@ -37,6 +38,12 @@ type AgentMessage = {
   warnings?: string[];
   strategyId?: string;
   bundle?: StrategyBacktestBundle | null;
+};
+
+type StrategyClarification = {
+  sidePreference: "both" | "long_only" | "short_only";
+  stopLossMode: "recommended" | "none" | "custom";
+  customStopLossPct: string;
 };
 
 type AgentCapabilitiesResponse = {
@@ -134,6 +141,7 @@ function summarizeSession(item: StrategyAgentSessionListItem) {
 export function StrategyAgentPanel({
   address,
   selectedMarket,
+  selectedTimeframe,
   onBacktestResult,
   onTimeframeChange,
   onReviewStrategy
@@ -148,6 +156,14 @@ export function StrategyAgentPanel({
   const [historyBusy, setHistoryBusy] = useState(false);
   const [historyRailOpen, setHistoryRailOpen] = useState(false);
   const [planModeEnabled, setPlanModeEnabled] = useState(false);
+  const [clarifierOpen, setClarifierOpen] = useState(false);
+  const [clarifierMode, setClarifierMode] = useState<"plan" | "run" | null>(null);
+  const [clarifierGoal, setClarifierGoal] = useState("");
+  const [clarification, setClarification] = useState<StrategyClarification>({
+    sidePreference: "both",
+    stopLossMode: "recommended",
+    customStopLossPct: ""
+  });
 
   const storageKey = useMemo(() => {
     if (!address || !selectedMarket?.id) return null;
@@ -272,10 +288,34 @@ export function StrategyAgentPanel({
     const goal = prompt.trim();
     if (!address || !goal || !selectedMarket) return;
 
+    if (!clarifierOpen || clarifierGoal !== goal || clarifierMode !== mode) {
+      setClarifierOpen(true);
+      setClarifierGoal(goal);
+      setClarifierMode(mode);
+      setStatus("Confirm side and stop-loss preferences before running the agent.");
+      return;
+    }
+
+    const stopLossLine =
+      clarification.stopLossMode === "custom" && clarification.customStopLossPct.trim()
+        ? `custom ${clarification.customStopLossPct.trim()}%`
+        : clarification.stopLossMode === "none"
+          ? "none"
+          : "recommended";
+
+    const enrichedGoal = [
+      goal,
+      "",
+      "User execution preferences:",
+      `- selected chart timeframe: ${selectedTimeframe}`,
+      `- allowed sides: ${clarification.sidePreference === "both" ? "long and short" : clarification.sidePreference === "long_only" ? "long only" : "short only"}`,
+      `- stop loss preference: ${stopLossLine}`
+    ].join("\n");
+
     const userMessage: AgentMessage = {
       id: buildMessageId(),
       role: "user",
-      text: goal,
+      text: enrichedGoal,
       mode
     };
     setMessages((current) => [...current, userMessage]);
@@ -286,13 +326,14 @@ export function StrategyAgentPanel({
       if (mode === "plan") {
         const payload = await agentApi<{ ok: true; result: StrategyAgentPlanResponse }>("/strategy/plan", {
           method: "POST",
-          body: JSON.stringify({
-            ownerAddress: address,
-            marketId: selectedMarket.id,
-            goal,
-            sessionId: session?.sessionId,
-            mode
-          })
+              body: JSON.stringify({
+                ownerAddress: address,
+                marketId: selectedMarket.id,
+                preferredTimeframe: selectedTimeframe,
+                goal: enrichedGoal,
+                sessionId: session?.sessionId,
+                mode
+              })
         });
 
         setSession(payload.result.session);
@@ -318,7 +359,8 @@ export function StrategyAgentPanel({
         body: JSON.stringify({
           ownerAddress: address,
           marketId: selectedMarket.id,
-          goal,
+          preferredTimeframe: selectedTimeframe,
+          goal: enrichedGoal,
           sessionId: session?.sessionId,
           mode
         })
@@ -372,6 +414,9 @@ export function StrategyAgentPanel({
   function startNewSession() {
     setMessages([]);
     setSession(null);
+    setClarifierOpen(false);
+    setClarifierGoal("");
+    setClarifierMode(null);
     setStatus("Started a fresh strategy session.");
     onBacktestResult(null);
   }
@@ -411,6 +456,8 @@ export function StrategyAgentPanel({
         <strong>{runtime?.tools.length ?? "--"}</strong>
         <span>Session</span>
         <strong>{session ? shortId(session.sessionId) : "New"}</strong>
+        <span>Chart TF</span>
+        <strong>{selectedTimeframe}</strong>
         <span>Strategy</span>
         <strong>{session?.strategy?.name ?? shortId(session?.strategyId)}</strong>
       </div>
@@ -520,6 +567,75 @@ export function StrategyAgentPanel({
               onChange={(event) => setPrompt(event.target.value)}
               placeholder="Describe the strategy you want to build, validate, improve, or continue..."
             />
+            {clarifierOpen && (
+              <div className="strategy-agent-trace">
+                <div>
+                  <strong>Agent needs two quick preferences before running</strong>
+                  <small>Choose allowed sides and how stop loss should be handled.</small>
+                </div>
+                <div className="strategy-agent-chips">
+                  <button
+                    type="button"
+                    className={clarification.sidePreference === "both" ? "strategy-agent-review-btn" : ""}
+                    onClick={() => setClarification((current) => ({ ...current, sidePreference: "both" }))}
+                  >
+                    Long + Short
+                  </button>
+                  <button
+                    type="button"
+                    className={clarification.sidePreference === "long_only" ? "strategy-agent-review-btn" : ""}
+                    onClick={() => setClarification((current) => ({ ...current, sidePreference: "long_only" }))}
+                  >
+                    Long only
+                  </button>
+                  <button
+                    type="button"
+                    className={clarification.sidePreference === "short_only" ? "strategy-agent-review-btn" : ""}
+                    onClick={() => setClarification((current) => ({ ...current, sidePreference: "short_only" }))}
+                  >
+                    Short only
+                  </button>
+                </div>
+                <div className="strategy-agent-chips">
+                  <button
+                    type="button"
+                    className={clarification.stopLossMode === "recommended" ? "strategy-agent-review-btn" : ""}
+                    onClick={() => setClarification((current) => ({ ...current, stopLossMode: "recommended" }))}
+                  >
+                    Recommended SL
+                  </button>
+                  <button
+                    type="button"
+                    className={clarification.stopLossMode === "none" ? "strategy-agent-review-btn" : ""}
+                    onClick={() => setClarification((current) => ({ ...current, stopLossMode: "none" }))}
+                  >
+                    No SL
+                  </button>
+                  <button
+                    type="button"
+                    className={clarification.stopLossMode === "custom" ? "strategy-agent-review-btn" : ""}
+                    onClick={() => setClarification((current) => ({ ...current, stopLossMode: "custom" }))}
+                  >
+                    Custom SL
+                  </button>
+                </div>
+                {clarification.stopLossMode === "custom" && (
+                  <input
+                    type="number"
+                    min="0.1"
+                    step="0.1"
+                    value={clarification.customStopLossPct}
+                    onChange={(event) =>
+                      setClarification((current) => ({
+                        ...current,
+                        customStopLossPct: event.target.value
+                      }))
+                    }
+                    placeholder="Stop loss %"
+                  />
+                )}
+              </div>
+            )}
             <div className="strategy-agent-actions">
               <label className="strategy-agent-plan-toggle">
                 <input
@@ -541,7 +657,13 @@ export function StrategyAgentPanel({
                 type="button"
                 className="strategy-primary-btn strategy-agent-submit-btn"
                 onClick={() => void submit(planModeEnabled ? "plan" : "run")}
-                disabled={busy !== null || !prompt.trim()}
+                disabled={
+                  busy !== null ||
+                  !prompt.trim() ||
+                  (clarifierOpen &&
+                    clarification.stopLossMode === "custom" &&
+                    !clarification.customStopLossPct.trim())
+                }
               >
                 {busy === "plan"
                   ? "Planning..."
@@ -549,7 +671,9 @@ export function StrategyAgentPanel({
                     ? "Running..."
                     : planModeEnabled
                       ? "Plan With AI"
-                      : "Run With AI"}
+                      : clarifierOpen
+                        ? "Continue With AI"
+                        : "Run With AI"}
               </button>
             </div>
           </div>

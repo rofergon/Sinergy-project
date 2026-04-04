@@ -32,6 +32,23 @@ type Candle = {
   volume: number;
 };
 
+type CandleResponse = {
+  candles: Array<{
+    ts: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+  }>;
+  hasMore?: boolean;
+};
+
+type LogicalRange = {
+  from: number;
+  to: number;
+};
+
 const TIMEFRAMES: Array<{ value: StrategyTimeframe; label: string }> = [
   { value: "1m", label: "1m" },
   { value: "5m", label: "5m" },
@@ -74,6 +91,43 @@ function fallbackCandles(series: number[], anchor: number, tf: StrategyTimeframe
   }));
 }
 
+function candleRequestLimit(timeframe: StrategyTimeframe, mode: "initial" | "refresh" | "older") {
+  switch (timeframe) {
+    case "1m":
+      return mode === "refresh" ? 240 : 720;
+    case "5m":
+      return mode === "refresh" ? 240 : 720;
+    case "15m":
+      return mode === "refresh" ? 320 : 960;
+    case "1h":
+      return mode === "refresh" ? 240 : 720;
+    case "4h":
+      return mode === "refresh" ? 180 : 540;
+    case "1d":
+      return mode === "refresh" ? 120 : 365;
+  }
+}
+
+function normalizeCandles(
+  candles: CandleResponse["candles"]
+): Candle[] {
+  return candles.map((bar) => ({
+    time: bar.ts as UTCTimestamp,
+    open: Number(bar.open),
+    high: Number(bar.high),
+    low: Number(bar.low),
+    close: Number(bar.close),
+    volume: Number(bar.volume ?? 0)
+  }));
+}
+
+function mergeCandles(existing: Candle[], incoming: Candle[]) {
+  const merged = new Map<number, Candle>();
+  for (const candle of existing) merged.set(Number(candle.time), candle);
+  for (const candle of incoming) merged.set(Number(candle.time), candle);
+  return [...merged.values()].sort((left, right) => Number(left.time) - Number(right.time));
+}
+
 export function TradingViewChart({ market, timeframe, onTimeframeChange, overlay }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -82,62 +136,110 @@ export function TradingViewChart({ market, timeframe, onTimeframeChange, overlay
   const [chartType, setChartType] = useState<"candle" | "line">("candle");
   const [candles, setCandles] = useState<Candle[]>([]);
   const [feedState, setFeedState] = useState<"live" | "fallback" | "loading">("loading");
+  const [hasMoreHistory, setHasMoreHistory] = useState(false);
+  const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
+  const candlesRef = useRef<Candle[]>([]);
+  const hasMoreHistoryRef = useRef(false);
+  const loadingMoreHistoryRef = useRef(false);
+  const visibleRangeRef = useRef<LogicalRange | null>(null);
+  const pendingRangeRef = useRef<LogicalRange | null>(null);
+  const shouldFitContentRef = useRef(true);
+  const activeDatasetRef = useRef("");
+
+  useEffect(() => {
+    candlesRef.current = candles;
+  }, [candles]);
+
+  useEffect(() => {
+    hasMoreHistoryRef.current = hasMoreHistory;
+  }, [hasMoreHistory]);
+
+  useEffect(() => {
+    loadingMoreHistoryRef.current = loadingMoreHistory;
+  }, [loadingMoreHistory]);
+
+  const loadCandles = useCallback(
+    async (mode: "initial" | "refresh" | "older") => {
+      const assetSymbol = market?.baseToken.symbol;
+      if (!assetSymbol) {
+        setCandles([]);
+        setHasMoreHistory(false);
+        setFeedState("fallback");
+        return;
+      }
+
+      const datasetKey = `${assetSymbol}:${timeframe}`;
+      const beforeTs =
+        mode === "older" ? Number(candlesRef.current[0]?.time ?? 0) : undefined;
+
+      if (mode === "older") {
+        if (!beforeTs || loadingMoreHistoryRef.current) return;
+        setLoadingMoreHistory(true);
+      }
+
+      try {
+        const result = await api<CandleResponse>(
+          `/prices/${assetSymbol}/candles?interval=${timeframe}&limit=${candleRequestLimit(timeframe, mode)}${beforeTs ? `&before=${beforeTs}` : ""}`
+        );
+
+        if (activeDatasetRef.current !== datasetKey) return;
+
+        const incoming = normalizeCandles(result.candles);
+        if (mode === "initial") {
+          shouldFitContentRef.current = true;
+          visibleRangeRef.current = null;
+          setCandles(incoming);
+          setHasMoreHistory(Boolean(result.hasMore));
+        } else if (mode === "refresh") {
+          setCandles((current) => mergeCandles(current, incoming));
+          setHasMoreHistory((current) => current || Boolean(result.hasMore));
+        } else {
+          const current = candlesRef.current;
+          const merged = mergeCandles(current, incoming);
+          const added = Math.max(merged.length - current.length, 0);
+          if (visibleRangeRef.current && added > 0) {
+            pendingRangeRef.current = {
+              from: visibleRangeRef.current.from + added,
+              to: visibleRangeRef.current.to + added
+            };
+          }
+          setCandles(merged);
+          setHasMoreHistory(Boolean(result.hasMore));
+        }
+        setFeedState("live");
+      } catch (error) {
+        if (activeDatasetRef.current !== datasetKey) return;
+        if (mode === "initial") {
+          console.error("Failed to load chart candles:", error);
+          setCandles([]);
+          setHasMoreHistory(false);
+          setFeedState("fallback");
+        }
+      } finally {
+        if (mode === "older") {
+          setLoadingMoreHistory(false);
+        }
+      }
+    },
+    [market?.baseToken.symbol, timeframe]
+  );
 
   useEffect(() => {
     const assetSymbol = market?.baseToken.symbol;
-    if (!assetSymbol) {
-      setCandles([]);
-      setFeedState("fallback");
-      return;
-    }
-
-    let cancelled = false;
-    const interval = timeframe;
-
-    async function loadCandles() {
-      try {
-        const result = await api<{
-          candles: Array<{
-            ts: number;
-            open: number;
-            high: number;
-            low: number;
-            close: number;
-            volume: number;
-          }>;
-        }>(`/prices/${assetSymbol}/candles?interval=${interval}&limit=200`);
-
-        if (cancelled) return;
-        setCandles(
-          result.candles.map((bar) => ({
-            time: bar.ts as UTCTimestamp,
-            open: Number(bar.open),
-            high: Number(bar.high),
-            low: Number(bar.low),
-            close: Number(bar.close),
-            volume: Number(bar.volume ?? 0)
-          }))
-        );
-        setFeedState("live");
-      } catch (error) {
-        if (cancelled) return;
-        console.error("Failed to load chart candles:", error);
-        setCandles([]);
-        setFeedState("fallback");
-      }
-    }
-
+    activeDatasetRef.current = assetSymbol ? `${assetSymbol}:${timeframe}` : "";
+    shouldFitContentRef.current = true;
+    visibleRangeRef.current = null;
+    pendingRangeRef.current = null;
     setFeedState("loading");
-    void loadCandles();
+    void loadCandles("initial");
     const timer = window.setInterval(() => {
-      void loadCandles();
+      void loadCandles("refresh");
     }, 60_000);
 
     return () => {
-      cancelled = true;
       window.clearInterval(timer);
     };
-  }, [market?.baseToken.symbol, timeframe]);
+  }, [loadCandles, market?.baseToken.symbol, timeframe]);
 
   const buildChart = useCallback(() => {
     if (!containerRef.current) return;
@@ -148,6 +250,10 @@ export function TradingViewChart({ market, timeframe, onTimeframeChange, overlay
     }
 
     if (chartRef.current) {
+      const previousRange = chartRef.current.timeScale().getVisibleLogicalRange();
+      if (previousRange) {
+        visibleRangeRef.current = previousRange as LogicalRange;
+      }
       chartRef.current.remove();
       chartRef.current = null;
       seriesRef.current = null;
@@ -265,7 +371,31 @@ export function TradingViewChart({ market, timeframe, onTimeframeChange, overlay
         }
       }
 
-      chart.timeScale().fitContent();
+      if (pendingRangeRef.current) {
+        chart.timeScale().setVisibleLogicalRange(pendingRangeRef.current);
+        visibleRangeRef.current = pendingRangeRef.current;
+        pendingRangeRef.current = null;
+        shouldFitContentRef.current = false;
+      } else if (shouldFitContentRef.current) {
+        chart.timeScale().fitContent();
+        shouldFitContentRef.current = false;
+      } else if (visibleRangeRef.current) {
+        chart.timeScale().setVisibleLogicalRange(visibleRangeRef.current);
+      }
+
+      chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+        if (!range) return;
+        visibleRangeRef.current = range as LogicalRange;
+
+        if (
+          range.from < 50 &&
+          hasMoreHistoryRef.current &&
+          !loadingMoreHistoryRef.current &&
+          candlesRef.current.length > 0
+        ) {
+          void loadCandles("older");
+        }
+      });
     }
 
     const ro = new ResizeObserver((entries) => {
@@ -279,7 +409,7 @@ export function TradingViewChart({ market, timeframe, onTimeframeChange, overlay
 
     ro.observe(containerRef.current);
     cleanupRef.current = () => ro.disconnect();
-  }, [candles, chartType, market, overlay, timeframe]);
+  }, [candles, chartType, loadCandles, market, overlay, timeframe]);
 
   useEffect(() => {
     buildChart();
@@ -321,6 +451,7 @@ export function TradingViewChart({ market, timeframe, onTimeframeChange, overlay
         <div className="tv-tf-sep" />
         <span style={{ fontSize: 11, color: "var(--text-tertiary)", marginLeft: "auto" }}>
           {market?.symbol ?? "---"} · {feedState === "live" ? "live data" : feedState}
+          {loadingMoreHistory ? " · loading history" : ""}
         </span>
       </div>
       <div className="tv-chart-container" ref={containerRef} />

@@ -14,7 +14,7 @@ import {
 } from "@sinergy/shared";
 
 export const STRATEGY_DEFAULTS = {
-  backtestBars: 250,
+  backtestBars: 8_640,
   maxRuleGroupsPerSide: 5,
   maxRulesPerGroup: 8,
   maxIndicatorLookback: 400
