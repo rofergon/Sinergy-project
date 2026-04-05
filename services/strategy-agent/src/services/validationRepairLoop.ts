@@ -516,6 +516,93 @@ function applyEmptyGroupFix(strategy: StrategyDefinition, issue: StrategyValidat
   return { issueCode: issue.code, path: issue.path, action: "Could not locate empty group", success: false };
 }
 
+function operandsMatch(left: StrategyOperand, right: StrategyOperand): boolean {
+  if (left.type !== right.type) {
+    return false;
+  }
+
+  if (left.type === "constant" && right.type === "constant") {
+    return left.value === right.value;
+  }
+
+  if (left.type === "price_field" && right.type === "price_field") {
+    return left.field === right.field;
+  }
+
+  if (left.type !== "indicator_output" || right.type !== "indicator_output") {
+    return false;
+  }
+
+  const leftParams = left.params ?? {};
+  const rightParams = right.params ?? {};
+  const leftKeys = Object.keys(leftParams).sort();
+  const rightKeys = Object.keys(rightParams).sort();
+
+  if (
+    left.indicator !== right.indicator ||
+    left.output !== right.output ||
+    leftKeys.length !== rightKeys.length
+  ) {
+    return false;
+  }
+
+  return leftKeys.every((key, index) => key === rightKeys[index] && leftParams[key] === rightParams[key]);
+}
+
+function rulesMatch(left: StrategyRule, right: StrategyRule): boolean {
+  return (
+    left.operator === right.operator &&
+    operandsMatch(left.left, right.left) &&
+    operandsMatch(left.right, right.right)
+  );
+}
+
+function invertOperator(operator: StrategyRuleOperator): StrategyRuleOperator | null {
+  if (operator === "crosses_above") return "crosses_below";
+  if (operator === "crosses_below") return "crosses_above";
+  return null;
+}
+
+function applyAmbiguousDualSideEntriesFix(strategy: StrategyDefinition, issue: StrategyValidationIssue): RepairAttempt {
+  let changed = 0;
+
+  for (let groupIndex = 0; groupIndex < strategy.entryRules.long.length; groupIndex += 1) {
+    const longGroup = strategy.entryRules.long[groupIndex];
+    const shortGroup = strategy.entryRules.short[groupIndex];
+
+    if (!longGroup || !shortGroup || longGroup.rules.length !== shortGroup.rules.length) {
+      continue;
+    }
+
+    for (let ruleIndex = 0; ruleIndex < longGroup.rules.length; ruleIndex += 1) {
+      const longRule = longGroup.rules[ruleIndex];
+      const shortRule = shortGroup.rules[ruleIndex];
+
+      if (!longRule || !shortRule || !rulesMatch(longRule, shortRule)) {
+        continue;
+      }
+
+      const inverseOperator = invertOperator(shortRule.operator);
+      if (!inverseOperator) {
+        continue;
+      }
+
+      shortRule.operator = inverseOperator;
+      changed += 1;
+    }
+  }
+
+  return {
+    issueCode: issue.code,
+    path: issue.path,
+    action:
+      changed > 0
+        ? `Inverted ${changed} identical short entry rule${changed === 1 ? "" : "s"} to avoid dual-side deadlock`
+        : "No crossover entry rules could be inverted automatically",
+    success: changed > 0
+  };
+}
+
 export function attemptValidationRepair(
   strategy: StrategyDefinition,
   validation: StrategyValidationResult,
@@ -585,6 +672,9 @@ export function attemptValidationRepair(
       case "missing_side":
         patchedStrategy.enabledSides = ["long", "short"];
         attempt = { issueCode: issue.code, path: issue.path, action: "Enabled both long and short sides", success: true };
+        break;
+      case "ambiguous_dual_side_entries":
+        attempt = applyAmbiguousDualSideEntriesFix(patchedStrategy, issue);
         break;
       default:
         attempt = { issueCode: issue.code, path: issue.path, action: `No automated fix for: ${issue.code}`, success: false };

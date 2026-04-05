@@ -47,15 +47,51 @@ function decodeMsgCallLogs(messageResponses: Array<{ typeUrl: string; value: Uin
       return [];
     }
 
-    const decoded = MsgCallResponse.decode(response.value);
-    return decoded.logs.map(
-      (log) =>
-        ({
-          address: log.address as Address,
-          topics: log.topics as Hex[],
-          data: (log.data || "0x") as Hex,
-        }) satisfies SyncLog
-    );
+    try {
+      const decoded = MsgCallResponse.decode(response.value);
+      return decoded.logs.map(
+        (log) =>
+          ({
+            address: log.address as Address,
+            topics: log.topics as Hex[],
+            data: (log.data || "0x") as Hex,
+          }) satisfies SyncLog
+      );
+    } catch {
+      return [];
+    }
+  });
+}
+
+/**
+ * Fallback: extract EVM logs from tx events when msgResponses-based
+ * decoding returns nothing (can happen with certain InterwovenKit /
+ * CosmJS versions on minievm chains).
+ */
+function extractEvmLogsFromEvents(
+  events: readonly { readonly type: string; readonly attributes: readonly { readonly key: string; readonly value: string }[] }[]
+): SyncLog[] {
+  return events.flatMap((event) => {
+    if (event.type !== "evm") return [];
+    return event.attributes.flatMap((attr) => {
+      if (attr.key !== "log") return [];
+      try {
+        const parsed = JSON.parse(attr.value) as {
+          address: string;
+          topics: string[];
+          data: string;
+        };
+        return [
+          {
+            address: parsed.address as Address,
+            topics: parsed.topics as Hex[],
+            data: (parsed.data || "0x") as Hex,
+          } satisfies SyncLog,
+        ];
+      } catch {
+        return [];
+      }
+    });
   });
 }
 
@@ -248,7 +284,10 @@ export function VaultPanel({
         })
       );
 
-      const logs = decodeMsgCallLogs(depositTx.msgResponses);
+      let logs = decodeMsgCallLogs(depositTx.msgResponses);
+      if (logs.length === 0 && depositTx.events) {
+        logs = extractEvmLogsFromEvents(depositTx.events);
+      }
       if (logs.length === 0) {
         throw new Error("Deposit completed but no EVM logs were returned.");
       }
@@ -390,7 +429,10 @@ export function VaultPanel({
       );
       broadcasted = true;
 
-      const logs = decodeMsgCallLogs(withdrawTx.msgResponses);
+      let logs = decodeMsgCallLogs(withdrawTx.msgResponses);
+      if (logs.length === 0 && withdrawTx.events) {
+        logs = extractEvmLogsFromEvents(withdrawTx.events);
+      }
       if (logs.length === 0) {
         throw new Error("Withdrawal completed but no EVM logs were returned.");
       }

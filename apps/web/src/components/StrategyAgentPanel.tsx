@@ -7,8 +7,9 @@ import type {
   StrategyTimeframe,
   StrategyToolName
 } from "@sinergy/shared";
-import { agentApi } from "../lib/api";
+import { agentApi, agentApiStream } from "../lib/api";
 import type {
+  ChartViewport,
   MarketSnapshot,
   StrategyAgentPlanResponse,
   StrategyAgentRunResponse,
@@ -22,6 +23,7 @@ type Props = {
   address?: HexString;
   selectedMarket?: MarketSnapshot;
   selectedTimeframe: StrategyTimeframe;
+  viewport: ChartViewport | null;
   onBacktestResult: (result: StrategyBacktestBundle | null) => void;
   onTimeframeChange: (timeframe: StrategyTimeframe) => void;
   onReviewStrategy: (strategyId: string, bundle: StrategyBacktestBundle | null) => void;
@@ -38,7 +40,16 @@ type AgentMessage = {
   warnings?: string[];
   strategyId?: string;
   bundle?: StrategyBacktestBundle | null;
+  liveThinking?: string;
 };
+
+type AgentStreamEvent =
+  | { type: "status"; message: string }
+  | { type: "thinking_delta"; text: string }
+  | { type: "content_delta"; text: string }
+  | { type: "tool"; phase: "start" | "done" | "error"; tool: string; step?: number; message?: string }
+  | { type: "done"; result: StrategyAgentRunResponse }
+  | { type: "error"; message: string };
 
 type StrategyClarification = {
   sidePreference: "both" | "long_only" | "short_only";
@@ -138,10 +149,19 @@ function summarizeSession(item: StrategyAgentSessionListItem) {
   return item.strategy?.name ?? item.lastUserMessage ?? "Untitled session";
 }
 
+function summarizeThinking(text: string, maxLength = 140) {
+  const compact = text.replace(/\s+/g, " ").trim();
+  if (compact.length <= maxLength) {
+    return compact;
+  }
+  return `${compact.slice(0, maxLength).trimEnd()}...`;
+}
+
 export function StrategyAgentPanel({
   address,
   selectedMarket,
   selectedTimeframe,
+  viewport,
   onBacktestResult,
   onTimeframeChange,
   onReviewStrategy
@@ -164,6 +184,11 @@ export function StrategyAgentPanel({
     stopLossMode: "recommended",
     customStopLossPct: ""
   });
+  const [liveThinking, setLiveThinking] = useState("");
+  const [liveFinalText, setLiveFinalText] = useState("");
+  const [liveTools, setLiveTools] = useState<Array<{ label: string; detail?: string }>>([]);
+  const [collapsedThinkingIds, setCollapsedThinkingIds] = useState<Record<string, boolean>>({});
+  const [liveThinkingCollapsed, setLiveThinkingCollapsed] = useState(false);
 
   const storageKey = useMemo(() => {
     if (!address || !selectedMarket?.id) return null;
@@ -206,6 +231,10 @@ export function StrategyAgentPanel({
     );
     setSession(payload.result.session);
     setMessages(toMessagesFromSession(payload.result.session));
+    setLiveThinking("");
+    setLiveFinalText("");
+    setLiveTools([]);
+    setLiveThinkingCollapsed(false);
     onBacktestResult(null);
 
     if (payload.result.session.strategy?.timeframe) {
@@ -330,6 +359,9 @@ export function StrategyAgentPanel({
                 ownerAddress: address,
                 marketId: selectedMarket.id,
                 preferredTimeframe: selectedTimeframe,
+                chartBars: viewport?.bars,
+                chartFromTs: viewport?.fromTs,
+                chartToTs: viewport?.toTs,
                 goal: enrichedGoal,
                 sessionId: session?.sessionId,
                 mode
@@ -354,47 +386,99 @@ export function StrategyAgentPanel({
         return;
       }
 
-      const payload = await agentApi<{ ok: true; result: StrategyAgentRunResponse }>("/strategy/run", {
-        method: "POST",
-        body: JSON.stringify({
-          ownerAddress: address,
-          marketId: selectedMarket.id,
-          preferredTimeframe: selectedTimeframe,
-          goal: enrichedGoal,
-          sessionId: session?.sessionId,
-          mode
-        })
-      });
+      setLiveThinking("");
+      setLiveFinalText("");
+      setLiveTools([]);
+      setLiveThinkingCollapsed(false);
+      let streamedThinking = "";
+      let streamedFinalText = "";
 
-      const bundle = toBacktestBundle(payload.result.toolTrace);
-      if (bundle) {
-        onTimeframeChange(bundle.summary.timeframe);
-        setTimeout(() => {
-          onBacktestResult(bundle);
-        }, 50);
-      }
-
-      setSession(payload.result.session);
-      setMessages((current) => [
-        ...current,
+      await agentApiStream(
+        "/strategy/run/stream",
         {
-          id: buildMessageId(),
-          role: "assistant",
-          text: payload.result.finalMessage,
-          mode,
-          usedTools: payload.result.usedTools,
-          trace: payload.result.toolTrace,
-          warnings: payload.result.warnings,
-          strategyId: payload.result.artifacts.strategyId ?? payload.result.session.strategyId,
-          bundle
+          method: "POST",
+          body: JSON.stringify({
+            ownerAddress: address,
+            marketId: selectedMarket.id,
+            preferredTimeframe: selectedTimeframe,
+            chartBars: viewport?.bars,
+            chartFromTs: viewport?.fromTs,
+            chartToTs: viewport?.toTs,
+            goal: enrichedGoal,
+            sessionId: session?.sessionId,
+            mode
+          })
+        },
+        {
+          onEvent: (event, raw) => {
+            const payload = raw as AgentStreamEvent;
+            if (event === "status" && payload.type === "status") {
+              setStatus(payload.message);
+              return;
+            }
+            if (event === "thinking_delta" && payload.type === "thinking_delta") {
+              streamedThinking += payload.text;
+              setLiveThinking((current) => current + payload.text);
+              return;
+            }
+            if (event === "content_delta" && payload.type === "content_delta") {
+              streamedFinalText += payload.text;
+              setLiveFinalText((current) => current + payload.text);
+              return;
+            }
+            if (event === "tool" && payload.type === "tool") {
+              setLiveTools((current) => [
+                ...current,
+                {
+                  label: `${payload.phase === "start" ? "Running" : payload.phase === "done" ? "Done" : "Error"} ${payload.tool}`,
+                  detail: payload.message
+                }
+              ]);
+              return;
+            }
+            if (event === "done" && payload.type === "done") {
+              const bundle = toBacktestBundle(payload.result.toolTrace);
+              if (bundle) {
+                onTimeframeChange(bundle.summary.timeframe);
+                setTimeout(() => {
+                  onBacktestResult(bundle);
+                }, 50);
+              }
+
+              setSession(payload.result.session);
+              setMessages((current) => [
+                ...current,
+                {
+                  id: buildMessageId(),
+                  role: "assistant",
+                  text: payload.result.finalMessage,
+                  mode,
+                  usedTools: payload.result.usedTools,
+                  trace: payload.result.toolTrace,
+                  warnings: payload.result.warnings,
+                  strategyId: payload.result.artifacts.strategyId ?? payload.result.session.strategyId,
+                  bundle,
+                  liveThinking: streamedThinking || undefined
+                }
+              ]);
+              setStatus(
+                payload.result.session.strategyId
+                  ? "Agent workflow finished. Session and strategy are ready to reopen."
+                  : "Agent workflow finished."
+              );
+              setLiveThinking("");
+              setLiveFinalText("");
+              setLiveTools([]);
+              setLiveThinkingCollapsed(false);
+              void refreshHistory(payload.result.session.sessionId, false);
+              return;
+            }
+            if (event === "error" && payload.type === "error") {
+              throw new Error(payload.message);
+            }
+          }
         }
-      ]);
-      setStatus(
-        payload.result.session.strategyId
-          ? "Agent workflow finished. Session and strategy are ready to reopen."
-          : "Agent workflow finished."
       );
-      void refreshHistory(payload.result.session.sessionId, false);
     } catch (error) {
       setMessages((current) => [
         ...current,
@@ -417,6 +501,10 @@ export function StrategyAgentPanel({
     setClarifierOpen(false);
     setClarifierGoal("");
     setClarifierMode(null);
+    setLiveThinking("");
+    setLiveFinalText("");
+    setLiveTools([]);
+    setLiveThinkingCollapsed(false);
     setStatus("Started a fresh strategy session.");
     onBacktestResult(null);
   }
@@ -505,6 +593,28 @@ export function StrategyAgentPanel({
                     <strong>{message.role === "assistant" ? "Agent" : "You"}</strong>
                     {message.mode && <span>{message.mode === "plan" ? "Plan" : "Run"}</span>}
                   </div>
+                  {message.liveThinking && (
+                    <div className="strategy-agent-trace">
+                      <button
+                        type="button"
+                        className={`strategy-agent-thinking-card ${collapsedThinkingIds[message.id] ? "collapsed" : ""}`}
+                        onClick={() =>
+                          setCollapsedThinkingIds((current) => ({
+                            ...current,
+                            [message.id]: !current[message.id]
+                          }))
+                        }
+                        aria-expanded={!collapsedThinkingIds[message.id]}
+                      >
+                        <span className="strategy-agent-thinking-title">Thinking</span>
+                        <small className="strategy-agent-thinking-body">
+                          {collapsedThinkingIds[message.id]
+                            ? summarizeThinking(message.liveThinking)
+                            : message.liveThinking}
+                        </small>
+                      </button>
+                    </div>
+                  )}
                   <p>{message.text}</p>
 
                   {message.plannedTools && message.plannedTools.length > 0 && (
@@ -558,6 +668,44 @@ export function StrategyAgentPanel({
                   )}
                 </div>
               ))
+            )}
+
+            {(busy === "run" && (liveThinking || liveFinalText || liveTools.length > 0)) && (
+              <div className="strategy-agent-message assistant">
+                <div className="strategy-agent-message-head">
+                  <strong>Agent</strong>
+                  <span>Live</span>
+                </div>
+
+                {liveThinking && (
+                  <div className="strategy-agent-trace">
+                    <button
+                      type="button"
+                      className={`strategy-agent-thinking-card ${liveThinkingCollapsed ? "collapsed" : ""}`}
+                      onClick={() => setLiveThinkingCollapsed((current) => !current)}
+                      aria-expanded={!liveThinkingCollapsed}
+                    >
+                      <span className="strategy-agent-thinking-title">Thinking</span>
+                      <small className="strategy-agent-thinking-body">
+                        {liveThinkingCollapsed ? summarizeThinking(liveThinking) : liveThinking}
+                      </small>
+                    </button>
+                  </div>
+                )}
+
+                {liveTools.length > 0 && (
+                  <div className="strategy-agent-trace">
+                    {liveTools.slice(-6).map((item, index) => (
+                      <div key={`live-tool-${index}`}>
+                        <strong>{item.label}</strong>
+                        <small>{item.detail ?? "in progress"}</small>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {liveFinalText && <p>{liveFinalText}</p>}
+              </div>
             )}
           </div>
 

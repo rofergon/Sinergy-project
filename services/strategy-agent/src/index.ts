@@ -154,4 +154,54 @@ app.post("/agent/strategy/run", async (request, reply) => {
   };
 });
 
+app.post("/agent/strategy/run/stream", async (request, reply) => {
+  const parsed = agentStrategyRequestSchema.safeParse(request.body);
+  if (!parsed.success) {
+    reply.code(422);
+    return {
+      ok: false,
+      error: {
+        message: "Invalid agent stream request.",
+        issues: parsed.error.issues
+      }
+    };
+  }
+
+  reply.raw.setHeader("Content-Type", "text/event-stream");
+  reply.raw.setHeader("Cache-Control", "no-cache, no-transform");
+  reply.raw.setHeader("Connection", "keep-alive");
+  reply.raw.flushHeaders?.();
+
+  const send = (event: string, data: unknown) => {
+    reply.raw.write(`event: ${event}\n`);
+    reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  try {
+    const result = await agentService.run(
+      {
+        ...parsed.data,
+        mode: "run"
+      },
+      {
+        emit(event) {
+          send(event.type, event);
+        }
+      }
+    );
+
+    send("done", {
+      type: "done",
+      result
+    });
+  } catch (error) {
+    send("error", {
+      type: "error",
+      message: error instanceof Error ? error.message : String(error)
+    });
+  } finally {
+    reply.raw.end();
+  }
+});
+
 app.listen({ host: "0.0.0.0", port: env.AGENT_PORT });

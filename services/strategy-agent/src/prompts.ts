@@ -35,7 +35,7 @@ Every tool input uses a STRICT JSON schema. Unknown top-level keys are rejected.
 - For \`update_strategy_draft\`, never send root-level \`marketId\` or \`strategyId\`; send only \`ownerAddress\` and \`strategy\`.
 - Treat tool schemas as authoritative. If a tool does not list a root key, do not send it.
 - Keep tool inputs compact and deterministic.
-- \`analyze_market_context\` accepts only \`ownerAddress\` and \`marketId\`.
+- \`analyze_market_context\` accepts \`ownerAddress\`, \`marketId\`, and optional \`bars\`.
 
 ## STRATEGY STRUCTURE
 
@@ -96,6 +96,9 @@ export function buildUserPrompt(input: {
   goal: string;
   marketId?: string;
   preferredTimeframe?: string;
+  chartBars?: number;
+  chartFromTs?: number;
+  chartToTs?: number;
   strategyId?: string;
   session?: AgentSessionSnapshot;
 }) {
@@ -103,6 +106,9 @@ export function buildUserPrompt(input: {
     `ownerAddress: ${input.ownerAddress}`,
     input.marketId ? `marketId: ${input.marketId}` : null,
     input.preferredTimeframe ? `preferredTimeframe: ${input.preferredTimeframe}` : null,
+    input.chartBars ? `chartBars: ${input.chartBars}` : null,
+    input.chartFromTs ? `chartFromTs: ${input.chartFromTs}` : null,
+    input.chartToTs ? `chartToTs: ${input.chartToTs}` : null,
     input.strategyId ? `strategyId: ${input.strategyId}` : null,
     `goal: ${input.goal}`
   ]
@@ -119,6 +125,9 @@ export function buildFallbackPlannerPrompt(input: {
   ownerAddress: string;
   marketId?: string;
   preferredTimeframe?: string;
+  chartBars?: number;
+  chartFromTs?: number;
+  chartToTs?: number;
   strategyId?: string;
   runId?: string;
   toolsCatalog: Array<{ name: string; description: string }>;
@@ -149,6 +158,9 @@ User context:
 - ownerAddress: ${input.ownerAddress}
 - marketId: ${input.marketId ?? "not provided"}
 - preferredTimeframe: ${input.preferredTimeframe ?? "not provided"}
+- chartBars: ${input.chartBars ?? "not provided"}
+- chartFromTs: ${input.chartFromTs ?? "not provided"}
+- chartToTs: ${input.chartToTs ?? "not provided"}
 - strategyId: ${input.strategyId ?? "not provided"}
 - runId: ${input.runId ?? "not provided"}
 - goal: ${input.goal}
@@ -170,11 +182,11 @@ Constraints:
 - Always include ownerAddress in tool input when relevant.
 - Tool input contracts are strict:
   - list_strategy_capabilities accepts only ownerAddress.
-  - analyze_market_context accepts ownerAddress and marketId.
+  - analyze_market_context accepts ownerAddress, marketId, and optional bars/fromTs/toTs.
   - create_strategy_draft accepts ownerAddress, marketId, and optional name.
   - update_strategy_draft accepts ownerAddress and strategy only.
   - validate_strategy_draft accepts ownerAddress plus strategyId or strategy.
-  - run_strategy_backtest accepts ownerAddress, strategyId, and optional bars.
+  - run_strategy_backtest accepts ownerAddress, strategyId, and optional bars/fromTs/toTs.
 - Never add root-level marketId or strategyId to tools that do not accept them.
 - If creating a strategy from scratch, capabilities should be consulted first.
 - If marketId is available and you are choosing or modifying a strategy, call analyze_market_context before selecting timeframe, EMA parameters, or template family.

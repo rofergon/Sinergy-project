@@ -1,14 +1,22 @@
 import { z } from "zod";
-import type { StrategyStatus, StrategyTimeframe, StrategyToolName } from "@sinergy/shared";
+import { STRATEGY_TOOL_LIMITS, type StrategyStatus, type StrategyTimeframe, type StrategyToolName } from "@sinergy/shared";
 
 export const agentStrategyRequestSchema = z.object({
   ownerAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
   goal: z.string().min(1),
   marketId: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
   preferredTimeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).optional(),
+  chartBars: z.coerce.number().int().positive().max(STRATEGY_TOOL_LIMITS.maxBarsPerBacktest).optional(),
+  chartFromTs: z.coerce.number().int().positive().optional(),
+  chartToTs: z.coerce.number().int().positive().optional(),
   strategyId: z.string().uuid().optional(),
   sessionId: z.string().uuid().optional(),
   mode: z.enum(["run", "plan"]).default("run")
+}).refine((value) => {
+  if (value.chartFromTs === undefined && value.chartToTs === undefined) return true;
+  return value.chartFromTs !== undefined && value.chartToTs !== undefined && value.chartFromTs <= value.chartToTs;
+}, {
+  message: "Provide chartFromTs and chartToTs together, with chartFromTs <= chartToTs."
 });
 
 export type AgentStrategyRequest = z.infer<typeof agentStrategyRequestSchema>;
@@ -126,3 +134,32 @@ export type AgentPlanResponse = {
   modelModeUsed: "native-tools" | "fallback-json";
   warnings: string[];
 };
+
+export type AgentStreamEvent =
+  | {
+      type: "status";
+      message: string;
+    }
+  | {
+      type: "thinking_delta";
+      text: string;
+    }
+  | {
+      type: "content_delta";
+      text: string;
+    }
+  | {
+      type: "tool";
+      phase: "start" | "done" | "error";
+      tool: string;
+      step?: number;
+      message?: string;
+    }
+  | {
+      type: "done";
+      result: AgentResponse;
+    }
+  | {
+      type: "error";
+      message: string;
+    };

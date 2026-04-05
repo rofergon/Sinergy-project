@@ -60,6 +60,8 @@ type BackfillOptions = {
 
 type CandleQueryOptions = {
   beforeTs?: number;
+  fromTs?: number;
+  toTs?: number;
 };
 
 type CandleQueryResult = {
@@ -150,7 +152,7 @@ function trimToContiguousTail(
 
   return {
     candles: contiguousWindow,
-    hasMore: contiguousStart === 0 && candles.length > recentWindow.length
+    hasMore: contiguousStart > 0 || candles.length > recentWindow.length
   };
 }
 
@@ -354,6 +356,12 @@ export class PriceService {
 
   getCandlesPage(symbol: string, inputInterval?: string, limit = 200, options?: CandleQueryOptions): CandleQueryResult {
     const interval = normalizeInterval(inputInterval);
+    if (options?.fromTs !== undefined && options?.toTs !== undefined) {
+      return {
+        candles: this.getCandlesInRange(symbol, interval, options.fromTs, options.toTs),
+        hasMore: false
+      };
+    }
     const bucketSeconds = intervalSeconds(interval);
     const fetchLimit = Math.max((limit + 1) * Math.max(bucketSeconds / 60, 1), limit + 1);
     const hasLiveRows = this.hasLiveRows(symbol);
@@ -435,6 +443,72 @@ export class PriceService {
 
     if (current) aggregated.push(current);
     return trimToContiguousTail(aggregated, interval, limit);
+  }
+
+  private getCandlesInRange(symbol: string, interval: CandleInterval, fromTs: number, toTs: number): StoredBarRow[] {
+    const bucketSeconds = intervalSeconds(interval);
+    const hasLiveRows = this.hasLiveRows(symbol);
+    const rangeEndExclusive = toTs + bucketSeconds;
+
+    const rows = this.db
+      .prepare(
+        `
+          SELECT ts, open, high, low, close, volume
+          FROM price_bars
+          WHERE asset_symbol = ?
+            AND (? = 0 OR source != 'fallback')
+            AND ts >= ?
+            AND ts < ?
+          ORDER BY ts ASC
+        `
+      )
+      .all(symbol, hasLiveRows ? 1 : 0, fromTs, rangeEndExclusive) as StoredBarRow[];
+
+    if (rows.length === 0) {
+      return [];
+    }
+
+    if (interval === "1m") {
+      return rows;
+    }
+
+    const aggregated: StoredBarRow[] = [];
+    let current: StoredBarRow | null = null;
+    let currentBucket = -1;
+
+    for (const row of rows) {
+      const bucket = Math.floor(row.ts / bucketSeconds) * bucketSeconds;
+      if (bucket !== currentBucket) {
+        if (current && current.ts >= fromTs && current.ts <= toTs) {
+          aggregated.push(current);
+        }
+        currentBucket = bucket;
+        current = {
+          ts: bucket,
+          open: row.open,
+          high: row.high,
+          low: row.low,
+          close: row.close,
+          volume: row.volume
+        };
+        continue;
+      }
+
+      current = {
+        ts: current!.ts,
+        open: current!.open,
+        high: Math.max(current!.high, row.high),
+        low: Math.min(current!.low, row.low),
+        close: row.close,
+        volume: current!.volume + row.volume
+      };
+    }
+
+    if (current && current.ts >= fromTs && current.ts <= toTs) {
+      aggregated.push(current);
+    }
+
+    return aggregated;
   }
 
   getStatus() {

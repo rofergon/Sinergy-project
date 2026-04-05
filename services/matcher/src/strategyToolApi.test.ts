@@ -208,6 +208,56 @@ test("capabilities and templates are exposed for agents", async () => {
   }
 });
 
+test("RSI strategies expose oscillator overlays and threshold guide lines", async () => {
+  const harness = makeHarness();
+  const ownerAddress = "0x00000000000000000000000000000000000000c3" as HexString;
+
+  try {
+    const cloned = await harness.api.execute("clone_strategy_template", {
+      ownerAddress,
+      marketId: harness.market.id,
+      templateId: "rsi-mean-reversion"
+    }) as { strategy: import("@sinergy/shared").StrategyDefinition };
+
+    const saved = await harness.api.execute("save_strategy", {
+      ownerAddress,
+      strategyId: cloned.strategy.id
+    }) as {
+      strategy: import("@sinergy/shared").StrategyDefinition;
+      validation: import("@sinergy/shared").StrategyValidationResult;
+    };
+
+    assert.equal(saved.validation.ok, true);
+
+    const run = await harness.api.execute("run_strategy_backtest", {
+      ownerAddress,
+      strategyId: cloned.strategy.id,
+      bars: 90
+    }) as {
+      overlay: import("@sinergy/shared").StrategyChartOverlay;
+    };
+
+    assert.equal(
+      run.overlay.indicators.some((indicator) => indicator.label.startsWith("RSI value")),
+      true
+    );
+    assert.equal(
+      run.overlay.indicators.some(
+        (indicator) => indicator.pane === "oscillator" && indicator.label === "RSI level 30"
+      ),
+      true
+    );
+    assert.equal(
+      run.overlay.indicators.some(
+        (indicator) => indicator.pane === "oscillator" && indicator.label === "RSI level 55"
+      ),
+      true
+    );
+  } finally {
+    harness.cleanup();
+  }
+});
+
 test("market analysis exposes timeframe, regime, and support resistance hints", async () => {
   const harness = makeHarness();
   const ownerAddress = "0x00000000000000000000000000000000000000c3" as HexString;
@@ -223,6 +273,65 @@ test("market analysis exposes timeframe, regime, and support resistance hints", 
     assert.equal(analysis.analysis.recommendedStrategyKinds.length > 0, true);
     assert.equal(typeof analysis.analysis.emaSuggestion.fastPeriod, "number");
     assert.equal(typeof analysis.analysis.summary, "string");
+  } finally {
+    harness.cleanup();
+  }
+});
+
+test("validation rejects identical long and short entry rules that would deadlock execution", async () => {
+  const harness = makeHarness();
+  const ownerAddress = "0x00000000000000000000000000000000000000c3" as HexString;
+
+  try {
+    const draftResult = await harness.api.execute("create_strategy_draft", {
+      ownerAddress,
+      marketId: harness.market.id
+    }) as { strategy: import("@sinergy/shared").StrategyDefinition };
+    const draft = draftResult.strategy;
+
+    draft.enabledSides = ["long", "short"];
+    draft.entryRules.long = [
+      {
+        id: "entry-long-1",
+        rules: [
+          {
+            id: "entry-long-rule-1",
+            left: { type: "indicator_output", indicator: "ema", output: "value", params: { period: 9 } },
+            operator: "crosses_above",
+            right: { type: "indicator_output", indicator: "ema", output: "value", params: { period: 21 } }
+          }
+        ]
+      }
+    ];
+    draft.entryRules.short = [
+      {
+        id: "entry-short-1",
+        rules: [
+          {
+            id: "entry-short-rule-1",
+            left: { type: "indicator_output", indicator: "ema", output: "value", params: { period: 9 } },
+            operator: "crosses_above",
+            right: { type: "indicator_output", indicator: "ema", output: "value", params: { period: 21 } }
+          }
+        ]
+      }
+    ];
+
+    await harness.api.execute("update_strategy_draft", {
+      ownerAddress,
+      strategy: draft
+    });
+
+    const validation = await harness.api.execute("validate_strategy_draft", {
+      ownerAddress,
+      strategyId: draft.id
+    }) as { validation: import("@sinergy/shared").StrategyValidationResult };
+
+    assert.equal(validation.validation.ok, false);
+    assert.equal(
+      validation.validation.issues.some((issue) => issue.code === "ambiguous_dual_side_entries"),
+      true
+    );
   } finally {
     harness.cleanup();
   }

@@ -89,7 +89,21 @@ export const strategyToolInputSchemas = {
   analyze_market_context: z
     .object({
       ownerAddress: strategyOwnerAddressSchema,
-      marketId: strategyMarketIdSchema
+      marketId: strategyMarketIdSchema,
+      bars: z
+        .number()
+        .int()
+        .positive()
+        .max(STRATEGY_TOOL_LIMITS.maxBarsPerBacktest)
+        .optional(),
+      fromTs: z.number().int().positive().optional(),
+      toTs: z.number().int().positive().optional()
+    })
+    .refine((value) => {
+      if (value.fromTs === undefined && value.toTs === undefined) return true;
+      return value.fromTs !== undefined && value.toTs !== undefined && value.fromTs <= value.toTs;
+    }, {
+      message: "Provide fromTs and toTs together, with fromTs <= toTs."
     })
     .strict(),
   list_strategy_templates: z
@@ -135,7 +149,15 @@ export const strategyToolInputSchemas = {
         .int()
         .positive()
         .max(STRATEGY_TOOL_LIMITS.maxBarsPerBacktest)
-        .optional()
+        .optional(),
+      fromTs: z.number().int().positive().optional(),
+      toTs: z.number().int().positive().optional()
+    })
+    .refine((value) => {
+      if (value.fromTs === undefined && value.toTs === undefined) return true;
+      return value.fromTs !== undefined && value.toTs !== undefined && value.fromTs <= value.toTs;
+    }, {
+      message: "Provide fromTs and toTs together, with fromTs <= toTs."
     })
     .strict(),
   get_backtest_summary: z

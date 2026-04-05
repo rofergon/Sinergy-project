@@ -16,6 +16,7 @@ import type {
   AgentResponse,
   AgentStrategyRequest,
   AgentStrategySummary,
+  AgentStreamEvent,
   AgentToolTraceEntry
 } from "../types.js";
 import { createTrackedStrategyLangChainTools } from "./matcherTools.js";
@@ -42,6 +43,10 @@ type CreationPlan = {
   templateId?: string;
   name?: string;
   strategyPatch?: Partial<StrategyDefinition>;
+};
+
+type AgentRunStreamCallbacks = {
+  emit: (event: AgentStreamEvent) => void;
 };
 
 function defaultRiskRulesForTimeframe(timeframe: StrategyDefinition["timeframe"]) {
@@ -92,6 +97,20 @@ function resolvePreferredTimeframe(
   return preferredTimeframe ?? marketAnalysis?.recommendedTimeframe ?? "15m";
 }
 
+function resolveBacktestBars(input: { chartBars?: number }) {
+  return typeof input.chartBars === "number" && input.chartBars > 0 ? input.chartBars : undefined;
+}
+
+function resolveChartRange(input: { chartFromTs?: number; chartToTs?: number }) {
+  if (typeof input.chartFromTs === "number" && typeof input.chartToTs === "number" && input.chartFromTs <= input.chartToTs) {
+    return {
+      fromTs: input.chartFromTs,
+      toTs: input.chartToTs
+    };
+  }
+  return undefined;
+}
+
 function extractRequestedSideBias(goal: string): StrategySideBias | undefined {
   if (/(long only|only long|solo long|solo compras)/i.test(goal)) return "long_only";
   if (/(short only|only short|solo short|solo ventas)/i.test(goal)) return "short_only";
@@ -139,7 +158,15 @@ function goalLooksLikeEmaCrossover(goal: string) {
   return /(ema).*(crossover|cross|cruce)|(crossover|cross|cruce).*(ema)/i.test(goal);
 }
 
+function goalLooksLikeRsiEmaHybrid(goal: string) {
+  return /(rsi).*(ema)|(ema).*(rsi)|(rsi).*(filter|filtro|confirm|confirmacion|breakout|ruptura)|(breakout|ruptura).*(rsi)/i.test(goal);
+}
+
 function detectBasicFastPath(goal: string): BasicFastPathConfig | null {
+  if (goalLooksLikeRsiEmaHybrid(goal)) {
+    return null;
+  }
+
   if (goalLooksLikeEmaCrossover(goal)) {
     return { kind: "ema", name: "EMA Crossover Strategy" };
   }
@@ -226,6 +253,15 @@ function emaOperand(period: number): StrategyDefinition["entryRules"]["long"][nu
   return {
     type: "indicator_output",
     indicator: "ema",
+    output: "value",
+    params: { period }
+  };
+}
+
+function rsiOperand(period: number): StrategyDefinition["entryRules"]["long"][number]["rules"][number]["left"] {
+  return {
+    type: "indicator_output",
+    indicator: "rsi",
     output: "value",
     params: { period }
   };
@@ -568,6 +604,126 @@ function buildBollingerVariant(strategy: StrategyDefinition, input: {
   }, `Bollinger Reversion ${input.period}/${input.stdDev}`);
 }
 
+function buildRsiEmaHybridDraft(strategy: StrategyDefinition, input: {
+  timeframe?: StrategyDefinition["timeframe"];
+  fast: number;
+  slow: number;
+  rsiPeriod: number;
+  longRsiMin: number;
+  shortRsiMax: number;
+  longExitRsi: number;
+  shortExitRsi: number;
+  stopLossPct?: number;
+  takeProfitPct?: number;
+  trailingStopPct?: number;
+  maxBarsInTrade?: number;
+}) {
+  const strategyId = strategy.id;
+
+  return withStrategyName({
+    ...strategy,
+    timeframe: input.timeframe ?? strategy.timeframe,
+    enabledSides: ["long", "short"],
+    entryRules: {
+      long: [
+        {
+          id: `${strategyId}-entry-long-1`,
+          rules: [
+            {
+              id: `${strategyId}-entry-long-rule-1`,
+              left: emaOperand(input.fast),
+              operator: "crosses_above",
+              right: emaOperand(input.slow)
+            },
+            {
+              id: `${strategyId}-entry-long-rule-2`,
+              left: rsiOperand(input.rsiPeriod),
+              operator: ">=",
+              right: { type: "constant", value: input.longRsiMin }
+            }
+          ]
+        }
+      ],
+      short: [
+        {
+          id: `${strategyId}-entry-short-1`,
+          rules: [
+            {
+              id: `${strategyId}-entry-short-rule-1`,
+              left: emaOperand(input.fast),
+              operator: "crosses_below",
+              right: emaOperand(input.slow)
+            },
+            {
+              id: `${strategyId}-entry-short-rule-2`,
+              left: rsiOperand(input.rsiPeriod),
+              operator: "<=",
+              right: { type: "constant", value: input.shortRsiMax }
+            }
+          ]
+        }
+      ]
+    },
+    exitRules: {
+      long: [
+        {
+          id: `${strategyId}-exit-long-1`,
+          rules: [
+            {
+              id: `${strategyId}-exit-long-rule-1`,
+              left: emaOperand(input.fast),
+              operator: "crosses_below",
+              right: emaOperand(input.slow)
+            }
+          ]
+        },
+        {
+          id: `${strategyId}-exit-long-2`,
+          rules: [
+            {
+              id: `${strategyId}-exit-long-rule-2`,
+              left: rsiOperand(input.rsiPeriod),
+              operator: "<=",
+              right: { type: "constant", value: input.longExitRsi }
+            }
+          ]
+        }
+      ],
+      short: [
+        {
+          id: `${strategyId}-exit-short-1`,
+          rules: [
+            {
+              id: `${strategyId}-exit-short-rule-1`,
+              left: emaOperand(input.fast),
+              operator: "crosses_above",
+              right: emaOperand(input.slow)
+            }
+          ]
+        },
+        {
+          id: `${strategyId}-exit-short-2`,
+          rules: [
+            {
+              id: `${strategyId}-exit-short-rule-2`,
+              left: rsiOperand(input.rsiPeriod),
+              operator: ">=",
+              right: { type: "constant", value: input.shortExitRsi }
+            }
+          ]
+        }
+      ]
+    },
+    riskRules: {
+      ...strategy.riskRules,
+      stopLossPct: input.stopLossPct ?? strategy.riskRules.stopLossPct,
+      takeProfitPct: input.takeProfitPct ?? strategy.riskRules.takeProfitPct,
+      trailingStopPct: input.trailingStopPct ?? strategy.riskRules.trailingStopPct,
+      maxBarsInTrade: input.maxBarsInTrade ?? strategy.riskRules.maxBarsInTrade
+    }
+  }, `RSI EMA Hybrid ${input.fast}/${input.slow} RSI${input.rsiPeriod}`);
+}
+
 function applyRequestedSidePreference(strategy: StrategyDefinition, goal: string) {
   const sideBias = extractRequestedSideBias(goal);
   if (sideBias === "long_only") {
@@ -626,6 +782,71 @@ function extractMessageText(output: unknown) {
   return "";
 }
 
+type PromptStreamResult = {
+  content: string;
+  reasoning: string;
+};
+
+function consumeTaggedContentChunk(
+  state: { mode: "content" | "thinking"; buffer: string },
+  chunk: string,
+  callbacks?: AgentRunStreamCallbacks
+) {
+  state.buffer += chunk;
+  let contentDelta = "";
+  let thinkingDelta = "";
+
+  while (state.buffer.length > 0) {
+    if (state.mode === "content") {
+      const thinkIndex = state.buffer.indexOf("<think>");
+      if (thinkIndex >= 0) {
+        const before = state.buffer.slice(0, thinkIndex);
+        if (before) {
+          callbacks?.emit({ type: "content_delta", text: before });
+          contentDelta += before;
+        }
+        state.buffer = state.buffer.slice(thinkIndex + "<think>".length);
+        state.mode = "thinking";
+        continue;
+      }
+
+      if (state.buffer.length > 16) {
+        const safe = state.buffer.slice(0, -16);
+        if (safe) {
+          callbacks?.emit({ type: "content_delta", text: safe });
+          contentDelta += safe;
+        }
+        state.buffer = state.buffer.slice(-16);
+      }
+      break;
+    }
+
+    const endThinkIndex = state.buffer.indexOf("</think>");
+    if (endThinkIndex >= 0) {
+      const thought = state.buffer.slice(0, endThinkIndex);
+      if (thought) {
+        callbacks?.emit({ type: "thinking_delta", text: thought });
+        thinkingDelta += thought;
+      }
+      state.buffer = state.buffer.slice(endThinkIndex + "</think>".length);
+      state.mode = "content";
+      continue;
+    }
+
+    if (state.buffer.length > 16) {
+      const safe = state.buffer.slice(0, -16);
+      if (safe) {
+        callbacks?.emit({ type: "thinking_delta", text: safe });
+        thinkingDelta += safe;
+      }
+      state.buffer = state.buffer.slice(-16);
+    }
+    break;
+  }
+
+  return { contentDelta, thinkingDelta };
+}
+
 function parseOptimizationCandidates(text: string): OptimizationCandidate[] {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
@@ -655,6 +876,7 @@ function isStrategyMarketAnalysis(value: unknown): value is StrategyMarketAnalys
 }
 
 function chooseFallbackKind(goal: string, marketAnalysis?: StrategyMarketAnalysis): StrategyIdeaKind {
+  if (goalLooksLikeRsiEmaHybrid(goal)) return "ema";
   if (goalLooksLikeEmaCrossover(goal)) return "ema";
   const explicit = detectBasicFastPath(goal);
   if (explicit?.kind === "template" && explicit.templateId) {
@@ -673,6 +895,33 @@ function buildAnalysisGuidedCreationPlan(input: {
   const timeframe = resolvePreferredTimeframe(input.preferredTimeframe, input.marketAnalysis);
   const sideBias = extractRequestedSideBias(input.goal) ?? "both";
   const riskRules = resolveRiskRulesForGoal(timeframe, input.goal);
+  if (goalLooksLikeRsiEmaHybrid(input.goal)) {
+    const suggestion = input.marketAnalysis?.emaSuggestion;
+    const base = buildTemporaryStrategy({
+      ownerAddress: input.ownerAddress,
+      marketId: input.marketId,
+      name: "RSI EMA Hybrid Strategy",
+      timeframe
+    });
+    const draft = buildRsiEmaHybridDraft(base, {
+      fast: suggestion?.fastPeriod ?? 9,
+      slow: suggestion?.slowPeriod ?? 21,
+      rsiPeriod: 14,
+      longRsiMin: 55,
+      shortRsiMax: 45,
+      longExitRsi: 45,
+      shortExitRsi: 55,
+      timeframe,
+      ...riskRules
+    });
+
+    return {
+      mode: "create_custom" as const,
+      name: draft.name,
+      strategyPatch: applyRequestedSidePreference(draft, input.goal)
+    };
+  }
+
   const preferredKind = chooseFallbackKind(input.goal, input.marketAnalysis);
 
   if (preferredKind === "ema") {
@@ -764,6 +1013,9 @@ function collectArtifactsFromTrace(
 type CompletionEnforcementOptions = {
   ownerAddress: string;
   marketId?: string;
+  chartBars?: number;
+  chartFromTs?: number;
+  chartToTs?: number;
   goal: string;
   finalMessage: string;
   trace: AgentToolTraceEntry[];
@@ -935,7 +1187,7 @@ async function enforceCompletion(options: CompletionEnforcementOptions): Promise
   trace: AgentToolTraceEntry[];
   finalMessageAddition: string;
 }> {
-  const { ownerAddress, marketId, goal, trace, artifacts, metrics, warnings, matcherTransport, model, capabilities } = options;
+  const { ownerAddress, marketId, chartBars, goal, trace, artifacts, metrics, warnings, matcherTransport, model, capabilities } = options;
   let finalMessageAddition = "";
   let finalMessage = options.finalMessage;
   let currentStrategyId = artifacts.strategyId;
@@ -1095,14 +1347,24 @@ async function enforceCompletion(options: CompletionEnforcementOptions): Promise
       const entry: AgentToolTraceEntry = {
         step: trace.length + 1,
         tool: "run_strategy_backtest",
-        input: { ownerAddress, strategyId: currentStrategyId },
+        input: {
+          ownerAddress,
+          strategyId: currentStrategyId,
+          ...(typeof chartBars === "number" && chartBars > 0 ? { bars: chartBars } : {}),
+          ...(resolveChartRange(options) ?? {})
+        },
         reason: "Enforce requested backtest before finalization",
         expectedArtifact: "backtest summary",
         startedAt: new Date().toISOString()
       };
       trace.push(entry);
       try {
-        const result = await matcherTransport("run_strategy_backtest", { ownerAddress: ownerAddress as HexString, strategyId: currentStrategyId });
+        const result = await matcherTransport("run_strategy_backtest", {
+          ownerAddress: ownerAddress as HexString,
+          strategyId: currentStrategyId,
+          ...(typeof chartBars === "number" && chartBars > 0 ? { bars: chartBars } : {}),
+          ...(resolveChartRange(options) ?? {})
+        });
         entry.output = result as Record<string, unknown>;
         entry.completedAt = new Date().toISOString();
         Object.assign(entry, summarizeToolProgress(entry));
@@ -1202,8 +1464,145 @@ export class StrategyAgentService {
     };
   }
 
-  private async invokePlanningModel(prompt: string) {
-    return await this.planningModel.invoke(prompt);
+  private async invokePlanningModel(prompt: string, stream?: AgentRunStreamCallbacks) {
+    if (!stream) {
+      return await this.planningModel.invoke(prompt);
+    }
+
+    const result = await this.invokePromptViaStreaming(prompt, {
+      stream,
+      statusLabel: "Thinking with model..."
+    });
+    return { content: result.content };
+  }
+
+  private async invokePromptViaStreaming(
+    prompt: string,
+    options: {
+      stream: AgentRunStreamCallbacks;
+      statusLabel?: string;
+      maxTokens?: number;
+    }
+  ): Promise<PromptStreamResult> {
+    const normalizedBase = this.options.modelBaseUrl.replace(/\/+$/, "");
+    const url = `${normalizedBase}/chat/completions`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.options.modelApiKey}`
+      },
+      body: JSON.stringify({
+        model: this.options.modelName,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0,
+        max_tokens: options.maxTokens ?? 2048,
+        stream: true
+      })
+    });
+
+    if (!response.ok || !response.body) {
+      throw new Error(`Model streaming request failed with HTTP ${response.status}`);
+    }
+
+    options.stream.emit({
+      type: "status",
+      message: options.statusLabel ?? "Waiting for model..."
+    });
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let sseBuffer = "";
+    let finalContent = "";
+    let finalReasoning = "";
+    const tagState: { mode: "content" | "thinking"; buffer: string } = {
+      mode: "content",
+      buffer: ""
+    };
+
+    const flushTaggedBuffer = () => {
+      if (!tagState.buffer) return;
+      if (tagState.mode === "thinking") {
+        options.stream.emit({ type: "thinking_delta", text: tagState.buffer });
+        finalReasoning += tagState.buffer;
+      } else {
+        options.stream.emit({ type: "content_delta", text: tagState.buffer });
+        finalContent += tagState.buffer;
+      }
+      tagState.buffer = "";
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      sseBuffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+
+      let boundaryIndex = sseBuffer.indexOf("\n\n");
+      while (boundaryIndex >= 0) {
+        const rawEvent = sseBuffer.slice(0, boundaryIndex);
+        sseBuffer = sseBuffer.slice(boundaryIndex + 2);
+
+        const data = rawEvent
+          .split("\n")
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice(5).trim())
+          .join("");
+
+        if (!data || data === "[DONE]") {
+          boundaryIndex = sseBuffer.indexOf("\n\n");
+          continue;
+        }
+
+        try {
+          const payload = JSON.parse(data) as {
+            choices?: Array<{
+              delta?: {
+                content?: string | null;
+                reasoning_content?: string | null;
+              };
+              message?: {
+                content?: string | null;
+                reasoning_content?: string | null;
+              };
+            }>;
+          };
+          const choice = payload.choices?.[0];
+          const delta = choice?.delta ?? choice?.message;
+          const reasoningChunk = typeof delta?.reasoning_content === "string" ? delta.reasoning_content : "";
+          const contentChunk = typeof delta?.content === "string" ? delta.content : "";
+
+          if (reasoningChunk) {
+            finalReasoning += reasoningChunk;
+            options.stream.emit({ type: "thinking_delta", text: reasoningChunk });
+          }
+
+          if (contentChunk) {
+            if (reasoningChunk) {
+              finalContent += contentChunk;
+              options.stream.emit({ type: "content_delta", text: contentChunk });
+            } else {
+              const tagged = consumeTaggedContentChunk(tagState, contentChunk, options.stream);
+              finalContent += tagged.contentDelta;
+              finalReasoning += tagged.thinkingDelta;
+            }
+          }
+        } catch {
+          // Ignore malformed non-JSON keepalive chunks.
+        }
+
+        boundaryIndex = sseBuffer.indexOf("\n\n");
+      }
+
+      if (done) {
+        break;
+      }
+    }
+
+    flushTaggedBuffer();
+
+    return {
+      content: finalContent,
+      reasoning: finalReasoning
+    };
   }
 
   async getCapabilities() {
@@ -1334,13 +1733,14 @@ Return JSON like:
     };
   }
 
-  async run(input: AgentStrategyRequest): Promise<AgentResponse> {
+  async run(input: AgentStrategyRequest, stream?: AgentRunStreamCallbacks): Promise<AgentResponse> {
     const requestId = crypto.randomUUID();
     const trace: AgentToolTraceEntry[] = [];
     const warnings: string[] = [];
     let artifacts: AgentResponse["artifacts"] = {};
     let metrics = createEmptyMetrics();
     const session = this.sessions.getOrCreate(input);
+    stream?.emit({ type: "status", message: "Starting agent workflow..." });
     this.sessions.addTurn(session, {
       role: "user",
       mode: "run",
@@ -1359,7 +1759,7 @@ Return JSON like:
           : (input.strategyId ?? sessionSnapshot.strategyId)
     };
 
-    const fastPathResult = await this.tryRunFastPath(activeInput, trace, warnings, metrics);
+    const fastPathResult = await this.tryRunFastPath(activeInput, trace, warnings, metrics, stream);
     if (fastPathResult) {
       artifacts = collectArtifactsFromTrace(trace, fastPathResult.artifacts);
       metrics = finalizeMetrics(metrics, trace);
@@ -1388,7 +1788,7 @@ Return JSON like:
       };
     }
 
-    const optimizationFastPathResult = await this.tryRunOptimizationFastPath(activeInput, trace, warnings, metrics);
+    const optimizationFastPathResult = await this.tryRunOptimizationFastPath(activeInput, trace, warnings, metrics, stream);
     if (optimizationFastPathResult) {
       artifacts = collectArtifactsFromTrace(trace, optimizationFastPathResult.artifacts);
       metrics = finalizeMetrics(metrics, trace);
@@ -1417,7 +1817,7 @@ Return JSON like:
       };
     }
 
-    if (!this.options.forceFallbackJson) {
+    if (!stream && !this.options.forceFallbackJson) {
       try {
         const nativeResult = await this.runNativeToolAgent(activeInput, trace, sessionSnapshot);
         if (trace.length > 0) {
@@ -1429,6 +1829,9 @@ Return JSON like:
           const enforcement = await enforceCompletion({
             ownerAddress: activeInput.ownerAddress,
             marketId: activeInput.marketId,
+            chartBars: activeInput.chartBars,
+            chartFromTs: activeInput.chartFromTs,
+            chartToTs: activeInput.chartToTs,
             goal: activeInput.goal,
             finalMessage: nativeResult.finalMessage,
             trace,
@@ -1483,11 +1886,32 @@ Return JSON like:
       ownerAddress: activeInput.ownerAddress,
       marketId: activeInput.marketId,
       preferredTimeframe: activeInput.preferredTimeframe,
+      chartBars: activeInput.chartBars,
       strategyId: activeInput.strategyId,
       session: sessionSnapshot,
         maxSteps: this.options.maxSteps,
         trace,
         metrics,
+        invokeText: stream
+          ? async (prompt) => {
+              const result = await this.invokePromptViaStreaming(prompt, {
+                stream,
+                statusLabel: "Reasoning with model..."
+              });
+              return result.content;
+            }
+          : undefined,
+        onStatus: stream ? (message) => stream.emit({ type: "status", message }) : undefined,
+        onTool: stream
+          ? (event) =>
+              stream.emit({
+                type: "tool",
+                phase: event.phase,
+                tool: event.tool,
+                step: event.step,
+                message: event.message
+              })
+          : undefined,
         invokeTool: async (toolName, rawInput) => {
           return this.matcherTransport(toolName, rawInput as never) as Promise<Record<string, unknown>>;
         }
@@ -1662,7 +2086,8 @@ Return JSON like:
     input: AgentStrategyRequest,
     trace: AgentToolTraceEntry[],
     warnings: string[],
-    metrics: AgentResponse["metrics"]
+    metrics: AgentResponse["metrics"],
+    stream?: AgentRunStreamCallbacks
   ): Promise<{ finalMessage: string; artifacts: AgentResponse["artifacts"] } | null> {
     if (!input.marketId || (input.strategyId && !goalLooksLikeFreshCreation(input.goal))) {
       return null;
@@ -1693,7 +2118,12 @@ Return JSON like:
     const marketAnalysisEntry: AgentToolTraceEntry = {
       step: trace.length + 1,
       tool: "analyze_market_context",
-      input: { ownerAddress: input.ownerAddress, marketId: input.marketId },
+      input: {
+        ownerAddress: input.ownerAddress,
+        marketId: input.marketId,
+        ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
+        ...(resolveChartRange(input) ?? {})
+      },
       reason: "Creation fast path: inspect supports, resistances, regime, and timeframe before drafting",
       expectedArtifact: "market analysis",
       startedAt: new Date().toISOString()
@@ -1703,7 +2133,9 @@ Return JSON like:
     try {
       const marketAnalysisResult = await this.matcherTransport("analyze_market_context", {
         ownerAddress: input.ownerAddress as HexString,
-        marketId: input.marketId as HexString
+        marketId: input.marketId as HexString,
+        ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
+        ...(resolveChartRange(input) ?? {})
       });
       marketAnalysisEntry.output = marketAnalysisResult as Record<string, unknown>;
       marketAnalysisEntry.completedAt = new Date().toISOString();
@@ -1753,7 +2185,7 @@ Return JSON like:
             }))
           : []
       });
-      const response = await this.invokePlanningModel(creationPrompt);
+      const response = await this.invokePlanningModel(creationPrompt, stream);
       creationPlan = parseCreationPlan(extractMessageText(response));
     } catch (error) {
       warnings.push(`Model-guided creation planning failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -1972,7 +2404,9 @@ Return JSON like:
         tool: "run_strategy_backtest",
         input: {
           ownerAddress: input.ownerAddress,
-          strategyId: finalStrategy.id
+          strategyId: finalStrategy.id,
+          ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
+          ...(resolveChartRange(input) ?? {})
         },
         reason: "Fast path: run requested backtest",
         expectedArtifact: "backtest summary",
@@ -1982,7 +2416,9 @@ Return JSON like:
 
       const backtest = await this.matcherTransport("run_strategy_backtest", {
         ownerAddress: input.ownerAddress as HexString,
-        strategyId: finalStrategy.id
+        strategyId: finalStrategy.id,
+        ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
+        ...(resolveChartRange(input) ?? {})
       });
       backtestEntry.output = backtest as Record<string, unknown>;
       backtestEntry.completedAt = new Date().toISOString();
@@ -2010,7 +2446,8 @@ Return JSON like:
     input: AgentStrategyRequest,
     trace: AgentToolTraceEntry[],
     warnings: string[],
-    metrics: AgentResponse["metrics"]
+    metrics: AgentResponse["metrics"],
+    stream?: AgentRunStreamCallbacks
   ): Promise<{ finalMessage: string; artifacts: AgentResponse["artifacts"] } | null> {
     if (!input.strategyId || !goalLooksLikeOptimization(input.goal)) {
       return null;
@@ -2057,7 +2494,9 @@ Return JSON like:
       tool: "analyze_market_context",
       input: {
         ownerAddress: input.ownerAddress,
-        marketId: baseStrategy.marketId
+        marketId: baseStrategy.marketId,
+        ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
+        ...(resolveChartRange(input) ?? {})
       },
       reason: "Optimization fast path: inspect regime and timeframe before parameter search",
       expectedArtifact: "market analysis",
@@ -2068,7 +2507,9 @@ Return JSON like:
     try {
       const analysisResult = await this.matcherTransport("analyze_market_context", {
         ownerAddress: input.ownerAddress as HexString,
-        marketId: baseStrategy.marketId
+        marketId: baseStrategy.marketId,
+        ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
+        ...(resolveChartRange(input) ?? {})
       });
       marketAnalysisEntry.output = analysisResult as Record<string, unknown>;
       marketAnalysisEntry.completedAt = new Date().toISOString();
@@ -2092,7 +2533,9 @@ Return JSON like:
         tool: "run_strategy_backtest",
         input: {
           ownerAddress: input.ownerAddress,
-          strategyId: baseStrategy.id
+          strategyId: baseStrategy.id,
+          ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
+          ...(resolveChartRange(input) ?? {})
         },
         reason: "Optimization fast path: get current baseline before proposing changes",
         expectedArtifact: "backtest summary",
@@ -2102,7 +2545,9 @@ Return JSON like:
 
       const baseline = await this.matcherTransport("run_strategy_backtest", {
         ownerAddress: input.ownerAddress as HexString,
-        strategyId: baseStrategy.id
+        strategyId: baseStrategy.id,
+        ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
+        ...(resolveChartRange(input) ?? {})
       });
       baselineEntry.output = baseline as Record<string, unknown>;
       baselineEntry.completedAt = new Date().toISOString();
@@ -2122,7 +2567,7 @@ Return JSON like:
         preferredTimeframe: input.preferredTimeframe,
         marketAnalysis: marketAnalysis as unknown as Record<string, unknown> | undefined
       });
-      const response = await this.invokePlanningModel(optimizationPrompt);
+      const response = await this.invokePlanningModel(optimizationPrompt, stream);
       candidateConfigs = parseOptimizationCandidates(extractMessageText(response));
     } catch (error) {
       warnings.push(`Model-guided optimization planning failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -2317,7 +2762,9 @@ Return JSON like:
         tool: "run_strategy_backtest",
         input: {
           ownerAddress: input.ownerAddress,
-          strategyId: candidate.id
+          strategyId: candidate.id,
+          ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
+          ...(resolveChartRange(input) ?? {})
         },
         reason: "Optimization fast path: score candidate by backtest result",
         expectedArtifact: "backtest summary",
@@ -2327,7 +2774,9 @@ Return JSON like:
 
       const backtest = await this.matcherTransport("run_strategy_backtest", {
         ownerAddress: input.ownerAddress as HexString,
-        strategyId: candidate.id
+        strategyId: candidate.id,
+        ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
+        ...(resolveChartRange(input) ?? {})
       });
       backtestEntry.output = backtest as Record<string, unknown>;
       backtestEntry.completedAt = new Date().toISOString();

@@ -67,11 +67,15 @@ export async function runFallbackJsonLoop(options: {
   ownerAddress: string;
   marketId?: string;
   preferredTimeframe?: string;
+  chartBars?: number;
   strategyId?: string;
   session?: AgentSessionSnapshot;
   maxSteps: number;
   trace: AgentToolTraceEntry[];
   invokeTool: (tool: StrategyToolName, input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  invokeText?: (prompt: string) => Promise<string>;
+  onStatus?: (message: string) => void;
+  onTool?: (event: { phase: "start" | "done" | "error"; tool: string; step?: number; message?: string }) => void;
   metrics?: AgentExecutionMetrics;
 }) {
   const warnings: string[] = [];
@@ -100,6 +104,7 @@ export async function runFallbackJsonLoop(options: {
       ownerAddress: options.ownerAddress,
       marketId: options.marketId,
       preferredTimeframe: options.preferredTimeframe,
+      chartBars: options.chartBars,
       strategyId: activeStrategyId,
       runId: activeRunId,
       session: options.session,
@@ -109,8 +114,10 @@ export async function runFallbackJsonLoop(options: {
       remainingValidationIssues: remainingValidationIssues.length > 0 ? remainingValidationIssues : undefined
     });
 
-    const message = await options.model.invoke(prompt);
-    const rawText = extractTextContent(message);
+    options.onStatus?.(`Reasoning step ${index + 1}/${options.maxSteps}...`);
+    const rawText = options.invokeText
+      ? await options.invokeText(prompt)
+      : extractTextContent(await options.model.invoke(prompt));
     console.log(`[FALLBACK] Step ${index + 1}/${options.maxSteps} LLM response:`, rawText.slice(0, 500));
     let decision: AgentDecision;
     try {
@@ -165,6 +172,12 @@ export async function runFallbackJsonLoop(options: {
       startedAt: new Date().toISOString()
     };
     options.trace.push(traceEntry);
+    options.onTool?.({
+      phase: "start",
+      tool: decision.next_tool,
+      step: traceEntry.step,
+      message: decision.why
+    });
 
     try {
       const output = await options.invokeTool(decision.next_tool, toolInput);
@@ -174,6 +187,12 @@ export async function runFallbackJsonLoop(options: {
       traceEntry.progressObserved = progress.progressObserved;
       traceEntry.resultSummary = progress.resultSummary;
       metrics.successfulToolCalls += 1;
+      options.onTool?.({
+        phase: "done",
+        tool: decision.next_tool,
+        step: traceEntry.step,
+        message: progress.resultSummary
+      });
       console.log(`[FALLBACK] Step ${index + 1} ${decision.next_tool} succeeded, output keys:`, Object.keys(output ?? {}));
 
       if (typeof output.strategy === "object" && output.strategy && "id" in output.strategy) {
@@ -212,6 +231,12 @@ export async function runFallbackJsonLoop(options: {
       traceEntry.progressObserved = false;
       traceEntry.resultSummary = traceEntry.error.message;
       metrics.failedToolCalls += 1;
+      options.onTool?.({
+        phase: "error",
+        tool: decision.next_tool,
+        step: traceEntry.step,
+        message: traceEntry.error.message
+      });
       console.log(`[FALLBACK] Step ${index + 1} ${decision.next_tool} FAILED:`, error instanceof Error ? error.message : String(error));
       throw error;
     }

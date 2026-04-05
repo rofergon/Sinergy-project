@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { StrategyTimeframe } from "@sinergy/shared";
-import type { StrategyBacktestBundle, MarketSnapshot } from "../types";
+import type { ChartViewport, StrategyBacktestBundle, MarketSnapshot } from "../types";
 import { TradingViewChart } from "./TradingViewChart";
 import { BottomTabs } from "./BottomTabs";
 import { StrategyPanel } from "./StrategyPanel";
@@ -46,6 +46,7 @@ export function StrategyStudio({
 }: Props) {
   const [focusStrategyId, setFocusStrategyId] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
+  const [viewport, setViewport] = useState<ChartViewport | null>(null);
 
   const selectedMarket = useMemo(
     () => markets.find((market) => market.id === selectedMarketId) ?? markets[0],
@@ -104,6 +105,7 @@ export function StrategyStudio({
               timeframe={timeframe}
               onTimeframeChange={onTimeframeChange}
               overlay={strategyBacktest?.overlay ?? null}
+              onVisibleBarsChange={setViewport}
             />
             <BottomTabs
               address={address}
@@ -123,6 +125,7 @@ export function StrategyStudio({
                 markets={markets}
                 selectedMarketId={selectedMarket?.id}
                 timeframe={timeframe}
+                viewport={viewport}
                 onSelectMarket={onSelectMarket}
                 onTimeframeChange={onTimeframeChange}
                 onBacktestResult={onBacktestResult}
@@ -134,6 +137,7 @@ export function StrategyStudio({
                 address={address}
                 selectedMarket={selectedMarket}
                 selectedTimeframe={timeframe}
+                viewport={viewport}
                 onBacktestResult={onBacktestResult}
                 onTimeframeChange={onTimeframeChange}
                 onReviewStrategy={reviewStrategy}

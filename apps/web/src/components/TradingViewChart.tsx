@@ -15,13 +15,14 @@ import {
   type UTCTimestamp
 } from "lightweight-charts";
 import { api } from "../lib/api";
-import type { MarketSnapshot } from "../types";
+import type { ChartViewport, MarketSnapshot } from "../types";
 
 type Props = {
   market?: MarketSnapshot;
   timeframe: StrategyTimeframe;
   onTimeframeChange: (timeframe: StrategyTimeframe) => void;
   overlay?: StrategyChartOverlay | null;
+  onVisibleBarsChange?: (viewport: ChartViewport | null) => void;
 };
 
 type Candle = {
@@ -97,15 +98,15 @@ function candleRequestLimit(timeframe: StrategyTimeframe, mode: "initial" | "ref
     case "1m":
       return mode === "refresh" ? 240 : 720;
     case "5m":
-      return mode === "refresh" ? 240 : 720;
+      return mode === "refresh" ? 480 : 1440;
     case "15m":
-      return mode === "refresh" ? 320 : 960;
+      return mode === "refresh" ? 640 : 1920;
     case "1h":
-      return mode === "refresh" ? 240 : 720;
+      return mode === "refresh" ? 480 : 1440;
     case "4h":
-      return mode === "refresh" ? 180 : 540;
+      return mode === "refresh" ? 360 : 1080;
     case "1d":
-      return mode === "refresh" ? 120 : 365;
+      return mode === "refresh" ? 240 : 730;
   }
 }
 
@@ -129,7 +130,13 @@ function mergeCandles(existing: Candle[], incoming: Candle[]) {
   return [...merged.values()].sort((left, right) => Number(left.time) - Number(right.time));
 }
 
-export function TradingViewChart({ market, timeframe, onTimeframeChange, overlay }: Props) {
+export function TradingViewChart({
+  market,
+  timeframe,
+  onTimeframeChange,
+  overlay,
+  onVisibleBarsChange
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<SeriesType> | null>(null);
@@ -187,6 +194,41 @@ export function TradingViewChart({ market, timeframe, onTimeframeChange, overlay
         value: number;
       } => item !== null);
   }, [activeOverlay]);
+
+  const emitVisibleBars = useCallback(
+    (range: LogicalRange | null, sourceCandles: Candle[]) => {
+      if (!onVisibleBarsChange) return;
+      if (sourceCandles.length <= 0) {
+        onVisibleBarsChange(null);
+        return;
+      }
+      if (!range) {
+        onVisibleBarsChange({
+          bars: sourceCandles.length,
+          fromTs: Number(sourceCandles[0].time),
+          toTs: Number(sourceCandles[sourceCandles.length - 1].time)
+        });
+        return;
+      }
+
+      const startIndex = Math.max(0, Math.floor(range.from));
+      const endIndex = Math.min(sourceCandles.length - 1, Math.ceil(range.to));
+      const startCandle = sourceCandles[startIndex];
+      const endCandle = sourceCandles[endIndex];
+
+      if (!startCandle || !endCandle) {
+        onVisibleBarsChange(null);
+        return;
+      }
+
+      onVisibleBarsChange({
+        bars: Math.max(1, endIndex - startIndex + 1),
+        fromTs: Number(startCandle.time),
+        toTs: Number(endCandle.time)
+      });
+    },
+    [onVisibleBarsChange]
+  );
 
   const loadCandles = useCallback(
     async (mode: "initial" | "refresh" | "older") => {
@@ -430,9 +472,12 @@ export function TradingViewChart({ market, timeframe, onTimeframeChange, overlay
         chart.timeScale().setVisibleLogicalRange(visibleRangeRef.current);
       }
 
+      emitVisibleBars(visibleRangeRef.current, chartCandles);
+
       chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
         if (!range) return;
         visibleRangeRef.current = range as LogicalRange;
+        emitVisibleBars(visibleRangeRef.current, candlesRef.current.length > 0 ? candlesRef.current : chartCandles);
 
         if (
           range.from < 50 &&
@@ -456,7 +501,7 @@ export function TradingViewChart({ market, timeframe, onTimeframeChange, overlay
 
     ro.observe(containerRef.current);
     cleanupRef.current = () => ro.disconnect();
-  }, [activeOverlay, candles, chartType, loadCandles, market, timeframe]);
+  }, [activeOverlay, candles, chartType, emitVisibleBars, loadCandles, market, timeframe]);
 
   useEffect(() => {
     buildChart();

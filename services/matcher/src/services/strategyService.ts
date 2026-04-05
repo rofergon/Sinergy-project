@@ -76,7 +76,13 @@ export class StrategyService {
     return this.capabilities;
   }
 
-  analyzeMarketContext(input: { ownerAddress: HexString; marketId: HexString }): StrategyMarketAnalysis {
+  analyzeMarketContext(input: {
+    ownerAddress: HexString;
+    marketId: HexString;
+    bars?: number;
+    fromTs?: number;
+    toTs?: number;
+  }): StrategyMarketAnalysis {
     this.assertOwnerAddress(input.ownerAddress);
     this.assertKnownMarket(input.marketId);
 
@@ -88,10 +94,18 @@ export class StrategyService {
     }
 
     const timeframes: StrategyTimeframe[] = ["1m", "5m", "15m", "1h", "4h", "1d"];
+    const bars = input.bars ?? 240;
     const candlesByTimeframe = Object.fromEntries(
       timeframes.map((timeframe) => [
         timeframe,
-        this.options.priceService.getCandles(market.baseToken.symbol, timeframe, 240).map((bar) => ({
+        this.options.priceService.getCandles(
+          market.baseToken.symbol,
+          timeframe,
+          bars,
+          input.fromTs !== undefined && input.toTs !== undefined
+            ? { fromTs: input.fromTs, toTs: input.toTs }
+            : undefined
+        ).map((bar) => ({
           ts: Number(bar.ts),
           open: Number(bar.open),
           high: Number(bar.high),
@@ -298,7 +312,13 @@ export class StrategyService {
     };
   }
 
-  runBacktest(input: { ownerAddress: HexString; strategyId: string; bars?: number }) {
+  runBacktest(input: {
+    ownerAddress: HexString;
+    strategyId: string;
+    bars?: number;
+    fromTs?: number;
+    toTs?: number;
+  }) {
     this.assertOwnerAddress(input.ownerAddress);
     const strategy = this.getStrategy(input.strategyId, input.ownerAddress);
     const validation = validateStrategyDefinition(
@@ -338,7 +358,14 @@ export class StrategyService {
     }
 
     const candles = this.options.priceService
-      .getCandles(market.baseToken.symbol, strategy.timeframe, bars)
+      .getCandles(
+        market.baseToken.symbol,
+        strategy.timeframe,
+        bars,
+        input.fromTs !== undefined && input.toTs !== undefined
+          ? { fromTs: input.fromTs, toTs: input.toTs }
+          : undefined
+      )
       .map((bar) => ({
         ts: Number(bar.ts),
         open: Number(bar.open),

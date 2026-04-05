@@ -34,6 +34,12 @@ export type MarketSnapshot = Market & {
   volumeLabel: string;
 };
 
+export type ChartViewport = {
+  bars: number;
+  fromTs: number;
+  toTs: number;
+};
+
 export type StrategyBacktestBundle = {
   summary: StrategyBacktestSummary;
   trades: StrategyBacktestTrade[];

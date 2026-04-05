@@ -5,6 +5,7 @@ import type {
   StrategyOperand,
   StrategyOverlayPane,
   StrategyOverlaySeries,
+  StrategyRule,
   StrategyRuleGroup
 } from "@sinergy/shared";
 
@@ -267,8 +268,8 @@ function indicatorColor(ref: IndicatorReference) {
   return palette[ref.indicator];
 }
 
-function indicatorPane(ref: IndicatorReference): StrategyOverlayPane {
-  switch (ref.indicator) {
+function paneForIndicator(indicator: StrategyIndicatorKind): StrategyOverlayPane {
+  switch (indicator) {
     case "rsi":
     case "macd":
     case "candle_body_pct":
@@ -279,13 +280,96 @@ function indicatorPane(ref: IndicatorReference): StrategyOverlayPane {
   }
 }
 
+function indicatorPane(ref: IndicatorReference): StrategyOverlayPane {
+  return paneForIndicator(ref.indicator);
+}
+
+function buildConstantOverlayKey(indicator: StrategyIndicatorKind, value: number) {
+  return `constant:${indicator}:${value}`;
+}
+
+function buildConstantOverlayLabel(indicator: StrategyIndicatorKind, value: number) {
+  return `${indicator.toUpperCase()} level ${value}`;
+}
+
+function buildConstantOverlayColor(indicator: StrategyIndicatorKind, value: number) {
+  if (indicator === "rsi") {
+    if (value >= 70) return "#f6465d";
+    if (value <= 30) return "#0ecb81";
+  }
+  return "#94a3b8";
+}
+
+function isOscillatorIndicatorOperand(
+  operand: StrategyOperand
+): operand is Extract<StrategyOperand, { type: "indicator_output" }> {
+  return operand.type === "indicator_output" && paneForIndicator(operand.indicator) === "oscillator";
+}
+
+function ruleConstantOverlay(
+  candles: StrategyCandle[],
+  rule: StrategyRule
+): StrategyOverlaySeries | null {
+  if (isOscillatorIndicatorOperand(rule.left) && rule.right.type === "constant") {
+    const value = rule.right.value;
+    if (!Number.isFinite(value)) return null;
+    return {
+      id: buildConstantOverlayKey(rule.left.indicator, value),
+      label: buildConstantOverlayLabel(rule.left.indicator, value),
+      color: buildConstantOverlayColor(rule.left.indicator, value),
+      seriesType: "line",
+      pane: "oscillator",
+      values: candles.map((candle) => ({ time: candle.ts, value }))
+    };
+  }
+
+  if (isOscillatorIndicatorOperand(rule.right) && rule.left.type === "constant") {
+    const value = rule.left.value;
+    if (!Number.isFinite(value)) return null;
+    return {
+      id: buildConstantOverlayKey(rule.right.indicator, value),
+      label: buildConstantOverlayLabel(rule.right.indicator, value),
+      color: buildConstantOverlayColor(rule.right.indicator, value),
+      seriesType: "line",
+      pane: "oscillator",
+      values: candles.map((candle) => ({ time: candle.ts, value }))
+    };
+  }
+
+  return null;
+}
+
+function collectConstantOverlaysFromGroups(
+  candles: StrategyCandle[],
+  groups: StrategyRuleGroup[],
+  overlays: Map<string, StrategyOverlaySeries>
+) {
+  for (const group of groups) {
+    for (const rule of group.rules) {
+      const overlay = ruleConstantOverlay(candles, rule);
+      if (overlay) {
+        overlays.set(overlay.id, overlay);
+      }
+    }
+  }
+}
+
+function buildConstantOverlays(candles: StrategyCandle[], strategy: StrategyDefinition): StrategyOverlaySeries[] {
+  const overlays = new Map<string, StrategyOverlaySeries>();
+  collectConstantOverlaysFromGroups(candles, strategy.entryRules.long, overlays);
+  collectConstantOverlaysFromGroups(candles, strategy.entryRules.short, overlays);
+  collectConstantOverlaysFromGroups(candles, strategy.exitRules.long, overlays);
+  collectConstantOverlaysFromGroups(candles, strategy.exitRules.short, overlays);
+  return [...overlays.values()];
+}
+
 export function buildIndicatorOverlays(
   candles: StrategyCandle[],
   strategy: StrategyDefinition,
   seriesMap: IndicatorSeriesMap
 ): StrategyOverlaySeries[] {
   const refs = collectIndicatorReferences(strategy);
-  return refs.map((ref) => ({
+  const indicatorOverlays: StrategyOverlaySeries[] = refs.map((ref) => ({
     id: ref.key,
     label: indicatorLabel(ref),
     color: indicatorColor(ref),
@@ -296,6 +380,7 @@ export function buildIndicatorOverlays(
       return value === null || value === undefined ? [] : [{ time: candle.ts, value }];
     })
   }));
+  return [...indicatorOverlays, ...buildConstantOverlays(candles, strategy)];
 }
 
 export function resolveOperandValue(

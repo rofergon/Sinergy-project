@@ -317,6 +317,35 @@ function validateRuleGroups(
   });
 }
 
+function canonicalizeOperand(operand: StrategyOperand): string {
+  if (operand.type === "constant") {
+    return `constant:${operand.value}`;
+  }
+
+  if (operand.type === "price_field") {
+    return `price:${operand.field}`;
+  }
+
+  const params = Object.entries(operand.params ?? {})
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}:${value}`)
+    .join(",");
+
+  return `indicator:${operand.indicator}:${operand.output}:${params}`;
+}
+
+function canonicalizeRuleGroups(groups: StrategyRuleGroup[]): string {
+  return JSON.stringify(
+    groups.map((group) => ({
+      rules: group.rules.map((rule) => ({
+        left: canonicalizeOperand(rule.left),
+        operator: rule.operator,
+        right: canonicalizeOperand(rule.right)
+      }))
+    }))
+  );
+}
+
 export function validateStrategyDefinition(
   strategy: StrategyDefinition,
   marketIds: Set<string>,
@@ -401,6 +430,20 @@ export function validateStrategyDefinition(
         "Add a rule like EMA 9 crosses above EMA 21."
       );
     }
+  }
+
+  if (
+    strategy.enabledSides.includes("long") &&
+    strategy.enabledSides.includes("short") &&
+    canonicalizeRuleGroups(strategy.entryRules.long) === canonicalizeRuleGroups(strategy.entryRules.short)
+  ) {
+    pushIssue(
+      issues,
+      "entryRules.short",
+      "ambiguous_dual_side_entries",
+      "Long and short entry rules are identical, so both sides trigger together and no position can be opened.",
+      "Use the inverse condition for short entries, for example EMA fast crosses_below EMA slow."
+    );
   }
 
   validateRuleGroups(strategy.entryRules.long, "entryRules.long", issues, capabilities);

@@ -16,6 +16,9 @@ type InitiaDexClientDeps = {
   keyName?: string;
   keyringBackend?: string;
   keyringHome?: string;
+  gasStationKeyName?: string;
+  gasStationKeyringBackend?: string;
+  gasStationKeyringHome?: string;
 };
 
 type SimulateSwapInput = {
@@ -251,11 +254,33 @@ export class InitiaDexClient {
     }
 
     const signerAddress = await this.getCliSignerAddress();
+    const available = await this.queryL1Balance(signerAddress, denom);
+
+    if (available >= requiredAmountAtomic) {
+      return;
+    }
+
+    // Attempt auto-fund from gas-station
+    const funded = await this.autoFundFromGasStation(
+      signerAddress,
+      denom,
+      requiredAmountAtomic,
+      available
+    );
+
+    if (!funded) {
+      throw new Error(
+        `L1 signer ${signerAddress} has ${available.toString()} ${denom} but needs ${requiredAmountAtomic.toString()} for ${symbol} swap; bridge-out inventory is not funded on L1 yet`
+      );
+    }
+  }
+
+  private async queryL1Balance(address: string, denom: string): Promise<bigint> {
     const { stdout } = await execFile("initiad", [
       "query",
       "bank",
       "balances",
-      signerAddress,
+      address,
       "--node",
       this.deps.rpcUrl,
       "--output",
@@ -264,14 +289,124 @@ export class InitiaDexClient {
     const parsed = JSON.parse(stdout) as {
       balances?: Array<{ denom?: string; amount?: string }>;
     };
-    const available = BigInt(
+    return BigInt(
       parsed.balances?.find((coin) => coin.denom === denom)?.amount ?? "0"
     );
+  }
 
-    if (available < requiredAmountAtomic) {
-      throw new Error(
-        `L1 signer ${signerAddress} has ${available.toString()} ${denom} but needs ${requiredAmountAtomic.toString()} for ${symbol} swap; bridge-out inventory is not funded on L1 yet`
+  private async autoFundFromGasStation(
+    recipientAddress: string,
+    denom: string,
+    requiredAmountAtomic: bigint,
+    currentBalance: bigint
+  ): Promise<boolean> {
+    const gsKeyName = this.deps.gasStationKeyName;
+    const gsKeyringBackend = this.deps.gasStationKeyringBackend;
+    const gsKeyringHome = this.deps.gasStationKeyringHome;
+
+    if (!gsKeyName || !gsKeyringBackend || !gsKeyringHome) {
+      console.warn(
+        "[router] Gas-station L1 auto-fund is not configured. Set L1_GAS_STATION_KEY_NAME, L1_GAS_STATION_KEYRING_BACKEND, L1_GAS_STATION_KEYRING_HOME."
       );
+      return false;
+    }
+
+    // Request 2x the deficit to reduce the frequency of auto-fund txs
+    const deficit = requiredAmountAtomic - currentBalance;
+    const transferAmount = deficit * 2n;
+
+    // Check gas-station balance first
+    let gsAddress: string;
+    try {
+      const { stdout } = await execFile("initiad", [
+        "keys",
+        "show",
+        gsKeyName,
+        "-a",
+        "--home",
+        gsKeyringHome,
+        "--keyring-backend",
+        gsKeyringBackend
+      ]);
+      gsAddress = stdout.trim();
+    } catch {
+      console.warn("[router] Failed to resolve gas-station address on L1");
+      return false;
+    }
+
+    const gsBalance = await this.queryL1Balance(gsAddress, denom);
+    if (gsBalance < transferAmount) {
+      console.warn(
+        `[router] Gas-station ${gsAddress} has ${gsBalance.toString()} ${denom} ` +
+        `but needs ${transferAmount.toString()} to auto-fund L1 signer. ` +
+        `Please fund the gas-station on L1 from the Initia faucet (https://faucet.testnet.initia.xyz/).`
+      );
+      return false;
+    }
+
+    const coins = `${transferAmount.toString()}${denom}`;
+
+    console.log(
+      `[router] Auto-funding L1 signer ${recipientAddress} with ${coins} from gas-station ${gsAddress}`
+    );
+
+    try {
+      await execFile("initiad", [
+        "tx",
+        "bank",
+        "send",
+        gsKeyName,
+        recipientAddress,
+        coins,
+        "--from",
+        gsKeyName,
+        "--home",
+        gsKeyringHome,
+        "--keyring-backend",
+        gsKeyringBackend,
+        "--chain-id",
+        this.deps.chainId,
+        "--node",
+        this.deps.rpcUrl,
+        "--gas",
+        "auto",
+        "--gas-adjustment",
+        this.deps.gasAdjustment,
+        "--gas-prices",
+        this.deps.gasPrices,
+        "--broadcast-mode",
+        "sync",
+        "--yes",
+        "--output",
+        "json"
+      ]);
+
+      // Wait for tx to be included
+      await delay(5_000);
+
+      // Verify the transfer succeeded
+      const newBalance = await this.queryL1Balance(recipientAddress, denom);
+      if (newBalance >= requiredAmountAtomic) {
+        console.log(
+          `[router] Auto-fund successful. L1 signer now has ${newBalance.toString()} ${denom}`
+        );
+        return true;
+      }
+
+      console.warn(
+        `[router] Auto-fund tx sent but balance still insufficient (${newBalance.toString()} ${denom}). ` +
+        `May need more time to confirm.`
+      );
+      // Give another few seconds for block finalization
+      await delay(5_000);
+      const retryBalance = await this.queryL1Balance(recipientAddress, denom);
+      return retryBalance >= requiredAmountAtomic;
+    } catch (error) {
+      console.error(
+        "[router] Auto-fund from gas-station failed:",
+        error instanceof Error ? error.message : String(error)
+      );
+      return false;
     }
   }
 

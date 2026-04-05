@@ -28,8 +28,9 @@ test("fallback planner prompt repeats root key restrictions for tools", () => {
   });
 
   assert.match(prompt, /list_strategy_capabilities accepts only ownerAddress/i);
-  assert.match(prompt, /analyze_market_context accepts ownerAddress and marketId/i);
+  assert.match(prompt, /analyze_market_context accepts ownerAddress, marketId, and optional bars\/fromTs\/toTs/i);
   assert.match(prompt, /update_strategy_draft accepts ownerAddress and strategy only/i);
+  assert.match(prompt, /run_strategy_backtest accepts ownerAddress, strategyId, and optional bars\/fromTs\/toTs/i);
   assert.match(prompt, /Never add root-level marketId or strategyId/i);
   assert.match(prompt, /goal_state/);
   assert.match(prompt, /expected_artifact/);

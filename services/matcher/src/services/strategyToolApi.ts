@@ -44,7 +44,10 @@ export class StrategyToolApi {
         return {
           analysis: this.strategyService.analyzeMarketContext({
             ownerAddress: payload.ownerAddress as `0x${string}`,
-            marketId: payload.marketId as `0x${string}`
+            marketId: payload.marketId as `0x${string}`,
+            bars: typeof payload.bars === "number" ? payload.bars : undefined,
+            fromTs: typeof payload.fromTs === "number" ? payload.fromTs : undefined,
+            toTs: typeof payload.toTs === "number" ? payload.toTs : undefined
           })
         };
       case "list_strategy_templates":
@@ -82,7 +85,9 @@ export class StrategyToolApi {
           ...(this.strategyService.runBacktest({
             ownerAddress: payload.ownerAddress as `0x${string}`,
             strategyId: payload.strategyId as string,
-            bars: typeof payload.bars === "number" ? payload.bars : undefined
+            bars: typeof payload.bars === "number" ? payload.bars : undefined,
+            fromTs: typeof payload.fromTs === "number" ? payload.fromTs : undefined,
+            toTs: typeof payload.toTs === "number" ? payload.toTs : undefined
           }))
         };
       case "get_backtest_summary":

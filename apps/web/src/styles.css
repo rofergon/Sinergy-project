@@ -1539,6 +1539,48 @@ a { color: inherit; text-decoration: none; }
   background: rgba(30, 35, 41, 0.55);
 }
 
+.strategy-agent-thinking-card {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(30, 35, 41, 0.55);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.strategy-agent-thinking-card:hover {
+  border-color: var(--border-focus);
+  background: rgba(37, 41, 48, 0.72);
+}
+
+.strategy-agent-thinking-title {
+  display: block;
+  margin-bottom: 0;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+  flex: 0 0 auto;
+}
+
+.strategy-agent-thinking-body {
+  display: block;
+  width: 100%;
+  line-height: 1.45;
+}
+
+.strategy-agent-thinking-card.collapsed small {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
 .strategy-agent-list strong,
 .strategy-agent-trace strong {
   display: block;

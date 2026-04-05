@@ -12,13 +12,14 @@ import type {
   StrategyValidationResult
 } from "@sinergy/shared";
 import { strategyTool } from "../lib/api";
-import type { MarketSnapshot, StrategyBacktestBundle } from "../types";
+import type { ChartViewport, MarketSnapshot, StrategyBacktestBundle } from "../types";
 
 type Props = {
   address?: HexString;
   markets: MarketSnapshot[];
   selectedMarketId?: HexString;
   timeframe: StrategyTimeframe;
+  viewport: ChartViewport | null;
   onSelectMarket: (marketId: HexString) => void;
   onTimeframeChange: (timeframe: StrategyTimeframe) => void;
   onBacktestResult: (result: StrategyBacktestBundle | null) => void;
@@ -55,6 +56,17 @@ function emptyGroup(): StrategyRuleGroup {
 
 function cloneStrategy(strategy: StrategyDefinition) {
   return JSON.parse(JSON.stringify(strategy)) as StrategyDefinition;
+}
+
+function serializeOperandKey(op: StrategyOperand): string | null {
+  if (op.type !== "indicator_output") return null;
+  const params = op.params
+    ? Object.entries(op.params)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => `${k}:${v}`)
+        .join("|")
+    : "";
+  return `${op.indicator}:${op.output}:${params}`;
 }
 
 function formatTimeframe(value: StrategyTimeframe) {
@@ -111,12 +123,14 @@ function OperandEditor({
   label,
   operand,
   capabilities,
-  onChange
+  onChange,
+  onGlobalSync
 }: {
   label: string;
   operand: StrategyOperand;
   capabilities: StrategyCapabilities | null;
   onChange: (next: StrategyOperand) => void;
+  onGlobalSync?: (prevKey: string, next: StrategyOperand) => void;
 }) {
   const indicator = operand.type === "indicator_output"
     ? findIndicatorDefinition(capabilities, operand.indicator)
@@ -142,7 +156,7 @@ function OperandEditor({
                 onChange({ type: "price_field", field: "close" });
                 return;
               }
-              onChange({
+              const nextOp: StrategyOperand = {
                 type: "indicator_output",
                 indicator: defaultIndicator.kind,
                 output: defaultIndicator.outputs[0],
@@ -151,7 +165,12 @@ function OperandEditor({
                     .filter((param) => param.defaultValue !== undefined)
                     .map((param) => [param.name, param.defaultValue as number])
                 )
-              });
+              };
+              onChange(nextOp);
+              if (onGlobalSync) {
+                const prevKey = serializeOperandKey(operand);
+                if (prevKey) onGlobalSync(prevKey, nextOp);
+              }
               return;
             }
             onChange({ type: "price_field", field: "close" });
@@ -194,7 +213,7 @@ function OperandEditor({
                 onChange={(event) => {
                   const nextIndicator = findIndicatorDefinition(capabilities, event.target.value);
                   if (!nextIndicator) return;
-                  onChange({
+                  const nextOp: StrategyOperand = {
                     type: "indicator_output",
                     indicator: nextIndicator.kind,
                     output: nextIndicator.outputs[0],
@@ -203,7 +222,12 @@ function OperandEditor({
                         .filter((param) => param.defaultValue !== undefined)
                         .map((param) => [param.name, param.defaultValue as number])
                     )
-                  });
+                  };
+                  onChange(nextOp);
+                  if (onGlobalSync) {
+                    const prevKey = serializeOperandKey(operand);
+                    if (prevKey) onGlobalSync(prevKey, nextOp);
+                  }
                 }}
               >
                 {capabilities?.indicatorCatalog.map((entry) => (
@@ -218,7 +242,14 @@ function OperandEditor({
               <span className="strategy-inline-label">Output</span>
               <select
                 value={operand.output}
-                onChange={(event) => onChange({ ...operand, output: event.target.value as any })}
+                onChange={(event) => {
+                  const nextOp: StrategyOperand = { ...operand, output: event.target.value as any };
+                  onChange(nextOp);
+                  if (onGlobalSync) {
+                    const prevKey = serializeOperandKey(operand);
+                    if (prevKey) onGlobalSync(prevKey, nextOp);
+                  }
+                }}
               >
                 {indicator.outputs.map((output) => (
                   <option key={output} value={output}>
@@ -234,15 +265,20 @@ function OperandEditor({
                 <input
                   type="number"
                   value={operand.params?.[param.name] ?? param.defaultValue ?? ""}
-                  onChange={(event) =>
-                    onChange({
+                  onChange={(event) => {
+                    const nextOp: StrategyOperand = {
                       ...operand,
                       params: {
                         ...(operand.params ?? {}),
                         [param.name]: Number(event.target.value)
                       }
-                    })
-                  }
+                    };
+                    onChange(nextOp);
+                    if (onGlobalSync) {
+                      const prevKey = serializeOperandKey(operand);
+                      if (prevKey) onGlobalSync(prevKey, nextOp);
+                    }
+                  }}
                   placeholder={param.label}
                 />
               </label>
@@ -258,12 +294,14 @@ function RuleBuilder({
   title,
   groups,
   capabilities,
-  onChange
+  onChange,
+  onGlobalSync
 }: {
   title: string;
   groups: StrategyRuleGroup[];
   capabilities: StrategyCapabilities | null;
   onChange: (next: StrategyRuleGroup[]) => void;
+  onGlobalSync?: (prevKey: string, next: StrategyOperand) => void;
 }) {
   return (
     <div className="strategy-rule-builder">
@@ -340,6 +378,7 @@ function RuleBuilder({
                         );
                         onChange(nextGroups);
                       }}
+                      onGlobalSync={onGlobalSync}
                     />
 
                     <label className="strategy-operator-field">
@@ -389,6 +428,7 @@ function RuleBuilder({
                         );
                         onChange(nextGroups);
                       }}
+                      onGlobalSync={onGlobalSync}
                     />
                   </div>
                 </div>
@@ -424,6 +464,7 @@ export function StrategyPanel({
   markets,
   selectedMarketId,
   timeframe,
+  viewport,
   onSelectMarket,
   onTimeframeChange,
   onBacktestResult,
@@ -439,6 +480,32 @@ export function StrategyPanel({
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState<"loading" | "saving" | "validating" | "running" | null>(null);
   const [templateId, setTemplateId] = useState("");
+
+  const handleGlobalSync = (prevKey: string, nextOp: StrategyOperand) => {
+    setDraft((current) => {
+      if (!current) return current;
+      const syncGroup = (group: StrategyRuleGroup) => ({
+        ...group,
+        rules: group.rules.map(rule => ({
+          ...rule,
+          left: serializeOperandKey(rule.left) === prevKey ? { ...nextOp } : rule.left,
+          right: serializeOperandKey(rule.right) === prevKey ? { ...nextOp } : rule.right,
+        }))
+      });
+      return {
+        ...current,
+        entryRules: {
+          long: current.entryRules.long.map(syncGroup),
+          short: current.entryRules.short.map(syncGroup),
+        },
+        exitRules: {
+          long: current.exitRules.long.map(syncGroup),
+          short: current.exitRules.short.map(syncGroup),
+        },
+        updatedAt: new Date().toISOString()
+      };
+    });
+  };
 
   const selectedMarket = useMemo(
     () => markets.find((market) => market.id === (draft?.marketId ?? selectedMarketId)) ?? markets[0],
@@ -641,7 +708,13 @@ export function StrategyPanel({
       const result = await strategyTool<StrategyBacktestBundle>("run_strategy_backtest", {
         ownerAddress: address,
         strategyId: synced.id,
-        bars: capabilities?.defaults.backtestBars ?? 250
+        ...(viewport
+          ? {
+              bars: viewport.bars,
+              fromTs: viewport.fromTs,
+              toTs: viewport.toTs
+            }
+          : { bars: capabilities?.defaults.backtestBars ?? 250 })
       });
       onBacktestResult(result);
       setStatus(`Backtest finished: ${result.summary.tradeCount} trades, ${result.summary.netPnlPct.toFixed(2)}% net.`);
@@ -997,12 +1070,14 @@ export function StrategyPanel({
                           groups={draft.entryRules[side]}
                           capabilities={capabilities}
                           onChange={(next) => setDraft(setRuleGroups(cloneStrategy(draft), "entryRules", side, next))}
+                          onGlobalSync={handleGlobalSync}
                         />
                         <RuleBuilder
                           title="Exit Rules"
                           groups={draft.exitRules[side]}
                           capabilities={capabilities}
                           onChange={(next) => setDraft(setRuleGroups(cloneStrategy(draft), "exitRules", side, next))}
+                          onGlobalSync={handleGlobalSync}
                         />
                       </>
                     ) : (

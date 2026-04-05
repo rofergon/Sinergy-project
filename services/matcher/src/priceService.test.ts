@@ -57,7 +57,7 @@ function insertBars(
   }
 }
 
-test("price service trims sparse historical gaps from 1m candles", () => {
+test("price service trims sparse historical gaps from 1m candles but keeps older pages reachable", () => {
   const harness = makeService();
 
   try {
@@ -69,7 +69,17 @@ test("price service trims sparse historical gaps from 1m candles", () => {
       result.candles.map((bar) => bar.ts),
       [3_600, 3_660, 3_720]
     );
-    assert.equal(result.hasMore, false);
+    assert.equal(result.hasMore, true);
+
+    const older = harness.service.getCandlesPage("cBTC", "1m", 6, {
+      beforeTs: result.candles[0]?.ts
+    });
+
+    assert.deepEqual(
+      older.candles.map((bar) => bar.ts),
+      [60, 120, 180]
+    );
+    assert.equal(older.hasMore, false);
   } finally {
     harness.cleanup();
   }
