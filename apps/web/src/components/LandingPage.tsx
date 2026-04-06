@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import logoUrl from "../../../../docs/logo.png";
 
 type Props = {
   onConnect: () => void;
@@ -211,7 +212,7 @@ export function LandingPage({ onConnect }: Props) {
         {/* Minimal landing header */}
         <nav className="landing-navbar">
           <div className="landing-nav-logo">
-            <div className="nav-logo-icon">S</div>
+            <img className="landing-nav-mark" src={logoUrl} alt="Sinergy logo" />
             <span>Sinergy</span>
           </div>
           <div className="landing-nav-right">

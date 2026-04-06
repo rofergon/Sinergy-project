@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Hex } from "viem";
+import logoUrl from "../../../../docs/logo.png";
 
 type MarketSnapshot = {
   id: Hex;
@@ -70,7 +71,7 @@ export function Navbar({
   return (
     <nav className="dex-navbar">
       <div className="nav-logo">
-        <div className="nav-logo-icon">S</div>
+        <img className="nav-logo-mark" src={logoUrl} alt="Sinergy logo" />
         <span>
           Sinergy
           <span style={{ color: "var(--text-tertiary)", fontWeight: 500 }}> DEX</span>
