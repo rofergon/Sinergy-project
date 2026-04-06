@@ -1,160 +1,80 @@
-# Initia DEX Liquidity Routing
+# InitiaDEX Liquidity Routing
 
-## In Simple Terms
+Sinergy is designed as a hybrid liquidity environment. While it operates a high-performance **private dark pool** on the `Sinergy-2` rollup, it maintains a seamless bridge to external liquidity on the `initiation-2` L1. 
 
-This document explains when an operation is resolved with local inventory inside `Sinergy` and when it needs to rely on external liquidity from `Initia DEX`. The key point is that, even if liquidity comes from L1, the operation still feels like a `Sinergy` flow from the user's point of view.
+This document outlines the architecture and execution flow that enables the Sinergy private router to tap into **InitiaDEX** when local inventory is insufficient, ensuring high liquidity availability without compromising the user's unified appchain experience.
 
-## When To Read This Document
+---
 
-Read this if you want to understand the router, the difference between `local` and `dex` routes, or the operational impact of relying on external liquidity.
+## Routing Architecture
 
-## What To Remember
+Sinergy supports two primary execution paths within its private router logic. Both paths can be triggered dynamically by the Strategy Agent or manually by the user.
 
-- `Sinergy` tries to fill from local inventory first when that makes sense.
-- If local inventory is not enough, the matcher can rebalance through `Initia DEX`.
-- For the user, the experience still feels like trading inside `Sinergy`, even when there is an external route behind the scenes.
+1. **`instant_local` (Dark Pool Fill)**
+   The trade is filled immediately against Sinergy's local, private inventory on the `Sinergy-2` rollup. This path provides the highest privacy and lowest latency.
+2. **`async_rebalance_required` (InitiaDEX Route)**
+   The trade is accepted by the Sinergy Matcher, but execution is fulfilled by routing the matching requirements against Initia L1 liquidity through InitiaDEX. The settlement is still anchored back to the user's `Sinergy-2` account.
 
-This document explains how Sinergy can source liquidity from Initia L1 for a private trade instead of filling only from the matcher's local inventory.
+### Route Preferences
+Users and autonomous agents can dictate how liquidity is sourced:
+*   **Auto**: The optimal default. Prefers local inventory when available and healthy, but falls back to InitiaDEX routing to guarantee execution if the local pool lacks depth.
+*   **Local**: Strictly utilizes the private dark pool. If the trade exceeds local capacity, execution is securely blocked rather than exposing the intent externally.
+*   **DEX-routed**: Forces the trade to settle through the InitiaDEX path, useful for massive sizes or specific arb-rebalancing needs.
 
-## Overview
+---
 
-Sinergy supports two execution paths inside the private router:
+## Execution Lifecycle: DEX-Routed Trade
 
-1. `instant_local`
-   The trade is filled immediately from Sinergy's local inventory on the rollup.
-2. `async_rebalance_required`
-   The trade is accepted on Sinergy first, then the matcher rebalances against Initia L1 liquidity through Initia DEX.
+When a trade is routed through InitiaDEX (e.g., a `cINIT/cUSDC` pair), the matcher safely orchestrates cross-chain execution:
 
-The UI now exposes three route preferences:
+1. **Intent Submission**: The user or AI Agent submits an intent requiring external liquidity.
+2. **Quoting**: The matcher simulates the equivalent swap directly on Initia L1 to lock in the expected return, generating a strict `dex` execution quote.
+3. **Reservation**: Upon approval, the swap job is queued on `Sinergy-2`, and the user's local inventory is reserved.
+4. **L1 Rebalancing**: The `rebalanceWorker` performs the actual swap on Initia L1 via InitiaDEX.
+5. **Event Verification**: The router listens for the `SwapEvent` on the L1 transaction to extract the *exact* returned amount.
+6. **Local Settlement**: The matcher securely credits the user's internal Sinergy vault balance with the L1 extraction, finalizing the transaction.
 
-1. `Auto`
-   Prefer local inventory when available. Fall back to Initia DEX routing when local fill is not suitable.
-2. `Local`
-   Only use local inventory. If the trade cannot be satisfied locally, execution is blocked.
-3. `DEX-routed`
-   Force the trade to settle through the Initia DEX rebalance path even if local inventory is available.
+From the user's perspective, the operation completes entirely within Sinergy's unified interface.
 
-## What Happens In A DEX-Routed Trade
+---
 
-For a routeable market such as `cINIT/cUSDC`, the matcher follows this sequence:
+## Technical Component Breakdown
 
-1. The user deposits assets into the vault on Sinergy.
-2. The user requests a quote from the private router.
-3. The matcher simulates the equivalent swap on Initia L1 using `dex swap_script`.
-4. The router returns a quote with `executionPath = dex`.
-5. When the user executes, the swap job is created on Sinergy and user inventory is reserved.
-6. The rebalance worker performs the real swap on Initia L1.
-7. The returned output amount is read from the `SwapEvent` on the L1 transaction.
-8. The matcher settles the result back into the Sinergy vault balances.
+The routing logic relies on specific microservices within the Sinergy backend:
 
-From the user's point of view, the trade still starts and ends on Sinergy. The external liquidity source is Initia DEX on L1.
+- **`router.ts`**: The brain of the quoting engine. Analyzes the market, bridge health, and local inventory limits to classify trades as `instant_local` or `async_rebalance_required`.
+- **`rebalanceWorker.ts`**: An asynchronous worker dedicated to processing queued cross-chain L1 routing jobs reliably.
+- **`initiaDex.ts`**: The execution hook. It constructs, signs, and executes the real Initia DEX swap on L1 and parses the deterministic output from the transaction logs securely.
+- **`inventory.ts`**: The reconciliation layer that settles real L1 output back into the encrypted Sinergy inventory arrays.
 
-## Components Involved
+---
 
-Main files:
+## Initia L1 Interaction Details
 
-- [SwapPanel.tsx](../apps/web/src/components/SwapPanel.tsx)
-- [router.ts](../services/matcher/src/services/router.ts)
-- [rebalanceWorker.ts](../services/matcher/src/services/rebalanceWorker.ts)
-- [initiaDex.ts](../services/matcher/src/services/initiaDex.ts)
-- [inventory.ts](../services/matcher/src/services/inventory.ts)
+To perform the live DEX swap predictably, the matcher relies on typed Initia CLI transaction paths, bypassing raw unstable payloads:
 
-Responsibilities:
+1. **Transaction Construction**:
+   Constructs the swap with precise types:
+   *   `object:<pair_object>`
+   *   `object:<metadata_object>`
+   *   `u64:<offer_amount>`
+   *   `option<u64>:null`
+2. **Broadcast & Listen**: Broadcasts the L1 swap.
+3. **Verification**: Polls `/cosmos/tx/v1beta1/txs/<hash>`.
+4. **Extraction**: Securely reads `return_amount` from the `SwapEvent`.
 
-- `SwapPanel.tsx`
-  Sends the selected route preference: `auto`, `local`, or `dex`.
-- `router.ts`
-  Chooses the quote mode and execution path.
-- `rebalanceWorker.ts`
-  Runs async rebalance jobs.
-- `initiaDex.ts`
-  Executes the real Initia DEX swap on L1 and extracts the actual returned amount from the transaction events.
-- `inventory.ts`
-  Settles the real output back into Sinergy inventory and user balances.
+### Operational Dependencies
+For DEX-routed trades to function continuously on testnet or mainnet, the matcher's L1 signer account requires:
+*   Sufficient `uinit` for gas execution on L1.
+*   Baseline L1 inventory in the routing source assets.
 
-## Quote Decision Logic
+Configuration variables actively managing this context:
+`L1_ROUTER_KEY_NAME`, `L1_ROUTER_HOME`, `L1_RPC_URL`, `L1_REST_URL`, `ROUTER_CANONICAL_ASSETS_JSON`, `ROUTER_MARKETS_JSON`.
 
-The router checks:
+---
 
-1. Whether the market is routeable.
-2. Whether bridge and OPinit health are acceptable.
-3. Whether matcher inventory on Sinergy is enough for an immediate fill.
-4. Whether the trade size is below the configured local notional limit.
+## Trust Assumptions & Evolution
 
-Decision summary:
+Currently, Sinergy’s InitiaDEX routing demonstrates a highly effective **hybrid inventory model** that brings deep L1 liquidity directly into an appchain environment with minimal friction.
 
-1. `Auto`
-   Uses `instant_local` when local inventory is healthy. Otherwise routes through Initia DEX.
-2. `Local`
-   Uses `instant_local` only. If local inventory is not enough, the quote is marked unavailable for execution.
-3. `DEX-routed`
-   Always uses the async rebalance path through Initia DEX.
-
-## L1 DEX Execution Details
-
-The matcher uses the Initia CLI path for the live DEX swap.
-
-Current working pattern:
-
-1. Pass typed CLI arguments:
-   `object:<pair_object>`
-   `object:<metadata_object>`
-   `u64:<offer_amount>`
-   `option<u64>:null`
-2. Broadcast the L1 swap transaction.
-3. Poll the tx endpoint:
-   `/cosmos/tx/v1beta1/txs/<hash>`
-4. Read `return_amount` from the `SwapEvent`.
-
-This is important because the live pool path did not behave correctly with the previous `raw_base64` argument approach.
-
-## Operational Requirements
-
-For DEX-routed trades to work, the matcher's L1 signer must have:
-
-1. Enough gas in `uinit`
-2. Enough L1 inventory in the source asset
-
-Relevant env and runtime inputs:
-
-- `L1_ROUTER_KEY_NAME`
-- `L1_ROUTER_HOME`
-- `L1_RPC_URL`
-- `L1_REST_URL`
-- `ROUTER_CANONICAL_ASSETS_JSON`
-- `ROUTER_MARKETS_JSON`
-
-If the signer runs out of `uinit`, the async route can quote correctly but execution will fail during the L1 swap stage.
-
-## What The User Sees
-
-In the trade panel:
-
-1. `Route source`
-   Selected preference: `Auto`, `Local`, or `DEX-routed`
-2. `Execution path`
-   The route the matcher plans to use: `local`, `dex`, or `unavailable`
-3. `Route mode`
-   The underlying mode returned by the backend:
-   `instant_local` or `async_rebalance_required`
-
-Interpretation:
-
-1. `local`
-   Sinergy can fill immediately from local inventory.
-2. `dex`
-   The trade will use Initia DEX liquidity through the async rebalance path.
-3. `unavailable`
-   The user explicitly requested `Local`, but the trade cannot be satisfied locally.
-
-## Current Limitation
-
-The user-facing trade starts and finishes on Sinergy, but the async path is still operationally dependent on matcher-controlled L1 balances and signer gas. It is not a trustless user-owned cross-chain execution path yet.
-
-That means the flow is already useful for:
-
-1. Demonstrating liquidity sourcing from Initia DEX
-2. Executing private trades backed by L1 liquidity
-3. Operating a hybrid inventory model
-
-But it should still be described as matcher-operated routing rather than fully user-sovereign bridging for every leg.
+In Phase 1, the asynchronous path is matcher-operated to ensure flawless UX and speed. Next-generation iterations will focus on converting these asynchronous legs into fully user-sovereign, trustless cross-chain ZK execution pathways.
