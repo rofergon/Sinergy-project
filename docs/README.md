@@ -38,7 +38,7 @@ For node operators and developers evaluating infrastructure health:
 
 ## 🚀 Sinergy's Core Design Philosophy
 
-Sinergy aims to revolutionize trading by making complex market operations accessible through AI, while preventing intent leakage and MEV (Miner Extractable Value) on-chain.
+Sinergy aims to enable next-generation trading by making complex market operations accessible through AI, while preventing intent leakage and MEV (Miner Extractable Value) on-chain.
 
 To achieve this, the system splits responsibility:
 1.  **AI Orchestration**: Natural-language commands are transformed into signed trading intents by the Strategy Agent.
