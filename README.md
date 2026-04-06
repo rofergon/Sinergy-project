@@ -1,8 +1,10 @@
 # Sinergy
 
-Sinergy is an agent-powered private trading appchain built natively on Initia. 
+Sinergy is an agent-powered private trading appchain built natively on Initia.
 
 It transforms natural-language trading intents into validated, secure executions. By combining an AI strategy agent, privacy-preserving infrastructure, and native Initia liquidity routing, Sinergy offers a seamless, next-generation DeFi experience tailored for the Initia ecosystem.
+
+At its core, Sinergy is about making advanced trading feel simple without forcing users to expose their full intent on public rails. Instead of broadcasting strategy logic, order flow, and execution decisions to an open orderbook, Sinergy keeps sensitive trading coordination inside a private execution layer while still anchoring custody and settlement guarantees on `Sinergy-2`.
 
 ## How It Works
 
@@ -15,9 +17,22 @@ It transforms natural-language trading intents into validated, secure executions
 5. **Private Settlement**: Approved execution state is anchored securely and privately on our `Sinergy-2` MiniEVM rollup.
 6. **Smart Routing**: When needed, the private matcher can seamlessly source deep liquidity from `InitiaDEX` and the broader Initia L1 (`initiation-2`).
 
+## Why Privacy Matters in Sinergy
+
+Most on-chain trading systems leak valuable information before a trade is fully complete: user intent, order timing, portfolio positioning, and routing behavior can all become visible to external observers. Sinergy is designed to reduce that leakage.
+
+Our privacy model keeps:
+
+- **Order flow private** so user strategies are not posted to a public on-chain orderbook.
+- **Execution coordination private** so matching and routing logic happen away from public mempool-style observation.
+- **Settlement verifiable** by anchoring the resulting state and custody flows on `Sinergy-2`.
+- **Liquidity composable** by routing to `InitiaDEX` and `Initia L1` only when external liquidity is actually needed.
+
+This gives users a better default trading experience: less strategy leakage, less signaling to the market, and a stronger path toward confidential DeFi execution on Initia.
+
 ## Why We Built This for the Initiate Hackathon
 
-Sinergy was designed from the ground up to showcase the unique capabilities of the Initia network. Rather than porting a generic EVM application, we built an **appchain-native product** that deeply integrates Initia primitives:
+Sinergy was designed from the ground up to showcase the unique capabilities of the Initia network. Rather than porting a generic EVM application, we built an **appchain-native product** that deeply integrates Initia primitives to support privacy-first trading UX:
 
 - **InterwovenKit** for a fluid, Initia-native wallet connection and signing UX.
 - **MiniEVM** on `Sinergy-2` customized for private trading execution.
@@ -41,7 +56,7 @@ Sinergy also natively surfaces Initia usernames for connected wallets. When a wa
 - **Connected assets**: `cINIT`, `cUSDC`, `cETH`, `cBTC`, `cSOL`
 - **Router-enabled markets**: `cINIT/cUSDC`, `cETH/cUSDC`
 - **Dark-pool markets**: `cBTC/cUSDC`, `cSOL/cUSDC`, `tAAPL/cUSDC`, `tBOND/cUSDC`, `tNVDA/cUSDC`
-- **Runtime deployment file**: [deployments/testnet.json](/home/sari/Sinergy-project/deployments/testnet.json)
+- **Runtime deployment file**: [deployments/testnet.json](/Sinergy-project/deployments/testnet.json)
 
 ---
 

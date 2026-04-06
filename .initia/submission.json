@@ -1,0 +1,12 @@
+{
+  "project_name": "Sinergy",
+  "repo_url": "https://github.com/rofergon/Sinergy-project",
+  "commit_sha": "e2add9898981cb420a46dcc70ad403dd5c212be0",
+  "rollup_chain_id": "Sinergy-2",
+  "deployed_address": "0x3fF37bE2C8B8179cBfd97CB1e75fEd91e5e38B19",
+  "vm": "evm",
+  "native_feature": "interwoven-bridge",
+  "core_logic_path": "services/matcher/src/index.ts",
+  "native_feature_frontend_path": "apps/web/src/components/BridgeLanding.tsx",
+  "demo_video_url": "https://www.youtube.com/watch?v=W8DB_e-DLI4"
+}
