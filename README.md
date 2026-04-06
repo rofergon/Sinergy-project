@@ -1,85 +1,55 @@
 # Sinergy
 
-Sinergy is an agent-powered private trading appchain on Initia.
+Sinergy is an agent-powered private trading appchain built natively on Initia. 
 
-For the hackathon, the core story is simple: a user describes a trading strategy in natural language, the Sinergy agent prepares and validates that strategy, and execution settles on `Sinergy-2` with optional access to real `InitiaDEX` liquidity.
+It transforms natural-language trading intents into validated, secure executions. By combining an AI strategy agent, privacy-preserving infrastructure, and native Initia liquidity routing, Sinergy offers a seamless, next-generation DeFi experience tailored for the Initia ecosystem.
 
-## Hackathon Pitch
-
-**Sinergy turns natural-language trading intent into validated execution on Initia.**
-
-What makes it stand out:
-
-- an AI strategy agent is part of the product, not just an extra chatbot;
-- strategy ideas can be interpreted, checked, repaired, and backtested before settlement;
-- execution happens on an Initia-native `MiniEVM` rollup;
-- the app can use local private inventory or route to `InitiaDEX` liquidity when needed;
-- wallet, bridge, and settlement flow are designed around Initia primitives.
-
-## Agent Flow
+## How It Works
 
 ![Sinergy agentic strategy flow](docs/AgentFlow.png)
 
-The flow shown above is the strongest way to explain Sinergy in a demo:
+1. **Natural Language Input**: Users connect their wallet via `InterwovenKit` and describe their trading strategy in plain language.
+2. **Contextual Awareness**: The agent input layer automatically builds the necessary prompt payload with real-time market and timeframe context.
+3. **AI Strategy Generation**: The AI agent interprets the request, drafts the strategy constraints, and orchestrates necessary trading tools.
+4. **Validation & Backtesting**: The system strictly validates rules and runs historical backtesting to ensure the strategy behaves as intended *before* any capital is deployed.
+5. **Private Settlement**: Approved execution state is anchored securely and privately on our `Sinergy-2` MiniEVM rollup.
+6. **Smart Routing**: When needed, the private matcher can seamlessly source deep liquidity from `InitiaDEX` and the broader Initia L1 (`initiation-2`).
 
-1. The user connects a wallet and describes a strategy in plain language.
-2. The agent input layer builds the prompt payload with market and timeframe context.
-3. The AI strategy agent interprets the request, drafts the strategy, and orchestrates tools.
-4. The system validates rules and runs backtesting before anything is deployed.
-5. Approved execution state is anchored on `Sinergy-2`.
-6. If needed, liquidity can be sourced from `InitiaDEX` and the broader Initia L1.
+## Why We Built This for the Initiate Hackathon
 
-## Why It Is Strong For A Hackathon
+Sinergy was designed from the ground up to showcase the unique capabilities of the Initia network. Rather than porting a generic EVM application, we built an **appchain-native product** that deeply integrates Initia primitives:
 
-- it has a clear user story: "say the strategy, validate it, execute it";
-- it combines AI, trading, privacy, and appchain infrastructure in one product;
-- it is easy to demo visually with one diagram and one end-to-end flow;
-- it uses real Initia components instead of a generic EVM stack.
+- **InterwovenKit** for a fluid, Initia-native wallet connection and signing UX.
+- **MiniEVM** on `Sinergy-2` customized for private trading execution.
+- **Connected Assets** seamlessly utilizing `cINIT`, `cUSDC`, `cETH`, `cBTC`, and `cSOL`.
+- **OPinit Bridge** infrastructure for robust cross-chain interoperability.
+- **Native Interoperability** via direct liquidity routing through `InitiaDEX`.
 
-## Why It Fits Initia
+Sinergy also natively surfaces Initia usernames for connected wallets. When a wallet has a registered username on `initiation-2`, the app displays `<name>.init`, falling back to the shortened address if not.
 
-Sinergy is built around Initia-native pieces:
+## Core Architecture Components
 
-- `InterwovenKit` for wallet connection and signing UX;
-- `MiniEVM` on `Sinergy-2` for appchain execution;
-- connected assets like `cINIT` and `cUSDC`;
-- `OPinit` bridge infrastructure;
-- optional liquidity access through `InitiaDEX` on `initiation-2`.
-
-This makes the product feel like an Initia app first, not a generic app ported onto Initia later.
-
-## Demo Path
-
-For a short competition demo, the cleanest storyline is:
-
-1. Connect the wallet with `InterwovenKit`.
-2. Show the user entering a strategy request in natural language.
-3. Explain how the agent adds market context, rules, and validation steps.
-4. Show the backtest and verification stage.
-5. Show settlement on `Sinergy-2`.
-6. Highlight that larger execution can optionally route into `InitiaDEX`.
-
-## Product Components
-
-- `Agent layer`
-  Turns natural-language strategy intent into an executable plan with validation and repair loops.
-- `Dark Vault`
-  Keeps funds in the settlement flow while reducing on-chain exposure of trading intent.
-- `Private matcher/router`
-  Handles private balances, local fills, and optional external liquidity routing.
-- `Bridge-backed assets`
-  Uses Initia-connected assets like `cINIT`, `cUSDC`, `cETH`, `cBTC`, and `cSOL`.
+- **Agent Layer**: Translates natural-language strategy intent into an executable plan, complete with validation and repair loops.
+- **Dark Vault**: Secures user funds within the settlement flow while minimizing the on-chain footprint and exposure of trading intent.
+- **Private Matcher & Router**: Handles private balances, executes local fills, and arbitrates external liquidity routing.
+- **Bridge-Backed Assets**: Natively operates using Initia-connected bridging standards.
 
 ## Live Testnet Snapshot
 
-- Rollup: `Sinergy-2`
-- L1: `initiation-2`
-- Connected assets: `cINIT`, `cUSDC`, `cETH`, `cBTC`, `cSOL`
-- Router-enabled markets: `cINIT/cUSDC`, `cETH/cUSDC`
-- Dark-pool markets: `cBTC/cUSDC`, `cSOL/cUSDC`, `tAAPL/cUSDC`, `tBOND/cUSDC`, `tNVDA/cUSDC`
-- Runtime deployment file: [deployments/testnet.json](/home/sari/Sinergy-project/deployments/testnet.json)
+- **Rollup**: `Sinergy-2`
+- **L1**: `initiation-2`
+- **Connected assets**: `cINIT`, `cUSDC`, `cETH`, `cBTC`, `cSOL`
+- **Router-enabled markets**: `cINIT/cUSDC`, `cETH/cUSDC`
+- **Dark-pool markets**: `cBTC/cUSDC`, `cSOL/cUSDC`, `tAAPL/cUSDC`, `tBOND/cUSDC`, `tNVDA/cUSDC`
+- **Runtime deployment file**: [deployments/testnet.json](/home/sari/Sinergy-project/deployments/testnet.json)
 
-## Fast Demo Startup
+---
+
+## Local Development & Evaluation Guide
+
+For judges and developers evaluating Sinergy locally, follow these steps to run the environment.
+
+### Fast Demo Startup
 
 If the machine already has the rollup configured, the fastest way to bring the public demo back after a reboot is:
 
@@ -89,7 +59,7 @@ If the machine already has the rollup configured, the fastest way to bring the p
 ./scripts/cloudflare-tunnel.sh quick
 ```
 
-Useful checks:
+Useful health checks:
 
 ```bash
 ./scripts/start-testnet-stack.sh status
@@ -98,15 +68,11 @@ Useful checks:
 ```
 
 What these commands do:
+- `start-testnet-stack.sh`: Restores the rollup, executor, relayer, matcher, and frontends.
+- `public-nginx.sh start`: Serves the public app, bridge, API, RPC, and related endpoints.
+- `cloudflare-tunnel.sh quick`: Exposes the stack to the internet without opening router ports.
 
-- `start-testnet-stack.sh`
-  Restores rollup, executor, relayer, matcher, and frontends.
-- `public-nginx.sh start`
-  Serves the public app, bridge, API, RPC, and related endpoints.
-- `cloudflare-tunnel.sh quick`
-  Exposes the stack to the internet without opening router ports.
-
-## Local Development
+### Manual Setup & Source Build
 
 Install dependencies:
 
@@ -126,6 +92,8 @@ Start the dedicated matcher:
 npm run dev:matcher
 ```
 
+#### ZK Architecture Support
+
 If you want to exercise the ZK withdrawal path locally, compile and prepare the circuit artifacts first:
 
 ```bash
@@ -135,17 +103,15 @@ node scripts/zk/export-withdrawal-vkey-calldata.mjs > .tmp/zk/withdrawal/vkey-ca
 ```
 
 Then deploy or configure the ZK stack so `deployments/local.json` contains:
-
 - `contracts.zkVault`
 - `contracts.stateAnchor`
 - `contracts.withdrawalVerifier`
 
-The matcher now expects the compiled circuit files at `.tmp/zk/withdrawal/withdrawal_js/withdrawal.wasm` and `.tmp/zk/withdrawal/withdrawal_final.zkey` unless overridden with:
+The matcher expects the compiled circuit files at `.tmp/zk/withdrawal/withdrawal_js/withdrawal.wasm` and `.tmp/zk/withdrawal/withdrawal_final.zkey` unless overridden with `ZK_WITHDRAWAL_WASM_FILE` and `ZK_WITHDRAWAL_ZKEY_FILE`.
 
-- `ZK_WITHDRAWAL_WASM_FILE`
-- `ZK_WITHDRAWAL_ZKEY_FILE`
+#### Testnet Configuration
 
-For testnet-oriented frontend configs:
+For testnet-oriented frontend configurations:
 
 ```bash
 cp apps/web/.env.testnet.example apps/web/.env.testnet
@@ -154,39 +120,14 @@ npm run dev:web:testnet
 npm run dev:bridge:testnet
 ```
 
-In the trading app, users can enable auto-sign from the `Dark Vault` panel. The current setup only grants `MsgCall` permission on `Sinergy-2`, which covers vault interactions while keeping the L1 bridge flow explicitly confirmed.
+Users can enable auto-sign from the **Dark Vault** panel. The current setup strictly grants `MsgCall` permission on `Sinergy-2`, covering vault interactions while keeping the L1 bridge flow explicitly user-confirmed for safety.
 
-Sinergy also surfaces Initia usernames for the connected wallet. When a wallet has a registered username on `initiation-2`, the app shows `<name>.init`; otherwise it falls back to the shortened Initia address.
+## Documentation Reference
 
-## What Makes The Demo Memorable
-
-- It is an appchain-native product, not just an EVM frontend.
-- It uses Initia wallets and bridge semantics, not a generic wallet abstraction.
-- It demonstrates connected assets inside a rollup.
-- It shows private trading UX on the appchain.
-- It can route selected trades to live `InitiaDEX` liquidity.
-- It tells a clear story for why appchains on Initia can feel better than isolated rollups or plain L1-only apps.
-
-## Docs
-
-- Architecture: [docs/architecture.md](/home/sari/Sinergy-project/docs/architecture.md)
-- Network startup: [docs/network-startup.md](/home/sari/Sinergy-project/docs/network-startup.md)
-- Testnet runbook: [docs/testnet-runbook.md](/home/sari/Sinergy-project/docs/testnet-runbook.md)
-- InitiaDEX routing: [docs/initia-dex-liquidity-routing.md](/home/sari/Sinergy-project/docs/initia-dex-liquidity-routing.md)
-- cUSDC migration: [docs/cusdc-migration.md](/home/sari/Sinergy-project/docs/cusdc-migration.md)
-- Implementation plan: [docs/implementation-plan.md](/home/sari/Sinergy-project/docs/implementation-plan.md)
-
-## Current Trust Model
-
-This repo is optimized for a strong hackathon demo and an operable testnet, not for final trust minimization.
-
-Today:
-
-- matching and routing logic live in the matcher;
-- some settlement logic is off-chain;
-- the private router is operational, but not fully trustless end-to-end;
-- the product already proves the UX and architecture thesis.
-
-That is enough to demonstrate the main idea:
-
-**Sinergy can bring private trading UX and real Initia liquidity together inside one appchain product.**
+Dive deeper into Sinergy's technical design:
+- **Architecture**: [docs/architecture.md](docs/architecture.md)
+- **Network Startup**: [docs/network-startup.md](docs/network-startup.md)
+- **Testnet Runbook**: [docs/testnet-runbook.md](docs/testnet-runbook.md)
+- **InitiaDEX Routing**: [docs/initia-dex-liquidity-routing.md](docs/initia-dex-liquidity-routing.md)
+- **cUSDC Migration**: [docs/cusdc-migration.md](docs/cusdc-migration.md)
+- **Implementation Plan**: [docs/implementation-plan.md](docs/implementation-plan.md)
