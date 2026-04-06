@@ -1,124 +1,61 @@
-# cUSDC Migration
+# Asset Architecture: Bridge-Backed Connected Assets (cUSDC)
 
-## In Simple Terms
+Sinergy utilizes a bridge-backed quote token model, aligning perfectly with the Initia ecosystem's standard for connected assets. This architectural decision ensures that liquidity deployed inside the `Sinergy-2` private rollup remains fully fungible and interoperable with the broader Cosmos and EVM landscapes connected via `initiation-2`.
 
-This document explains why the project is moving away from `sUSDC` and switching to `cUSDC`. The change is not only about naming: it makes the quote asset easier to understand, aligns it with the connected-asset model, and better prepares the bridge path with the Initia ecosystem.
+This document details the transition from mock local liquidity to fully functional Initia bridging logic.
 
-## When To Read This Document
+---
 
-Read this if you are reviewing assets, markets, matcher configuration, or deployments where the move from `sUSDC` to `cUSDC` could affect contracts, UI, or inventory.
+## The Strategic Shift to `cUSDC`
 
-## What To Remember
+Early prototypes of Sinergy utilized `sUSDC` (Sinergy Mock USD), a locally deployed ERC20 token isolated to the rollup. While sufficient for testing internal matchmaking, it compromised the goal of true cross-chain appchain integration.
 
-- `cUSDC` expresses the connected-asset model better than `sUSDC`.
-- The migration affects naming, configuration, markets, and internal balances.
-- This change is already reflected in the active project testnet.
+To solve this, Sinergy implemented the **Connected-Asset Model**, officially deprecating `sUSDC` in favor of **`cUSDC` (Connected USD Coin)**. 
 
-This document tracks the migration away from the legacy local quote token `sUSDC` toward a bridge-backed quote token model based on `cUSDC`.
+### Benefits of the Connected-Asset Integration:
+1.  **Product Clarity**: `cUSDC` provides users with standardized, predictable pricing and bridging semantics mirroring Initia's core `cINIT` token.
+2.  **Cross-Chain Interoperability**: `cUSDC` natively plugs into the Sinergy private router, allowing direct routing into the `InitiaDEX` for real liquidity.
+3.  **Unified Bridge UI**: Simplifies the frontend bridging experience, standardizing claim/redeem flows across all connected assets (`cINIT`, `cUSDC`, `cETH`, `cSOL`, `cBTC`).
 
-## Why This Migration Exists
+---
 
-The migration started because the legacy live testnet used:
+## Technical Implementation & API Readiness
 
-- `sUSDC`
-- `Sinergy Mock USD`
-- a local ERC20 quote token that was connected to Initia DEX routing only through matcher-side canonical mapping
+Integrating bridge-backed assets required extending the `matcher-service` and shared package metadata to handle multichain verifications.
 
-That works technically, but it is confusing from a product perspective because users can read `USDC` semantics into a token that is still deployed as a local mock asset.
+*   **`packages/shared/src/chain.ts`**: The `DeploymentToken` standard was rewritten to encapsulate cross-chain `bridge` metadata (L1 to L2 denom mapping).
+*   **`services/matcher/src/services/bridgeClaims.ts`**: Implemented a generic, robust claim/redeem state machine capable of discovering mapped L2 denoms securely on Sinergy.
+*   **Bridge REST API Engine**: The matcher exposes standardized endpoints for any connected asset:
+    *   `GET /bridge/assets`
+    *   `GET /bridge/claimable/:tokenSymbol/:initiaAddress`
+    *   `POST /bridge/claim` *(Securely bridges OPinit assets to the MiniEVM Vault)*
+    *   `POST /bridge/redeem`
 
-The goal of the migration is:
+---
 
-1. Replace `sUSDC` with `cUSDC`
-2. Make the quote asset naming consistent with the connected-asset model
-3. Prepare the bridge-backed claim/redeem flow so `cUSDC` can behave like `cINIT`
+## Validated Markets on Sinergy-2
 
-## What Has Already Been Prepared
+The shift to `cUSDC` guarantees that Sinergy's market pairs reflect real, routeable liquidity. The current testnet defaults feature these deeply backed pairs:
 
-The repo is now ready for multiple bridge-backed assets, not only `cINIT`.
+*   **Crypto / Majors**:
+    *   `cINIT / cUSDC`
+    *   `cETH / cUSDC`
+    *   `cBTC / cUSDC`
+    *   `cSOL / cUSDC`
+*   **Tokenized Real World Assets (RWAs)**:
+    *   `tAAPL / cUSDC`
+    *   `tBOND / cUSDC`
+    *   `tNVDA / cUSDC`
 
-Main changes:
+---
 
-- [packages/shared/src/chain.ts](../packages/shared/src/chain.ts)
-  `DeploymentToken` now supports `bridge` metadata.
-- [services/matcher/src/services/bridgeClaims.ts](../services/matcher/src/services/bridgeClaims.ts)
-  Claim and redeem logic is generic and can support future bridge-backed tokens such as `cUSDC`.
-- [services/matcher/src/index.ts](../services/matcher/src/index.ts)
-  Added generic bridge endpoints:
-  - `GET /bridge/assets`
-  - `GET /bridge/claimable/:tokenSymbol/:initiaAddress`
-  - `POST /bridge/claim`
-  - `POST /bridge/redeem`
-- [apps/web/src/components/BridgeLanding.tsx](../apps/web/src/components/BridgeLanding.tsx)
-  The bridge UI is now structured to support multiple bridge-backed assets.
+## Operational Migration Record
 
-## Local Deployment Defaults For The Next Deployment
+For transparency and infrastructure auditing, the cutover from legacy mock testing to the active bridge-backed environment was achieved via the following on-chain actions:
 
-The next local deployment now defaults to:
+1.  **Smart Contract Deployment**: Deployed the `ConnectedQuoteToken` standard contract natively as `cUSDC`.
+2.  **Vault Whitelisting**: Whitelisted `cUSDC` within the Zero-Knowledge `DarkPoolVault` to guarantee security.
+3.  **Market Realignment**: Relaunched the base pairing curve across the Sinergy matcher infrastructure against `*/cUSDC`.
+4.  **OPinit Mapping Discovery**: Queried the `Sinergy-2` relayer nodes to identify the deterministic bridged `USDC` denomination on the rollup and linked it securely in the infrastructure's central `deployments/testnet.json`.
 
-- quote token name: `Connected USD Coin`
-- quote token symbol: `cUSDC`
-
-Relevant scripts:
-
-- [scripts/deploy-local.sh](../scripts/deploy-local.sh)
-- [scripts/add-crypto-assets.sh](../scripts/add-crypto-assets.sh)
-
-That means the next fresh local deployment will list markets like:
-
-- `cINIT/cUSDC`
-- `cETH/cUSDC`
-- `cBTC/cUSDC`
-- `cSOL/cUSDC`
-- `tAAPL/cUSDC`
-
-instead of `*/sUSDC`.
-
-## Current Live Status
-
-The running testnet is now switched to `cUSDC`.
-
-Completed live steps:
-
-1. Deployed `ConnectedQuoteToken` as `cUSDC`
-2. Added `cUSDC` to the vault supported token set
-3. Listed `*/cUSDC` markets on-chain
-4. Transferred `cUSDC` ownership to the matcher signer
-5. Discovered the bridged `USDC` denom on Sinergy and added it to [deployments/testnet.json](../deployments/testnet.json)
-6. Switched matcher runtime config to `cUSDC`
-7. Migrated matcher state from legacy `sUSDC` balances to `cUSDC`
-
-## Real On-Chain Migration Checklist
-
-Completed on the current testnet:
-
-1. Deploy a new `cUSDC` ERC20 on Sinergy
-2. Transfer `cUSDC` ownership to the matcher signer
-3. Add `cUSDC` as the vault quote token
-4. List new markets:
-   - `cINIT/cUSDC`
-   - `cETH/cUSDC`
-   - `cBTC/cUSDC`
-   - `cSOL/cUSDC`
-   - `tAAPL/cUSDC`
-   - `tBOND/cUSDC`
-   - `tNVDA/cUSDC`
-5. Update deployment metadata with the new quote token address
-6. Add `bridge` metadata for `cUSDC` once the bridged L2 denom is known
-7. Update matcher runtime config:
-   - `ROUTER_CANONICAL_ASSETS_JSON`
-   - `ROUTER_MARKETS_JSON`
-   - `ROUTER_BOOTSTRAP_INVENTORY_JSON`
-8. Migrate or discard legacy `sUSDC` balances depending on the rollout strategy
-
-## Recommended Rollout
-
-For future environments, keep using the same order:
-
-1. Deploy `cUSDC`
-2. Add the token to the vault and markets
-3. Discover and record the bridged L2 `USDC` denom
-4. Switch matcher runtime config
-5. Migrate internal balances before restarting the matcher
-6. Refresh the frontends and public Nginx build
-
-That keeps the UI and the on-chain/runtime state in sync during the cutover.
+This successful migration ensures Sinergy is operating a production-like asset pipeline suitable for mainnet evaluation.
