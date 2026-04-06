@@ -1,42 +1,48 @@
-# Sinergy Documentation
+# Sinergy Documentation Directory
 
-This folder explains the project from several angles. The goal of this guide is to help you know where to start without opening every file first.
+Welcome to the technical documentation for **Sinergy**, an agent-powered private trading appchain built natively on Initia. 
 
-## If you want a quick understanding of the project
+This directory contains deep-dive architectural references, operational runbooks, and cryptographic design documents. It is intended to help developers, node operators, and hackathon judges quickly navigate the Sinergy technical stack.
 
-- Read [onboarding-hackathon.md](/home/sari/Sinergy-project/docs/onboarding-hackathon.md). It is the best high-level overview of the product, problem, and value proposition.
-- Then read [architecture.md](/home/sari/Sinergy-project/docs/architecture.md). It summarizes how the contracts, backend, and frontend fit together.
+---
 
-## If you want to understand the privacy side
+## 🗺️ Documentation Index
 
-- Read [privacy-architecture.md](/home/sari/Sinergy-project/docs/privacy-architecture.md) to understand what privacy exists today and what the target is.
-- Read [privacy-engine-design.md](/home/sari/Sinergy-project/docs/privacy-engine-design.md) if you need the more technical version of that evolution.
-- Read [zk-withdrawal-runbook.md](/home/sari/Sinergy-project/docs/zk-withdrawal-runbook.md) if you are going to run the real proof-backed deposit and withdrawal flow.
+### 1. System Overview & Architecture
+If you want to understand what Sinergy is and how its microservices and on-chain components interact:
 
-## If you want to operate the network or the testnet environment
+*   **[Main Sinergy README](../README.md)**: Start here for the high-level hackathon pitch, user flow, and feature list.
+*   **[onboarding-hackathon.md](onboarding-hackathon.md)**: A detailed product onboarding guide analyzing the problem space and our specific value proposition.
+*   **[architecture.md](architecture.md)**: The core system overview detailing how the AI Strategy Agent, Private Matcher, and the `Sinergy-2` MiniEVM integrate.
 
-- Read [implementation-plan.md](/home/sari/Sinergy-project/docs/implementation-plan.md) for the overall work plan.
-- Read [testnet-runbook.md](/home/sari/Sinergy-project/docs/testnet-runbook.md) to bring the stack up on testnet.
-- Read [network-startup.md](/home/sari/Sinergy-project/docs/network-startup.md) for day-to-day operational startup.
+### 2. Integration & Liquidity
+Understanding how Sinergy connects with the broader Initia ecosystem:
 
-## If you want to understand integrations or specific changes
+*   **[initia-dex-liquidity-routing.md](initia-dex-liquidity-routing.md)**: Explains the hybrid liquidity model, detailing when trades execute via local private inventory vs. when the AI routes them externally through InitiaDEX on L1.
+*   **[cusdc-migration.md](cusdc-migration.md)**: An architectural record detailing the migration to Initia's bridge-backed connected assets (`cUSDC`, `cINIT`, `cSOL`).
 
-- Read [initia-dex-liquidity-routing.md](/home/sari/Sinergy-project/docs/initia-dex-liquidity-routing.md) to understand when an operation uses local liquidity and when it routes to Initia DEX.
-- Read [cusdc-migration.md](/home/sari/Sinergy-project/docs/cusdc-migration.md) to understand the migration from `sUSDC` to `cUSDC`.
+### 3. ZK Privacy Engine
+For cryptography engineers looking at the private execution and zero-knowledge pathways:
 
-## Recommended reading by profile
+*   **[privacy-architecture.md](privacy-architecture.md)**: Explains current privacy features (off-chain matching, on-chain obfuscation) and the trust model.
+*   **[privacy-engine-design.md](privacy-engine-design.md)**: The longer-term cryptographic evolution path targeting full stealth and TEE integration.
+*   **[zk-withdrawal-runbook.md](zk-withdrawal-runbook.md)**: Instructions for compiling circuits and interacting with the active Groth16/Plonk ZKVault withdrawal flow.
 
-- Product or demo: [onboarding-hackathon.md](/home/sari/Sinergy-project/docs/onboarding-hackathon.md), [architecture.md](/home/sari/Sinergy-project/docs/architecture.md)
-- Backend or smart contracts: [architecture.md](/home/sari/Sinergy-project/docs/architecture.md), [privacy-architecture.md](/home/sari/Sinergy-project/docs/privacy-architecture.md), [privacy-engine-design.md](/home/sari/Sinergy-project/docs/privacy-engine-design.md), [zk-withdrawal-runbook.md](/home/sari/Sinergy-project/docs/zk-withdrawal-runbook.md)
-- DevOps or testnet: [implementation-plan.md](/home/sari/Sinergy-project/docs/implementation-plan.md), [testnet-runbook.md](/home/sari/Sinergy-project/docs/testnet-runbook.md), [network-startup.md](/home/sari/Sinergy-project/docs/network-startup.md)
+### 4. Operations, Testnet, & Deployment
+For node operators and developers evaluating infrastructure health:
 
-## Project idea in simple language
+*   **[network-startup.md](network-startup.md)**: Operational guide for bootstrapping the `Sinergy-2` local environment and OPinit bridge bots.
+*   **[testnet-runbook.md](testnet-runbook.md)**: Instructions for deploying contracts to a live testnet, setting up reverse proxies (Nginx), and securing edge domains via Cloudflare tunneling.
 
-Sinergy aims to make trading crypto and tokenized assets less publicly exposed on-chain. To do that:
+---
 
-- funds are held on-chain;
-- orders and matching live off-chain;
-- the web interface connects the user to that flow;
-- `Initia L1` provides external liquidity when local inventory is not enough.
+## 🚀 Sinergy's Core Design Philosophy
 
-In other words, the chain is used for what must be verifiable, and the rest is kept as private and practical as possible.
+Sinergy aims to revolutionize trading by making complex market operations accessible through AI, while preventing intent leakage and MEV (Miner Extractable Value) on-chain.
+
+To achieve this, the system splits responsibility:
+1.  **AI Orchestration**: Natural-language commands are transformed into signed trading intents by the Strategy Agent.
+2.  **Private Execution**: Order matching and balancing live within an off-chain secure enclave / matcher.
+3.  **Verifiable Custody**: Initia L1 provides deep liquidity, while the `Sinergy-2` rollup guarantees secure asset custody through Zero-Knowledge settlement.
+
+The blockchain handles what **must** be verifiable, while the execution layer ensures operations remain **private, intelligent, and practical**.

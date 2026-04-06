@@ -1,173 +1,140 @@
-# Testnet Runbook
+# Sinergy-2 Appchain Deployment & Hosting Runbook
 
-## In Simple Terms
+This runbook outlines the operational criteria for deploying the Sinergy stack against a live testnet environment. It provides step-by-step instructions for smart contract deployment, service bootstrapping, and exposing internal appchain endpoints to public users securely without disrupting localized workflows.
 
-This document explains how to run `Sinergy` on a real testnet without mixing that environment with the local workflow. It is the practical guide for getting contracts, services, and endpoints ready for external testing.
+---
 
-## When To Read This Document
+## 1. Environment Preparation
 
-Read this once the overall plan is clear and you want to execute the concrete steps to bring the stack up on testnet.
+Before deploying the contracts or starting the services, establish the baseline environment configuration for the testnet target.
 
-## What To Remember
+1. **Deployment Ledger**: Complete the registry parameters in `deployments/testnet.json`.
+2. **Environment Synchronization**: Generate the target `.env` configurations from provided templates:
+   ```bash
+   cp apps/web/.env.testnet.example apps/web/.env.testnet
+   cp apps/bridge/.env.testnet.example apps/bridge/.env.testnet
+   cp services/matcher/.env.testnet.example services/matcher/.env.testnet
+   ```
+3. **Variable Injection**: Replace all `TODO_*` placeholder variables with verifiable operational values (e.g., specific L1 bridge IDs, EVM chain IDs).
 
-- The separation between `local` and `testnet` is an important part of the workflow, not a small detail.
-- First configure files and contracts, then bring up services and public endpoints.
-- The expected result is a usable testnet from wallet and frontend, not just running services.
+---
 
-## Goal
+## 2. Smart Contract Rollout
 
-Run `Sinergy` against an operable testnet rollup without affecting the local workflow.
-
-## 1. Prepare Base Files
-
-1. complete [deployments/testnet.json](../deployments/testnet.json)
-2. copy the templates:
-   - `cp apps/web/.env.testnet.example apps/web/.env.testnet`
-   - `cp apps/bridge/.env.testnet.example apps/bridge/.env.testnet`
-   - `cp services/matcher/.env.testnet.example services/matcher/.env.testnet`
-3. replace all `TODO_*` values
-
-## 2. Deploy Contracts To The Testnet Rollup
-
-Use the wrapper:
+Deploy the foundational `ZKVault` and `DarkPoolMarket` contracts onto the testnet rollup using the deterministic deployment wrapper:
 
 ```bash
 ./scripts/deploy-testnet.sh
 ```
 
-Minimum variables you should override:
-
+**Required Runtime Overrides:**
+To ensure accurate topology routing, supply the following parameters to the script:
 ```bash
 NETWORK_NAME="Sinergy Testnet"
-ROLLUP_CHAIN_ID="TU_ROLLUP_CHAIN_ID"
-TENDERMINT_RPC_URL="https://TU_TENDERMINT_RPC"
-JSON_RPC_URL="https://TU_JSON_RPC"
-WS_URL="wss://TU_EVM_WS"
-REST_URL="https://TU_REST"
-EVM_CHAIN_ID="TU_CHAIN_ID_NUMERICO"
-EVM_CHAIN_ID_HEX="TU_CHAIN_ID_HEX"
-EXPLORER_URL="https://TU_EXPLORER"
+ROLLUP_CHAIN_ID="Sinergy-2"
+TENDERMINT_RPC_URL="https://rpc..."
+JSON_RPC_URL="https://evm-rpc..."
+WS_URL="wss://evm-ws..."
+REST_URL="https://rest..."
+EVM_CHAIN_ID="<NUMERIC_ID>"
+EVM_CHAIN_ID_HEX="<HEX_ID>"
+EXPLORER_URL="https://explorer..."
 MATCHER_PRIVATE_KEY="0x..."
 ./scripts/deploy-testnet.sh
 ```
 
-This updates:
+*Note: Execution will automatically sync state outputs back into `deployments/testnet.json` and `services/matcher/.env.testnet`.*
 
-1. [deployments/testnet.json](../deployments/testnet.json)
-2. `services/matcher/.env.testnet`
+---
 
-## 3. Start Services In Testnet
+## 3. Core Service Bootstrap
 
-### Matcher
+Initiate the primary services running against the testnet variables. It is recommended to run these inside detached sessions (`tmux`, `screen`, or systemd) if persisting the demo environment.
 
+**Matcher Service:**
 ```bash
 npm run dev:matcher:testnet
 ```
 
-### Web
-
+**Next.js Frontend:**
 ```bash
 npm run dev:web:testnet
 ```
 
-### Bridge
-
+**OPinit Bridge Interface:**
 ```bash
 npm run dev:bridge:testnet
 ```
 
-## 4. Expose The Stack To The Internet
+---
 
-1. start the base stack:
+## 4. Public Ingress & Reverse Proxy (Nginx)
 
-```bash
-./scripts/start-testnet-stack.sh
-```
+To provide access to judges or users without sharing direct port strings, Sinergy utilizes an NGinx reverse proxy container to unify all endpoints.
 
-2. start the Nginx proxy in Docker:
+**Initialization:**
+1. Start the underlying operational stack:
+   ```bash
+   ./scripts/start-testnet-stack.sh
+   ```
+2. Spawn the Nginx Edge gateway:
+   ```bash
+   ./scripts/public-nginx.sh start
+   ```
 
-```bash
-./scripts/public-nginx.sh start
-```
+**Routing Behavior:**
+The Nginx layer builds the static clients (web, bridge) in testnet mode and strictly reverse-proxies the backend capabilities:
+- Frontend static hosting
+- Matcher API
+- JSON-RPC and EVM WebSockets
+- Cosmos REST and Tendermint RPC
 
-That script:
-
-1. builds `web` and `bridge` in `testnet` mode
-2. serves those static builds from Nginx
-3. reverse-proxies `matcher`, `rpc`, `ws`, `rest`, and `tm`
-
-3. inspect the computed hosts:
-
-```bash
-./scripts/public-nginx.sh print-env
-```
-
-4. if the machine is behind a router/NAT, forward:
-   - `80 -> 192.168.1.14:8080`
-   - `443 -> 192.168.1.14:8443`
-
-5. request a certificate once DNS resolves to your public IP:
-
+**DNS & SSL Automation:**
+Once DNS A-records are propagated to your server's ingress IP, generate zero-downtime Let's Encrypt certificates:
 ```bash
 LETSENCRYPT_EMAIL=you@example.com ./scripts/request-public-cert.sh
 ```
 
-6. update your testnet env files to use:
-   - `https://app.<root>`
-   - `https://bridge.<root>`
-   - `https://api.<root>`
-   - `https://rpc.<root>`
-   - `wss://ws.<root>`
-   - `https://rest.<root>`
-   - `https://tm.<root>`
-   - `https://indexer.<root>`
+Ensure your `.env.testnet` files point to the secure domains: `https://app.<root>`, `https://api.<root>`, `wss://ws.<root>`, etc.
 
-## 5. Expose Without Opening Router Ports
+---
 
-If you do not want to touch the router, use Cloudflare Tunnel:
+## 5. Zero-Trust Tunneling (Cloudflare)
 
+If port forwarding (`80`/`443`) is impossible due to NATs, firewalls, or lack of static IP ranges, use the bundled Cloudflare Tunnel integration.
+
+**Ephemeral Public Gateway:**
 ```bash
 ./scripts/cloudflare-tunnel.sh quick
 ```
+This generates a temporary `https://<random>.trycloudflare.com` edge endpoint, orchestrating:
+1. `/*` -> App Frontend
+2. `/api` -> Matcher
+3. `/rpc` -> EVM JSON-RPC
+4. `/rest` -> Cosmos REST
+5. `/tm` -> Tendermint RPC
+6. `/ws` -> EVM WebSocket
 
-This creates a `https://<random>.trycloudflare.com` URL and publishes:
+**Persistent Edge Access:**
+For a stable domain configuration on Cloudflare:
+```bash
+CF_TUNNEL_TOKEN=... ./scripts/cloudflare-tunnel.sh named
+```
 
-1. app at `/`
-2. matcher at `/api`
-3. EVM JSON-RPC at `/rpc`
-4. Cosmos REST at `/rest`
-5. Tendermint RPC at `/tm`
-6. indexer path at `/indexer`
-7. EVM websocket at `/ws`
-
-Useful commands:
-
+**Tunnel Operations:**
 ```bash
 ./scripts/cloudflare-tunnel.sh status
 ./scripts/cloudflare-tunnel.sh stop
 ```
 
-If you later want your own domain and stable hostnames in Cloudflare:
+---
 
-```bash
-CF_TUNNEL_TOKEN=... ./scripts/cloudflare-tunnel.sh named
-```
+## 6. End-to-End Validation Criteria
 
-## 6. Minimum Verification
+The testnet node is considered fully functional and ready for judges/end-users when:
 
-1. matcher starts with `DEPLOYMENT_FILE=../../deployments/testnet.json`
-2. `GET /health` responds
-3. `GET /bridge/status` reflects real OPinit/relayer health
-4. `web` connects the wallet and resolves the `customChain`
-5. `bridge` opens the official flow with the configured defaults
-
-## 7. Exit Criteria
-
-Testnet is considered “operable” when:
-
-1. you can connect a wallet
-2. you can deposit into `DarkPoolVault`
-3. you can submit orders or swaps
-4. matcher can sign withdrawals
-5. the frontend no longer depends on `localhost`
-6. MetaMask or Coinbase Wallet accept `https://rpc.<root>`
+1. **Environment State**: The matcher boots gracefully using the anchor file `DEPLOYMENT_FILE=../../deployments/testnet.json`.
+2. **Network Liveness**: `GET /health` requests yield sequential successes.
+3. **Cross-Chain Discovery**: `GET /bridge/status` actively reflects healthy synchronization with the OPinit relayer index.
+4. **Wallet Integrity**: EVM wallets smoothly auto-add the `Sinergy Testnet` via the exposed JSON-RPC edge without internal `localhost` dependencies.
+5. **Private Settlement**: ZKVault deposits, order matchings, and withdrawal signature flows complete instantaneously on the frontend without blocking errors.
