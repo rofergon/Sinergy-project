@@ -1,133 +1,69 @@
-# Sinergy Dark RWA Market
+# Sinergy System Architecture
 
-## In Simple Terms
+This document provides a high-level technical overview of the Sinergy appchain. It details how the AI strategy agent, the private execution environment, zero-knowledge (ZK) settlement, and Initia routing interact to form a cohesive, privacy-preserving trading platform.
 
-This document explains the simplest way to understand `Sinergy`: funds live in contracts, but orders and matching are not published on-chain. That creates a more private experience than a fully public DEX without losing control over deposits and withdrawals.
+## High-Level Objective
 
-## When To Read This Document
+Sinergy transforms natural-language trading intents into verifiable, private executions. Users can securely deposit funds into the `Sinergy-2` MiniEVM rollup, express trading strategies to an AI agent, have their orders executed privately or routed externally upon validation, and withdraw assets using ZK proofs—minimizing their on-chain trading footprint.
 
-Read this if you want a system-level overview before getting into privacy, testnet, or ZK details.
+---
 
-## What To Remember
+## Core System Components
 
-- `Sinergy` does not put the order book on-chain.
-- Contracts hold funds and validate exits; the backend runs the market logic.
-- Current privacy comes mainly from separating private execution from public settlement.
+The Sinergy architecture is divided into the **Appchain/Rollup Layer**, the **Off-chain Services (Agent & Matcher)**, and the **Client Layer**.
 
-## Objective
+### 1. The Strategy Agent (`strategy-agent`)
+The intelligence layer of Sinergy. Instead of burdening the user with complex trading interfaces, this service acts as the orchestration brain.
+*   **Natural Language Processing**: Translates plain-English descriptions into structured constraints (e.g., specific entry prices, stop losses, time-weighted executions).
+*   **Contextual Awareness**: Injects real-time market data, technical indicators, and user portfolio states into its reasoning core.
+*   **Validation & Backtesting**: Simulates the generated strategy against historical or real-time mock data to validate correctness before any state is transmitted to the matcher.
+*   **Intent Generation**: Outputs a cryptographic payload describing the explicit bounds of the allowed execution, signed by the user's session key.
 
-Build an RWA market on `Sinergy-2` where buyers and sellers can:
+### 2. Private Matcher & Router (`matcher`)
+The execution engine that runs off-chain for maximum privacy and performance, settling selectively on the appchain.
+*   **Dark Pool Operations**: Maintains an internal, encrypted state of deposits, open orders, and balance updates. It executes price-time matching privately for local liquidity (e.g., Sinergy-native RWAs or internal bridge assets).
+*   **InitiaDEX Routing**: If an AI strategy requires liquidity beyond the dark pool, the router seamlessly taps into `initiation-2` L1 liquidity via InitiaDEX, performing optimal routing while still masking the user's origin intent where possible.
+*   **State Anchoring**: Periodically calculates a Merkle root of the internal execution state and commits it to the `Sinergy-2` rollup, allowing mathematically verified off-chain progression.
 
-- deposit liquidity into a shared vault;
-- negotiate orders without publishing them on-chain;
-- execute matching off-chain;
-- withdraw positions from the vault via signed tickets;
-- reduce the on-chain visible footprint to deposits, withdrawals, and periodic state anchors.
+### 3. Sinergy-2 MiniEVM Rollup (On-chain)
+The Initia-native execution layer ensuring secure asset custody and state verification.
+*   **`ZKVault`**: The primary smart contract custodying user assets (like bridged `cUSDC`, `cINIT`, `cSOL`). Deposits are recorded here, but local balance changes from trading remain off-chain until withdrawal.
+*   **`StateAnchor`**: Receives batch hashes (`stateRoot`, `settlementRoot`) from the matcher. This acts as the source of truth for the latest valid off-chain ledger state.
+*   **`WithdrawalVerifier`**: A crucial privacy component. Users withdraw their funds by generating a Zero-Knowledge proof (Groth16/Plonk) on the client side, proving they own unspent balances in the established Merkle state. The `WithdrawalVerifier` validates this proof on-chain without revealing the exact trade history that led to the balance.
 
-## Translation of `ssl` to Initia
+### 4. Client & UI Layer (`web`)
+A privacy-first trading terminal.
+*   **Initia Integration**: Native integration with `InterwovenKit`, enabling seamless connections to Initia infrastructure and EVM-compatible wallets.
+*   **Agent Interaction Interface**: A dedicated UI panel to communicate with the Strategy Agent, visualize backtesting metrics, and approve AI-generated intents via EIP-712 signatures.
+*   **ZK Proof Generation**: Built-in WASM circuits that calculate the complex mathematics for ZK withdrawals locally in the browser, keeping sensitive data strictly on the user's device.
 
-The reference project `furqaannabi/ssl` relies on three pieces we cannot use directly in `Sinergy-2`:
+---
 
-1. `Chainlink CRE` for confidential matching in TEE.
-2. `Chainlink ACE / World ID` for compliance enforcement.
-3. `Convergence Vault` for private settlement already solved by third parties.
+## The Request Lifecycle (End-to-End)
 
-In this MVP we replace them as follows:
+1.  **Fund Custody**: The user bridges assets (e.g., OPinit) and deposits `cUSDC` into the `ZKVault` on `Sinergy-2`.
+2.  **Intent Formulation**: The user types a strategy: "Buy $100 of cBTC when it dips 5%."
+3.  **Agent Orchestration**: 
+      * The `strategy-agent` parses the request.
+      * Retrieves current `cBTC` prices from Initia oracles.
+      * Formulates a structured limit order or a time-delayed trigger constraint.
+      * Returns a transaction payload for user approval.
+4.  **Authorization**: The user reviews the AI's deterministic plan in the UI and securely signs the EIP-712 payload.
+5.  **Execution & Routing**: 
+      * The `matcher` queues the order.
+      * It first attempts to cross the order privately within the internal dark pool.
+      * If liquidity is shallow, the `router` component formulates exactly the needed swap transaction against `InitiaDEX` to fulfill the AI's parameter bounds.
+6.  **State Commitment**: The matcher bundles the execution details and anchors the new `stateRoot` onto the `StateAnchor` contract without publishing the individual trades.
+7.  **Private Withdrawal**: To exit, the user requests their balance from the UI. The browser generates a ZK proof against the latest `stateRoot` and submits it to the `WithdrawalVerifier`. Funds are unlocked from the `ZKVault`.
 
-| SSL | Sinergy MVP |
-|---|---|
-| CRE TEE | own `matcher-service` |
-| Confidential HTTP / Chainlink oracle | own `price service` with mock/manual/http adapters |
-| Convergence vault | `DarkPoolVault` |
-| ACE / World ID | decoupled compliance layer in backend |
-| Shield settlement outside our control | internal off-chain settlement + signed withdrawals |
+---
 
-## Components
+## Trust Model & Future Work
 
-### 1. `DarkPoolVault` on-chain
+Sinergy relies on separating **private execution** from **public settlement**. The current system provides robust privacy against public blockchain observers, as the exact orderbook and individual trade pathways are not written sequentially into block data.
 
-Custody contract for `USDC` and RWA tokens.
-
-- receives ERC20 deposits;
-- emits `Deposit` and `Withdraw` events;
-- does not expose order book or matchings;
-- only allows withdrawals with EIP-712 signed permissions from the authorized backend.
-
-This makes on-chain visible activity minimal:
-
-- `approve + deposit`
-- `withdraw`
-- periodic order book state anchors
-
-### 2. `DarkPoolMarket` on-chain
-
-Lightweight control contract that:
-
-- registers listed markets;
-- stores batches anchored by the matcher (`stateRoot`, `settlementRoot`);
-- allows auditing snapshots without revealing each order.
-
-### 3. `matcher-service`
-
-TypeScript backend responsible for:
-
-- maintaining internal balances per user and token;
-- synchronizing deposits from the vault;
-- validating available balances;
-- storing limit orders;
-- executing price-time matching;
-- applying slippage guards with a reference price;
-- signing withdrawal tickets for the frontend.
-
-### 4. `web`
-
-Vite + React + wagmi/viem frontend for:
-
-- connecting an EVM wallet;
-- approving and depositing into the vault;
-- synchronizing internal balances;
-- sending private orders to the backend;
-- requesting withdrawal tickets and executing `withdraw`.
-
-## What privacy we achieve in this first cut
-
-### Yes
-
-- the order book and trading intent do not live on-chain;
-- other participants do not see open orders;
-- internal matching rebalances are not published on-chain;
-- visible settlement is concentrated in the vault and batch hashes.
-
-### Not yet
-
-- the backend operator can see orders in plaintext;
-- no TEE or zk to hide logic from the operator;
-- no strong compliance in contract;
-- no full stealth withdrawals yet.
-
-## Trust model
-
-This MVP prioritizes build speed over total cryptographic privacy.
-
-Current trust assumptions:
-
-1. The user trusts the `matcher-service` to maintain the internal order book.
-2. The user trusts the backend signer to authorize correct withdrawals.
-3. The contract limits damage because it only moves funds through explicit deposits and signed tickets.
-
-## Recommended evolution
-
-### Phase 2
-
-- client -> backend encryption with ECIES;
-- SQL persistence + full auditing;
-- separate processes for matcher, risk, and oracle;
-- Merkle snapshot of the internal ledger;
-- compliance via allowlists, KYC, or attestations.
-
-### Phase 3
-
-- private settlement with stealth addresses;
-- per-user balance proofs;
-- matcher execution in TEE or confidential environment;
-- zk proofs for settlement batches.
+### Next Evolution (Phase 2)
+To move towards complete trust-minimization (preventing even the matcher operator from front-running):
+-   Migrate the matcher engine to a Trusted Execution Environment (TEE).
+-   Deploy homomorphic encryption overlays for the AI Agent input state.
+-   Replace EIP-712 signed tickets with pure client-side ZK-VM execution paths.
