@@ -165,6 +165,15 @@ function formatProviderDate(date: Date) {
   return date.toISOString().slice(0, 19);
 }
 
+function isNoDataProviderMessage(message?: string) {
+  const normalized = message?.trim().toLowerCase() ?? "";
+  return (
+    normalized.includes("no data is available") ||
+    normalized.includes("no data available") ||
+    normalized.includes("no values returned")
+  );
+}
+
 function formatFallbackBar(price: string): StoredBarRow {
   const close = Number(price);
   const ts = Math.floor(Date.now() / 60_000) * 60;
@@ -679,12 +688,15 @@ export class PriceService {
 
     const payload = (await response.json()) as TwelveDataResponse;
     if (payload.status === "error") {
+      if (isNoDataProviderMessage(payload.message)) {
+        return;
+      }
       throw new Error(payload.message ?? `Provider error for ${providerSymbol}`);
     }
 
     const values = Array.isArray(payload.values) ? payload.values : [];
     if (values.length === 0) {
-      throw new Error(`No values returned for ${providerSymbol}`);
+      return;
     }
 
     const insert = this.db.prepare(`
