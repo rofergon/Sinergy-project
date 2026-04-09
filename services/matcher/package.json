@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
     "dev:testnet": "bash -lc 'set -a; if [ -f ./.env.testnet ]; then . ./.env.testnet; fi; set +a; tsx watch src/index.ts'",
+    "patch-recent": "bash -lc 'set -a; if [ -f ./.env ]; then . ./.env; fi; set +a; tsx src/patchRecentPrices.ts'",
     "start": "tsx src/index.ts",
     "start:testnet": "bash -lc 'set -a; if [ -f ./.env.testnet ]; then . ./.env.testnet; fi; set +a; tsx src/index.ts'",
     "test": "tsx --test src/**/*.test.ts",
