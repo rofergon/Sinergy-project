@@ -32,6 +32,7 @@ For cryptography engineers looking at the private execution and zero-knowledge p
 For node operators and developers evaluating infrastructure health:
 
 *   **[network-startup.md](network-startup.md)**: Operational guide for bootstrapping the `Sinergy-2` local environment and OPinit bridge bots.
+*   **[price-patch-runbook.md](price-patch-runbook.md)**: Restore recent gaps in the local matcher price database after the matcher has been offline.
 *   **[testnet-runbook.md](testnet-runbook.md)**: Instructions for deploying contracts to a live testnet, setting up reverse proxies (Nginx), and securing edge domains via Cloudflare tunneling.
 
 ---
