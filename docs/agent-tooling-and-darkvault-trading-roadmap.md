@@ -1,71 +1,71 @@
-# Agent: comportamiento actual, tooling y roadmap para ejecutar trades en DarkVault
+# Agent: current behavior, tooling, and a roadmap to execute trades in DarkVault
 
-Este documento aterriza **cómo funciona hoy el agente** en este repo (qué servicios toca, qué herramientas tiene disponibles y cómo se orquesta), y propone un **roadmap concreto** para que el agente pueda **ejecutar trades dentro de la plataforma (DarkVault / matcher)** con guardrails, autorización y observabilidad.
+This document explains **how the agent works today** in this repo (which services it touches, which tools it has available, and how it orchestrates them), and proposes a **concrete roadmap** to let the agent **execute trades inside the platform (DarkVault / matcher)** with guardrails, authorization, and observability.
 
-> Estado a la fecha: el agente existente está enfocado en **construcción/validación/backtesting de estrategias**. La **ejecución** (órdenes y swaps) existe en el `matcher` y en la UI, pero **no está expuesta como “tools” del agente** ni tiene un modelo de autorización apto para ejecución autónoma.
+> Current state: the existing agent is focused on **building/validating/backtesting strategies**. **Execution** (orders and swaps) exists in the `matcher` and in the UI, but **is not exposed as agent “tools”** and does not yet have an authorization model suitable for autonomous execution.
 
-## 1) Dónde vive “el agente” y cómo actúa
+## 1) Where the “agent” lives and how it acts
 
-### Servicios y responsabilidades (as-is)
+### Services and responsibilities (as-is)
 
 - `services/strategy-agent/`:
-  - API Fastify para “agent sessions” y ejecución del runtime del agente.
-  - Endpoints principales:
+  - Fastify API for agent sessions and the agent runtime.
+  - Main endpoints:
     - `GET /agent/health`
     - `GET /agent/capabilities`
     - `GET /agent/sessions` / `GET /agent/sessions/:sessionId`
     - `POST /agent/strategy/plan`
-    - `POST /agent/strategy/run` y `POST /agent/strategy/run/stream`
-  - Archivo de entrada: `services/strategy-agent/src/index.ts`.
+    - `POST /agent/strategy/run` and `POST /agent/strategy/run/stream`
+  - Entry point: `services/strategy-agent/src/index.ts`.
 
 - `services/matcher/`:
-  - Motor de ejecución off-chain (matching, router, vault sync, etc.).
-  - Exposición de “strategy tools” consumibles por el agente:
+  - Off-chain execution engine (matching, router, vault sync, etc.).
+  - Exposes “strategy tools” that the agent can call:
     - `GET /strategy-tools/catalog`
     - `POST /strategy-tools/:tool`
-  - Archivo de entrada: `services/matcher/src/index.ts`.
+  - Entry point: `services/matcher/src/index.ts`.
 
 - `packages/shared/`:
-  - Define el contrato de herramientas (schemas Zod + catálogo + transport HTTP).
-  - Hoy: `packages/shared/src/strategyTools.ts` define `strategyToolDefinitions`, `strategyToolInputSchemas` y `createHttpStrategyToolTransport(...)`.
+  - Defines the tools contract (Zod schemas + tool catalog + HTTP transport).
+  - Today: `packages/shared/src/strategyTools.ts` defines `strategyToolDefinitions`, `strategyToolInputSchemas`, and `createHttpStrategyToolTransport(...)`.
 
 - `apps/web/`:
-  - UI para el modo agentic (Strategy Studio).
-  - Componente clave: `apps/web/src/components/StrategyAgentPanel.tsx` consume el API del agente (`/agent/*`) y renderiza trace/outputs.
+  - UI for agentic mode (Strategy Studio).
+  - Key component: `apps/web/src/components/StrategyAgentPanel.tsx` calls the agent API (`/agent/*`) and renders trace/outputs.
 
-### Tooling del agente (as-is)
+### Agent tooling (as-is)
 
-El agente sólo puede usar herramientas de estrategia definidas en `@sinergy/shared`:
+The agent can only use strategy tools defined in `@sinergy/shared`:
 
 - Discovery: `list_strategy_capabilities`, `analyze_market_context`, `list_strategy_templates`, `list_user_strategies`, `get_strategy`
 - Mutations: `create_strategy_draft`, `update_strategy_draft`, `save_strategy`, `clone_strategy_template`
 - Verification/terminal: `validate_strategy_draft`, `run_strategy_backtest`, `get_backtest_summary`, `get_backtest_trades`, `get_backtest_chart_overlay`
 
-La ejecución real del tool-call sucede contra el matcher:
+Tool execution actually happens against the matcher:
 
-- Transporte HTTP: `createHttpStrategyToolTransport(...)` (shared) llama `POST /strategy-tools/:tool`.
-- En el matcher, `services/matcher/src/services/strategyToolApi.ts` valida input (Zod), rate-limitea por owner y ejecuta via `StrategyService`.
-- Envoltorio de errores/meta: `services/matcher/src/services/strategyToolSecurity.ts`.
+- HTTP transport: `createHttpStrategyToolTransport(...)` (shared) calls `POST /strategy-tools/:tool`.
+- In the matcher, `services/matcher/src/services/strategyToolApi.ts` validates input (Zod), rate-limits per owner, and executes via `StrategyService`.
+- Error/meta wrapper: `services/matcher/src/services/strategyToolSecurity.ts`.
 
-### Runtime del agente: tool-calling nativo vs fallback
+### Agent runtime: native tool-calling vs fallback
 
-`services/strategy-agent` está diseñado para operar con modelos que:
+`services/strategy-agent` is designed to work with models that:
 
-1) soportan tool-calling (vía LangChain), o
-2) **no** soportan tool-calling: usa un **fallback planner** que obliga al modelo a devolver JSON y el servidor invoca la herramienta.
+1) support tool-calling (via LangChain), or
+2) **do not** support tool-calling: it uses a **fallback planner** that forces the model to return JSON and the server invokes the tool.
 
-Piezas relevantes:
+Relevant pieces:
 
-- Prompt principal y reglas del workflow: `services/strategy-agent/src/prompts.ts`.
-- Catálogo y wrapping de tools (con trace): `services/strategy-agent/src/services/matcherTools.ts`.
-- Políticas de runtime / métricas / stall detection: `services/strategy-agent/src/services/runtimePolicy.ts`.
+- Main prompt and workflow rules: `services/strategy-agent/src/prompts.ts`.
+- Tool catalog + wrapping (with trace): `services/strategy-agent/src/services/matcherTools.ts`.
+- Runtime policies / metrics / stall detection: `services/strategy-agent/src/services/runtimePolicy.ts`.
 - Fallback loop (JSON planner): `services/strategy-agent/src/services/fallbackRuntime.ts`.
 
-## 2) Qué sí existe hoy para “trading” (pero fuera del agente)
+## 2) What already exists today for “trading” (but outside the agent)
 
-En el matcher ya existen endpoints de ejecución que la UI usa directamente:
+The matcher already exposes execution endpoints that the UI uses directly:
 
-- Órdenes:
+- Orders:
   - `GET /orders/:address`
   - `POST /orders`
   - `POST /orders/:id/cancel`
@@ -74,142 +74,142 @@ En el matcher ya existen endpoints de ejecución que la UI usa directamente:
   - `POST /swap/execute`
   - `GET /swap/status/:id`
 
-Referencias:
-- `services/matcher/src/index.ts` (rutas).
-- UI de swaps: `apps/web/src/components/SwapPanel.tsx`.
+References:
+- `services/matcher/src/index.ts` (routes).
+- Swap UI: `apps/web/src/components/SwapPanel.tsx`.
 
-Limitación importante (as-is):
-- Estos endpoints toman `userAddress` en el body, pero **no validan una firma** ni un token de autorización por request. Esto es aceptable para un demo local, pero **no es suficiente** para habilitar ejecución autónoma desde un agente.
+Important limitation (as-is):
+- These endpoints accept `userAddress` in the request body, but **do not verify a signature** or an authorization token per request. That’s fine for a local demo, but **not sufficient** to enable agent-driven autonomous execution.
 
-## 3) Gap: por qué el agente “no hace trades” hoy
+## 3) Gap: why the agent “doesn’t trade” today
 
-1) No existen “agent tools” para trading (órdenes/swaps). El catálogo de tools (`strategyToolDefinitions`) está limitado a estrategias/backtesting.
-2) No hay un modelo robusto de autorización/consentimiento para que un agente ejecute acciones con fondos:
-   - falta una capa de “intent signing” (por ejemplo EIP-712) y verificación server-side,
-   - falta un mecanismo de “human-in-the-loop” o delegación acotada.
-3) No hay un policy layer específico de ejecución (riesgo, límites, slippage, allowlists) aplicado a herramientas de trading.
-4) Observabilidad/auditoría de ejecuciones no está integrada al loop del agente (más allá del trace de strategy tools).
+1) There are no agent tools for trading (orders/swaps). The tool catalog (`strategyToolDefinitions`) is limited to strategy building/backtesting.
+2) There is no robust authorization/consent model for an agent to execute actions with funds:
+   - missing an intent-signing layer (e.g., EIP-712) and server-side verification,
+   - missing a human-in-the-loop (HITL) or constrained delegation mechanism.
+3) There is no execution-specific policy layer (risk limits, slippage caps, allowlists) applied to trading actions.
+4) Execution observability/auditing is not integrated into the agent loop (beyond the trace for strategy tools).
 
-## 4) Roadmap propuesto: ejecutar trades dentro de DarkVault (matcher) de forma segura
+## 4) Proposed roadmap: safely executing trades inside DarkVault (matcher)
 
-### Principios de diseño
+### Design principles
 
-- El servicio del agente **no debe** custodiar llaves privadas ni “firmar por el usuario”.
-- La ejecución debe ser **determinista y auditable**: lo que se ejecuta debe estar acotado por un artefacto verificable (intento/quote/nonce/expiry).
-- Separar explícitamente:
-  - **Tools de lectura** (estado/balances/quotes),
-  - **Tools de preparación** (borradores / intents),
-  - **Tools de ejecución** (requieren aprobación o delegación válida).
+- The agent service **must not** custody private keys or “sign as the user”.
+- Execution must be **deterministic and auditable**: what gets executed must be bounded by a verifiable artifact (intent/quote/nonce/expiry).
+- Explicitly separate:
+  - **Read tools** (state/balances/quotes),
+  - **Preparation tools** (drafts / intents),
+  - **Execution tools** (require approval or valid delegation).
 
-### Fase 0 — Alinear contrato “as-is” vs “aspiracional” (1–2 días)
+### Phase 0 — Align “as-is” vs “aspirational” contract (1–2 days)
 
-- Documentar claramente qué está implementado y qué no (por ejemplo, `docs/architecture.md` menciona aprobación EIP-712, pero en el código actual no hay verificación de firmas en `/swap/*` o `/orders`).
-- Definir el “mínimo seguro” para ejecución:
-  - Modo 1: **human-in-the-loop** (recomendado para el primer release).
-  - Modo 2: **delegación acotada** (session key / allowance / policies), posterior.
+- Clearly document what is implemented vs not (e.g., `docs/architecture.md` mentions EIP-712 approval, but current code does not verify signatures on `/swap/*` or `/orders`).
+- Define the “minimum safe” execution mode:
+  - Mode 1: **human-in-the-loop** (recommended for the first release).
+  - Mode 2: **constrained delegation** (session key / allowance / policies), later.
 
-### Fase 1 — Crear un sistema de “Trade Tools” paralelo a “Strategy Tools” (3–6 días)
+### Phase 1 — Create a “Trade Tools” system parallel to “Strategy Tools” (3–6 days)
 
-Crear un módulo equivalente a `strategyTools` pero para ejecución, p.ej.:
+Create a module equivalent to `strategyTools` but for execution, e.g.:
 
 - `packages/shared/src/tradeTools.ts`
-  - `tradeToolInputSchemas` (Zod strict)
-  - `tradeToolDefinitions` (catálogo + descripciones)
+  - `tradeToolInputSchemas` (strict Zod)
+  - `tradeToolDefinitions` (catalog + descriptions)
   - `createHttpTradeToolTransport(...)`
   - `createLangChainCompatibleTradeTools(...)`
 
-Tools sugeridas (mínimo viable):
+Suggested tools (minimum viable):
 
-- Lectura:
-  - `get_balances` (o `get_internal_balances`): mirror de `GET /balances/:address`.
-  - `list_open_orders`: mirror de `GET /orders/:address`.
-  - `get_swap_quote`: wrapper de `POST /swap/quote`.
-  - `get_swap_status`: wrapper de `GET /swap/status/:id`.
-- Preparación/ejecución (con guardrails):
-  - `prepare_swap_intent` → devuelve quote + parámetros y un `intentHash`.
-  - `execute_swap_intent` → requiere `intent` + `signature` (modo HITL) o `delegationToken` (modo delegado).
-  - `place_limit_order_intent` / `cancel_order_intent` en el mismo patrón.
+- Read:
+  - `get_balances` (or `get_internal_balances`): mirror of `GET /balances/:address`.
+  - `list_open_orders`: mirror of `GET /orders/:address`.
+  - `get_swap_quote`: wrapper of `POST /swap/quote`.
+  - `get_swap_status`: wrapper of `GET /swap/status/:id`.
+- Preparation/execution (with guardrails):
+  - `prepare_swap_intent` → returns quote + parameters and an `intentHash`.
+  - `execute_swap_intent` → requires `intent` + `signature` (HITL) or a `delegationToken` (delegated mode).
+  - `place_limit_order_intent` / `cancel_order_intent` in the same pattern.
 
-### Fase 2 — Exponer `/trade-tools/*` en el matcher con seguridad consistente (3–6 días)
+### Phase 2 — Expose `/trade-tools/*` in the matcher with consistent security (3–6 days)
 
-En `services/matcher`:
+In `services/matcher`:
 
-- Agregar:
-  - `services/matcher/src/services/tradeToolApi.ts` (switch por tool + validación)
-  - `services/matcher/src/services/tradeToolSecurity.ts` (meta + errores + rate limit)
+- Add:
+  - `services/matcher/src/services/tradeToolApi.ts` (tool switch + validation)
+  - `services/matcher/src/services/tradeToolSecurity.ts` (meta + errors + rate limit)
   - Endpoints:
     - `GET /trade-tools/catalog`
     - `POST /trade-tools/:tool`
 
-Implementación incremental:
+Incremental implementation:
 
-- Inicialmente, los trade-tools pueden delegar a las funciones ya existentes:
+- Initially, trade-tools can delegate to existing functions:
   - `liquidityRouter.quote(...)`, `liquidityRouter.execute(...)`
   - `matchingService.placeOrder(...)`, `matchingService.cancelOrder(...)`
-- Mantener `/swap/*` y `/orders*` para UI legacy, pero dirigir el roadmap a que la ejecución “real” pase por trade-tools (con policy + auth).
+- Keep `/swap/*` and `/orders*` for legacy UI, but steer the roadmap so “real” execution flows through trade-tools (with policy + auth).
 
-### Fase 3 — Autorización: intents firmados (HITL) y verificación server-side (4–10 días)
+### Phase 3 — Authorization: signed intents (HITL) and server-side verification (4–10 days)
 
-Modelo recomendado para el primer release:
+Recommended model for the first release:
 
-- El agente sólo produce un **intent** (no ejecuta).
-- La UI muestra un “Review & Approve” y el usuario firma (EIP-712).
-- El matcher valida firma + nonce + expiry y recién ahí ejecuta.
+- The agent only produces an **intent** (does not execute).
+- The UI shows “Review & Approve” and the user signs (EIP-712).
+- The matcher verifies signature + nonce + expiry and only then executes.
 
-Diseño sugerido del intent (ejemplo swap):
+Suggested intent design (swap example):
 
-- Campos típicos:
+- Typical fields:
   - `owner` (address), `marketId`, `fromToken`, `amountIn`, `minOut`, `routePreference`
   - `expiry`, `nonce`, `chainId`, `matcherDomain`
-  - opcional: `maxSlippageBps`, `maxPriceImpactBps`, `maxNotionalQuote`
+  - optional: `maxSlippageBps`, `maxPriceImpactBps`, `maxNotionalQuote`
 
-Cambios requeridos:
+Required changes:
 
-- Agregar verificación de firma a la capa de ejecución (idealmente dentro de `/trade-tools/execute_*`).
-- Persistir nonce/anti-replay por `owner` en DB.
+- Add signature verification to the execution layer (ideally inside `/trade-tools/execute_*`).
+- Persist per-owner nonce / anti-replay state in the DB.
 
-### Fase 4 — Guardrails/riesgo y “policy engine” (3–8 días)
+### Phase 4 — Guardrails/risk and a “policy engine” (3–8 days)
 
-Aplicar guardrails tanto:
+Apply guardrails both:
 
-- server-side (matcher): fuente de verdad para límites, allowlists y checks, y
-- agent-side (strategy-agent runtime): evitar que el modelo “salte” pasos o llame ejecución sin confirmación.
+- server-side (matcher): the source of truth for limits, allowlists, and checks, and
+- agent-side (strategy-agent runtime): prevent the model from skipping steps or executing without confirmation.
 
-Checklist mínima:
+Minimum checklist:
 
-- Allowlist de `marketId` y tokens permitidos.
-- Límites por owner: notional máximo por trade/día, slippage máximo, cooldown por tool.
-- Validación de balances (internos/vault) antes de preparar o ejecutar.
-- En swaps: exigir `minOut` y `expiry` siempre; en órdenes: exigir limitPrice razonable (o prohibir market orders al inicio).
+- Allowlist `marketId` and allowed tokens.
+- Per-owner limits: max notional per trade/day, max slippage, cooldown per tool.
+- Balance checks (internal/vault) before preparing or executing.
+- For swaps: always require `minOut` and `expiry`; for orders: require a reasonable limit price (or prohibit market orders initially).
 
-### Fase 5 — Integración en `strategy-agent`: catálogo mixto y UX (3–7 días)
+### Phase 5 — Integrate into `strategy-agent`: mixed catalog + UX (3–7 days)
 
-Opciones:
+Options:
 
-1) Extender el `strategy-agent` actual para soportar **dos catálogos**:
-   - `strategyTools` (construcción/backtest)
-   - `tradeTools` (lectura/ejecución)
-2) Crear un servicio separado (`trade-agent`) y mantener responsabilidades separadas.
+1) Extend the current `strategy-agent` to support **two catalogs**:
+   - `strategyTools` (build/backtest)
+   - `tradeTools` (read/execute)
+2) Create a separate service (`trade-agent`) and keep responsibilities separate.
 
-Para reducir complejidad inicial, la opción (1) suele ser suficiente:
+To reduce initial complexity, option (1) is usually enough:
 
-- Exponer en `/agent/capabilities` ambos catálogos y un flag `tradingEnabled`.
-- Agregar a la UI un modo “Execution” donde:
-  - el agente puede cotizar y preparar intents,
-  - pero ejecutar requiere confirmación + firma.
+- Expose both catalogs in `/agent/capabilities` plus a `tradingEnabled` flag.
+- Add an “Execution” mode in the UI where:
+  - the agent can quote and prepare intents,
+  - but execution requires confirmation + signature.
 
-### Fase 6 — Observabilidad, auditoría y tests (continuo)
+### Phase 6 — Observability, auditing, and tests (ongoing)
 
-- Persistir en `agent-sessions.sqlite`:
-  - intents generados,
-  - approvals (hash/firma),
-  - ejecuciones (orderId/jobId/txHash si aplica).
+- Persist in `agent-sessions.sqlite`:
+  - generated intents,
+  - approvals (hash/signature),
+  - executions (orderId/jobId/txHash as applicable).
 - Tests:
-  - unit tests de schemas (`packages/shared`),
-  - tests de API (`services/matcher`) para `/trade-tools/*`,
-  - tests del runtime (simular decisiones y verificar que no ejecute sin aprobación).
+  - schema unit tests (`packages/shared`),
+  - API tests (`services/matcher`) for `/trade-tools/*`,
+  - runtime tests (simulate decisions and verify it can’t execute without approval).
 
-## 5) Secuencia recomendada (HITL) para un swap “agentic”
+## 5) Recommended (HITL) sequence for an agentic swap
 
 ```mermaid
 sequenceDiagram
@@ -230,16 +230,15 @@ sequenceDiagram
   W-->>U: UI updates + status polling (/swap/status/:id)
 ```
 
-## 6) Entregables concretos del roadmap (para tickets)
+## 6) Concrete roadmap deliverables (ticket-ready)
 
 - `packages/shared`:
-  - Nuevo `tradeTools.ts` + exports públicos.
+  - New `tradeTools.ts` + public exports.
 - `services/matcher`:
-  - Nuevos endpoints `/trade-tools/catalog` y `/trade-tools/:tool`.
-  - Verificación de firma en tools de ejecución (mínimo para swaps).
+  - New endpoints `/trade-tools/catalog` and `/trade-tools/:tool`.
+  - Signature verification in execution tools (at minimum for swaps).
 - `services/strategy-agent`:
-  - Soporte de catálogo de trade tools + policy de “no ejecutar sin approval”.
+  - Trade tool catalog support + a “never execute without approval” policy.
 - `apps/web`:
-  - UI de review/approve para intents.
-  - Visualización de jobs (swap rebalancing) dentro del hilo del agente.
-
+  - Intent review/approve UI.
+  - Job visualization (swap rebalancing) inside the agent thread.
