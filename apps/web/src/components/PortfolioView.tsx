@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { formatUnits } from "viem";
+import type { TxPopupData } from "./TransactionPopup";
 import { VaultPanel } from "./VaultPanel";
 import { BalancesPanel } from "./BalancesPanel";
 
@@ -41,6 +42,7 @@ type Props = {
   markets: Market[];
   onAfterMutation: () => Promise<void>;
   onCancelOrder: (orderId: string) => Promise<void>;
+  showTx: (data: TxPopupData) => void;
 };
 
 function tokenAmount(
@@ -68,6 +70,7 @@ export function PortfolioView({
   markets,
   onAfterMutation,
   onCancelOrder,
+  showTx,
 }: Props) {
   const activeOrders = orders.filter((order) => order.status === "OPEN" || order.status === "PARTIAL");
   const pendingBuys = activeOrders.filter((order) => order.side === "BUY");
@@ -224,6 +227,7 @@ export function PortfolioView({
               zkVaultAddress={zkVaultAddress}
               tokens={tokens}
               onAfterMutation={onAfterMutation}
+              showTx={showTx}
             />
           </section>
 
