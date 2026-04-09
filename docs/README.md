@@ -14,6 +14,7 @@ If you want to understand what Sinergy is and how its microservices and on-chain
 *   **[Main Sinergy README](../README.md)**: Start here for the high-level hackathon pitch, user flow, and feature list.
 *   **[onboarding-hackathon.md](onboarding-hackathon.md)**: A detailed product onboarding guide analyzing the problem space and our specific value proposition.
 *   **[architecture.md](architecture.md)**: The core system overview detailing how the AI Strategy Agent, Private Matcher, and the `Sinergy-2` MiniEVM integrate.
+*   **[agent-tooling-and-darkvault-trading-roadmap.md](agent-tooling-and-darkvault-trading-roadmap.md)**: Current agent behavior/tooling (as implemented) + a roadmap to safely enable agent-executed trades inside DarkVault/matcher.
 
 ### 2. Integration & Liquidity
 Understanding how Sinergy connects with the broader Initia ecosystem:
