@@ -142,6 +142,7 @@ Users can enable auto-sign from the **Dark Vault** panel. The current setup stri
 Dive deeper into Sinergy's technical design:
 - **Architecture**: [docs/architecture.md](docs/architecture.md)
 - **Network Startup**: [docs/network-startup.md](docs/network-startup.md)
+- **Recent Price Patch**: [docs/price-patch-runbook.md](docs/price-patch-runbook.md)
 - **Testnet Runbook**: [docs/testnet-runbook.md](docs/testnet-runbook.md)
 - **InitiaDEX Routing**: [docs/initia-dex-liquidity-routing.md](docs/initia-dex-liquidity-routing.md)
 - **cUSDC Migration**: [docs/cusdc-migration.md](docs/cusdc-migration.md)
