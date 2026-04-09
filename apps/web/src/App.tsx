@@ -295,6 +295,7 @@ function Dashboard() {
           markets={marketSnapshots}
           onAfterMutation={refreshUser}
           onCancelOrder={cancelOrder}
+          showTx={showTx}
         />
       ) : (
         <div className="dex-grid">
