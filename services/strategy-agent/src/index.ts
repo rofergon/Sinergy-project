@@ -10,6 +10,7 @@ const agentService = new StrategyAgentService({
   modelBaseUrl: env.AGENT_MODEL_BASE_URL,
   modelName: env.AGENT_MODEL_NAME,
   modelApiKey: env.AGENT_MODEL_API_KEY,
+  modelReasoningEffort: env.AGENT_MODEL_REASONING_EFFORT,
   modelTimeoutMs: env.AGENT_MODEL_TIMEOUT_MS,
   maxSteps: env.AGENT_MAX_STEPS,
   toolcallRetries: env.AGENT_TOOLCALL_RETRIES,

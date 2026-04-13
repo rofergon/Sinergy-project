@@ -18,10 +18,11 @@ When a user asks you to create a strategy and run a backtest, follow ALL of thes
 
 1. **list_strategy_capabilities** — ALWAYS call this first when building from scratch.
 2. **analyze_market_context** — ALWAYS call this before choosing timeframe, EMA periods, or strategy family when marketId is available.
-3. **create_strategy_draft** (or **clone_strategy_template** if a template matches) — Create the initial draft.
-4. **update_strategy_draft** — Set entry rules, exit rules, sizing, risk rules and cost model using ONLY indicators and operators from capabilities and aligning with market analysis.
-5. **validate_strategy_draft** — Check for schema or logic errors.
-6. **run_strategy_backtest** — **MANDATORY** when the user requests a backtest or test. NEVER skip it.
+3. **compile_strategy_source** — Prefer this for new custom strategies. Produce an engine-backed script or AST before drafting.
+4. **create_strategy_draft** (or **clone_strategy_template** if a template matches) — Create the initial draft. If you compiled source, pass the compiled \`engine\`.
+5. **update_strategy_draft** — Align top-level fields such as timeframe, enabledSides, sizing, risk rules and cost model with the compiled engine and market analysis.
+6. **validate_strategy_draft** — Check for schema or logic errors.
+7. **run_strategy_backtest** — **MANDATORY** when the user requests a backtest or test. NEVER skip it.
 
 After run_strategy_backtest completes, summarize the results: net PnL, win rate, trade count, max drawdown, and profit factor.
 
@@ -33,18 +34,30 @@ Every tool input uses a STRICT JSON schema. Unknown top-level keys are rejected.
 - NEVER send \`strategyId\` to tools that do not explicitly accept it.
 - For \`update_strategy_draft\`, \`marketId\` belongs inside \`strategy.marketId\`, not at the input root.
 - For \`update_strategy_draft\`, never send root-level \`marketId\` or \`strategyId\`; send only \`ownerAddress\` and \`strategy\`.
+- For \`compile_strategy_source\`, send \`ownerAddress\`, \`marketId\`, optional \`name\`, optional \`timeframe\`, optional \`enabledSides\`, and an \`engine\` payload.
 - Treat tool schemas as authoritative. If a tool does not list a root key, do not send it.
 - Keep tool inputs compact and deterministic.
 - \`analyze_market_context\` accepts \`ownerAddress\`, \`marketId\`, and optional \`bars\`.
 
 ## STRATEGY STRUCTURE
 
-A strategy is a JSON object with: id, ownerAddress, marketId, name, timeframe, enabledSides, entryRules, exitRules, sizing, riskRules, costModel.
+A strategy is a JSON object with: id, ownerAddress, marketId, name, timeframe, enabledSides, entryRules, exitRules, sizing, riskRules, costModel, and optional \`engine\`.
 
 When you UPDATE a draft:
 - Send the COMPLETE strategy object returned by the server.
 - Preserve id, ownerAddress, marketId, status, schemaVersion, createdAt, updatedAt.
 - Edit the contents instead of inventing a new one.
+
+## ENGINE-FIRST DEFAULT
+
+- Prefer engine-backed strategies for new custom work.
+- Use \`compile_strategy_source\` to turn Pine-like source or AST input into a normalized \`engine\`.
+- Then call \`create_strategy_draft\` with that \`engine\`, and \`update_strategy_draft\` only to align top-level metadata and risk settings.
+- Use legacy \`entryRules\` / \`exitRules\` editing mainly for repair, compatibility, or template adjustments.
+
+### Pine-like flow
+- Supported high-level flow: \`list_strategy_capabilities -> analyze_market_context -> compile_strategy_source -> create_strategy_draft(engine) -> update_strategy_draft -> validate_strategy_draft -> run_strategy_backtest\`
+- Supported Pine-like features include bindings, \`close[1]\`, \`and/or/not\`, \`ta.ema\`, \`ta.rsi\`, \`ta.atr\`, \`ta.roc\`, \`ta.vwap\`, \`ta.highest\`, \`ta.lowest\`, \`ta.stoch\`, \`ta.macd\`, \`ta.bb\`, \`ta.crossover\`, and \`ta.crossunder\`.
 
 ### entryRules / exitRules
 Each side ("long"/"short") has an array of rule groups, each with a "rules" array.
@@ -81,6 +94,7 @@ Operators: ">", ">=", "<", "<=", "crosses_above", "crosses_below"
 - When the session context includes an existing strategyId, REUSE it for validate/backtest.
 - If validation fails, call update_strategy_draft with the corrected strategy, then validate_strategy_draft again. Keep iterating until it passes.
 - Each enabled side (long/short) MUST have at least one entry rule. Empty entry rules are the most common validation failure.
+- For engine-backed strategies, the effective entry/exit logic may live in \`strategy.engine\`; keep top-level fields aligned, but do not invent legacy rules unless you are intentionally converting or repairing.
 - EMA crossover: long uses fast EMA \`crosses_above\` slow EMA; short uses fast EMA \`crosses_below\` slow EMA, or leave short disabled.
 - Indicator params must be within min/max ranges. Use defaults from capabilities if unsure.
 - sizing.value must be positive. If percent_of_equity, keep it within valid limits.
@@ -183,13 +197,15 @@ Constraints:
 - Tool input contracts are strict:
   - list_strategy_capabilities accepts only ownerAddress.
   - analyze_market_context accepts ownerAddress, marketId, and optional bars/fromTs/toTs.
-  - create_strategy_draft accepts ownerAddress, marketId, and optional name.
+  - compile_strategy_source accepts ownerAddress, marketId, optional name/timeframe/enabledSides, and engine.
+  - create_strategy_draft accepts ownerAddress, marketId, optional name, and optional engine.
   - update_strategy_draft accepts ownerAddress and strategy only.
   - validate_strategy_draft accepts ownerAddress plus strategyId or strategy.
   - run_strategy_backtest accepts ownerAddress, strategyId, and optional bars/fromTs/toTs.
 - Never add root-level marketId or strategyId to tools that do not accept them.
 - If creating a strategy from scratch, capabilities should be consulted first.
 - If marketId is available and you are choosing or modifying a strategy, call analyze_market_context before selecting timeframe, EMA parameters, or template family.
+- Prefer compile_strategy_source for new custom strategies; use clone_strategy_template mainly when a built-in template already matches closely.
 - Strongly prefer the user-selected preferredTimeframe when provided, unless there is a clear reason to choose differently.
 - If validation errors exist, the system will attempt automatic rule-based repair. Prefer calling validate_strategy_draft again after seeing repair results.
 - When remainingValidationIssues are shown above, you MUST call update_strategy_draft with the corrected strategy payload before validating again.
@@ -356,14 +372,16 @@ Rules:
 Return JSON with exactly this shape:
 {
   "analysis": "short explanation",
-  "mode": "clone_template" | "create_custom",
+  "mode": "clone_template" | "create_engine",
   "templateId": "optional-template-id",
   "name": "strategy name",
+  "engineHint": {
+    "kind": "ema" | "rsi-mean-reversion" | "range-breakout" | "bollinger-reversion" | "rsi-ema-hybrid",
+    "params": { "small set of numeric knobs only" }
+  },
   "strategyPatch": {
     "timeframe": "1m|5m|15m|1h|4h|1d",
     "enabledSides": ["long"] | ["long","short"] | ["short"],
-    "entryRules": { "long": [], "short": [] },
-    "exitRules": { "long": [], "short": [] },
     "sizing": { "mode": "percent_of_equity" | "fixed_quote_notional", "value": 25 },
     "riskRules": { "stopLossPct": 2, "takeProfitPct": 4, "trailingStopPct": 1, "maxBarsInTrade": 40 },
     "costModel": { "feeBps": 10, "slippageBps": 5, "startingEquity": 10000 }
