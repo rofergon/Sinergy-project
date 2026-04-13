@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(lsof *)",
+      "Bash(ss *)",
+      "Bash(netstat *)",
+      "Bash(docker ps *)",
+      "Bash(chmod *)"
+    ]
+  },
+  "$version": 3
+}
