@@ -8,7 +8,8 @@
       "Bash(chmod *)",
       "Bash(fuser *)",
       "Bash(grep *)",
-      "Bash(true)"
+      "Bash(true)",
+      "Bash(npx *)"
     ]
   },
   "$version": 3
