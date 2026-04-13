@@ -27,6 +27,35 @@ test("injects required marketId into create_strategy_draft only", () => {
   });
 });
 
+test("injects required marketId into compile_strategy_source", () => {
+  const merged = mergeToolContext(
+    "compile_strategy_source",
+    {
+      name: "EMA engine",
+      engine: {
+        version: "2",
+        sourceType: "pine_like_v0",
+        script: "fast = ta.ema(close, 9)"
+      }
+    },
+    {
+      ownerAddress: "0x00000000000000000000000000000000000000c3",
+      marketId: "0x0000000000000000000000000000000000000000000000000000000000000111"
+    }
+  );
+
+  assert.deepEqual(merged, {
+    ownerAddress: "0x00000000000000000000000000000000000000c3",
+    marketId: "0x0000000000000000000000000000000000000000000000000000000000000111",
+    name: "EMA engine",
+    engine: {
+      version: "2",
+      sourceType: "pine_like_v0",
+      script: "fast = ta.ema(close, 9)"
+    }
+  });
+});
+
 test("injects marketId into analyze_market_context", () => {
   const merged = mergeToolContext("analyze_market_context", {}, {
     ownerAddress: "0x00000000000000000000000000000000000000c3",
