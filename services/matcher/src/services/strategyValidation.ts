@@ -7,13 +7,15 @@ import {
   type StrategyIndicatorKind,
   type StrategyIndicatorParams,
   type StrategyOperand,
+  type StrategyPriceField,
   type StrategyRule,
   type StrategyRuleGroup,
   type StrategyRuleSet,
   type StrategyValidationIssue,
   type StrategyValidationResult
 } from "@sinergy/shared";
-import { STRATEGY_DEFAULTS, buildStrategyCapabilities, createEmptyStrategyDraft } from "./strategyCatalog.js";
+import { buildStrategyCapabilities, createEmptyStrategyDraft } from "./strategyCatalog.js";
+import { compileEngineToRuntime, normalizeStrategyEngine } from "./strategySourceCompiler.js";
 
 const HEX_PATTERN = /^0x[0-9a-fA-F]+$/;
 
@@ -29,10 +31,17 @@ function asNumber(value: unknown, fallback?: number) {
   return fallback;
 }
 
+function asInteger(value: unknown, fallback?: number) {
+  const next = asNumber(value, fallback);
+  return next !== undefined ? Math.trunc(next) : undefined;
+}
+
 function normalizeOperand(input: unknown): StrategyOperand {
   if (!isRecord(input)) {
     return { type: "price_field", field: "close" };
   }
+
+  const barsAgo = asInteger(input.barsAgo);
 
   if (input.type === "constant") {
     return {
@@ -44,24 +53,38 @@ function normalizeOperand(input: unknown): StrategyOperand {
   if (input.type === "indicator_output") {
     const paramsInput = isRecord(input.params) ? input.params : {};
     const params: StrategyIndicatorParams = {};
-    for (const key of ["period", "fastPeriod", "slowPeriod", "signalPeriod", "stdDev", "lookback"] as const) {
+    for (const key of [
+      "period",
+      "fastPeriod",
+      "slowPeriod",
+      "signalPeriod",
+      "smoothK",
+      "smoothD",
+      "stdDev",
+      "lookback"
+    ] as const) {
       const next = asNumber(paramsInput[key]);
       if (next !== undefined) {
         params[key] = next;
       }
+    }
+    if (typeof paramsInput.source === "string") {
+      params.source = paramsInput.source as StrategyPriceField;
     }
 
     return {
       type: "indicator_output",
       indicator: (typeof input.indicator === "string" ? input.indicator : "ema") as StrategyIndicatorKind,
       output: (typeof input.output === "string" ? input.output : "value") as any,
-      params
+      params,
+      ...(barsAgo !== undefined ? { barsAgo } : {})
     };
   }
 
   return {
     type: "price_field",
-    field: (typeof input.field === "string" ? input.field : "close") as any
+    field: (typeof input.field === "string" ? input.field : "close") as any,
+    ...(barsAgo !== undefined ? { barsAgo } : {})
   };
 }
 
@@ -175,6 +198,7 @@ export function normalizeStrategyDefinition(input: unknown): StrategyDefinition 
       payload.status === "saved" || payload.status === "archived" || payload.status === "draft"
         ? payload.status
         : base.status,
+    ...(payload.engine !== undefined ? { engine: normalizeStrategyEngine(payload.engine) } : {}),
     schemaVersion:
       typeof payload.schemaVersion === "string" && payload.schemaVersion
         ? payload.schemaVersion
@@ -202,6 +226,25 @@ function validateOperand(
   issues: StrategyValidationIssue[],
   capabilities: StrategyCapabilities
 ) {
+  if (operand.type !== "constant" && operand.barsAgo !== undefined) {
+    if (!Number.isInteger(operand.barsAgo) || operand.barsAgo < 0) {
+      pushIssue(
+        issues,
+        `${path}.barsAgo`,
+        "invalid_bars_ago",
+        "barsAgo must be a non-negative integer.",
+        "Use 0 for the current bar, 1 for the previous bar, and so on."
+      );
+    } else if (operand.barsAgo > capabilities.defaults.maxIndicatorLookback) {
+      pushIssue(
+        issues,
+        `${path}.barsAgo`,
+        "bars_ago_above_limit",
+        `barsAgo must be <= ${capabilities.defaults.maxIndicatorLookback}.`
+      );
+    }
+  }
+
   if (operand.type === "constant") {
     if (!Number.isFinite(operand.value)) {
       pushIssue(issues, path, "invalid_constant", "Constant value must be a finite number.", "Use a numeric constant like 20 or 55.");
@@ -241,13 +284,25 @@ function validateOperand(
           `${path}.params.${paramDef.name}`,
           "missing_indicator_param",
           `Missing required parameter '${paramDef.name}'.`,
-          `Set it to ${paramDef.defaultValue ?? paramDef.min ?? 1}.`
+          `Set it to ${paramDef.type === "source" ? "close" : paramDef.defaultValue ?? paramDef.min ?? 1}.`
         );
       }
       continue;
     }
 
-    if (!Number.isFinite(rawValue)) {
+    if (paramDef.type === "source") {
+      if (typeof rawValue !== "string" || !capabilities.priceFields.includes(rawValue as StrategyPriceField)) {
+        pushIssue(
+          issues,
+          `${path}.params.${paramDef.name}`,
+          "invalid_indicator_source",
+          `Parameter '${paramDef.name}' must be one of: ${capabilities.priceFields.join(", ")}.`
+        );
+      }
+      continue;
+    }
+
+    if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) {
       pushIssue(
         issues,
         `${path}.params.${paramDef.name}`,
@@ -255,6 +310,15 @@ function validateOperand(
         `Parameter '${paramDef.name}' must be numeric.`
       );
       continue;
+    }
+
+    if (paramDef.type === "integer" && !Number.isInteger(rawValue)) {
+      pushIssue(
+        issues,
+        `${path}.params.${paramDef.name}`,
+        "indicator_param_not_integer",
+        `Parameter '${paramDef.name}' must be an integer.`
+      );
     }
 
     if (paramDef.min !== undefined && rawValue < paramDef.min) {
@@ -323,7 +387,7 @@ function canonicalizeOperand(operand: StrategyOperand): string {
   }
 
   if (operand.type === "price_field") {
-    return `price:${operand.field}`;
+    return `price:${operand.field}:${operand.barsAgo ?? 0}`;
   }
 
   const params = Object.entries(operand.params ?? {})
@@ -331,7 +395,7 @@ function canonicalizeOperand(operand: StrategyOperand): string {
     .map(([key, value]) => `${key}:${value}`)
     .join(",");
 
-  return `indicator:${operand.indicator}:${operand.output}:${params}`;
+  return `indicator:${operand.indicator}:${operand.output}:${operand.barsAgo ?? 0}:${params}`;
 }
 
 function canonicalizeRuleGroups(groups: StrategyRuleGroup[]): string {
@@ -420,30 +484,43 @@ export function validateStrategyDefinition(
     }
   }
 
-  for (const side of strategy.enabledSides) {
-    if (strategy.entryRules[side].every((group) => group.rules.length === 0)) {
+  if (strategy.engine) {
+    try {
+      compileEngineToRuntime(strategy, strategy.engine);
+    } catch (error) {
       pushIssue(
         issues,
-        `entryRules.${side}`,
-        "missing_entry_rules",
-        `At least one ${side} entry rule is required.`,
-        "Add a rule like EMA 9 crosses above EMA 21."
+        "engine",
+        "invalid_strategy_engine",
+        error instanceof Error ? error.message : String(error)
       );
     }
-  }
+  } else {
+    for (const side of strategy.enabledSides) {
+      if (strategy.entryRules[side].every((group) => group.rules.length === 0)) {
+        pushIssue(
+          issues,
+          `entryRules.${side}`,
+          "missing_entry_rules",
+          `At least one ${side} entry rule is required.`,
+          "Add a rule like EMA 9 crosses above EMA 21."
+        );
+      }
+    }
 
-  if (
-    strategy.enabledSides.includes("long") &&
-    strategy.enabledSides.includes("short") &&
-    canonicalizeRuleGroups(strategy.entryRules.long) === canonicalizeRuleGroups(strategy.entryRules.short)
-  ) {
-    pushIssue(
-      issues,
-      "entryRules.short",
-      "ambiguous_dual_side_entries",
-      "Long and short entry rules are identical, so both sides trigger together and no position can be opened.",
-      "Use the inverse condition for short entries, for example EMA fast crosses_below EMA slow."
-    );
+    if (
+      strategy.enabledSides.includes("long") &&
+      strategy.enabledSides.includes("short") &&
+      canonicalizeRuleGroups(strategy.entryRules.long) === canonicalizeRuleGroups(strategy.entryRules.short)
+    ) {
+      pushIssue(
+        issues,
+        "entryRules.short",
+        "ambiguous_dual_side_entries",
+        "Long and short entry rules are identical, so both sides trigger together and no position can be opened.",
+        "Use the inverse condition for short entries, for example EMA fast crosses_below EMA slow."
+      );
+    }
   }
 
   validateRuleGroups(strategy.entryRules.long, "entryRules.long", issues, capabilities);

@@ -50,6 +50,15 @@ export class StrategyToolApi {
             toTs: typeof payload.toTs === "number" ? payload.toTs : undefined
           })
         };
+      case "compile_strategy_source":
+        return this.strategyService.compileStrategySource({
+          ownerAddress: payload.ownerAddress as `0x${string}`,
+          marketId: payload.marketId as `0x${string}`,
+          name: typeof payload.name === "string" ? payload.name : undefined,
+          timeframe: typeof payload.timeframe === "string" ? payload.timeframe as any : undefined,
+          enabledSides: Array.isArray(payload.enabledSides) ? payload.enabledSides as Array<"long" | "short"> : undefined,
+          engine: payload.engine
+        });
       case "list_strategy_templates":
         return {
           templates: this.strategyService.listTemplates(
@@ -62,7 +71,8 @@ export class StrategyToolApi {
           strategy: this.strategyService.createDraft({
             ownerAddress: payload.ownerAddress as `0x${string}`,
             marketId: payload.marketId as `0x${string}`,
-            name: typeof payload.name === "string" ? payload.name : undefined
+            name: typeof payload.name === "string" ? payload.name : undefined,
+            engine: payload.engine
           })
         };
       case "update_strategy_draft":
