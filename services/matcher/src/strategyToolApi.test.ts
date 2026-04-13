@@ -258,6 +258,65 @@ test("RSI strategies expose oscillator overlays and threshold guide lines", asyn
   }
 });
 
+test("pine-like source can be compiled, saved as a draft, validated, and backtested through the tool API", async () => {
+  const harness = makeHarness();
+  const ownerAddress = "0x00000000000000000000000000000000000000c3" as HexString;
+  const script = `
+fast = ta.ema(close, 3)
+slow = ta.sma(close, 5)
+longEntry = ta.crossover(fast, slow) or close > fast
+longExit = ta.crossunder(close, fast)
+`;
+
+  try {
+    const compiled = await harness.api.execute("compile_strategy_source", {
+      ownerAddress,
+      marketId: harness.market.id,
+      name: "Pine Compiler Preview",
+      engine: {
+        version: "2",
+        sourceType: "pine_like_v0",
+        script
+      }
+    }) as import("@sinergy/shared").StrategySourceCompilation;
+
+    assert.equal(compiled.engine.sourceType, "pine_like_v0");
+    assert.equal(compiled.preview.bindingCount, 2);
+    assert.equal(compiled.preview.signalsPresent.includes("longEntry"), true);
+    assert.equal(compiled.preview.indicatorRefs.some((ref) => ref.indicator === "ema"), true);
+
+    const created = await harness.api.execute("create_strategy_draft", {
+      ownerAddress,
+      marketId: harness.market.id,
+      name: "Pine Draft",
+      engine: compiled.engine
+    }) as { strategy: import("@sinergy/shared").StrategyDefinition };
+
+    assert.equal(created.strategy.engine?.sourceType, "pine_like_v0");
+
+    const validation = await harness.api.execute("validate_strategy_draft", {
+      ownerAddress,
+      strategyId: created.strategy.id
+    }) as { validation: import("@sinergy/shared").StrategyValidationResult };
+
+    assert.equal(validation.validation.ok, true);
+
+    const run = await harness.api.execute("run_strategy_backtest", {
+      ownerAddress,
+      strategyId: created.strategy.id,
+      bars: 20
+    }) as {
+      summary: import("@sinergy/shared").StrategyBacktestSummary;
+      trades: import("@sinergy/shared").StrategyBacktestTrade[];
+    };
+
+    assert.equal(run.summary.tradeCount >= 0, true);
+    assert.equal(Array.isArray(run.trades), true);
+  } finally {
+    harness.cleanup();
+  }
+});
+
 test("market analysis exposes timeframe, regime, and support resistance hints", async () => {
   const harness = makeHarness();
   const ownerAddress = "0x00000000000000000000000000000000000000c3" as HexString;
