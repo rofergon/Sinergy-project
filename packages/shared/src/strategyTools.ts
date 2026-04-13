@@ -3,6 +3,7 @@ import type {
   HexString,
   StrategyCapabilities,
   StrategyDefinition,
+  StrategySourceCompilation,
   StrategyTemplate,
   StrategyToolName,
   StrategyValidationResult,
@@ -106,6 +107,21 @@ export const strategyToolInputSchemas = {
       message: "Provide fromTs and toTs together, with fromTs <= toTs."
     })
     .strict(),
+  compile_strategy_source: z
+    .object({
+      ownerAddress: strategyOwnerAddressSchema,
+      marketId: strategyMarketIdSchema,
+      name: z
+        .string()
+        .trim()
+        .min(STRATEGY_TOOL_LIMITS.minNameLength)
+        .max(STRATEGY_TOOL_LIMITS.maxNameLength)
+        .optional(),
+      timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).optional(),
+      enabledSides: z.array(z.enum(["long", "short"])).min(1).optional(),
+      engine: z.unknown()
+    })
+    .strict(),
   list_strategy_templates: z
     .object({
       ownerAddress: strategyOwnerAddressSchema,
@@ -121,7 +137,8 @@ export const strategyToolInputSchemas = {
         .trim()
         .min(STRATEGY_TOOL_LIMITS.minNameLength)
         .max(STRATEGY_TOOL_LIMITS.maxNameLength)
-        .optional()
+        .optional(),
+      engine: z.unknown().optional()
     })
     .strict(),
   update_strategy_draft: z
@@ -211,6 +228,7 @@ export type StrategyToolInput<TTool extends StrategyToolName> = z.infer<
 export type StrategyToolResultMap = {
   list_strategy_capabilities: { capabilities: StrategyCapabilities };
   analyze_market_context: { analysis: StrategyMarketAnalysis };
+  compile_strategy_source: StrategySourceCompilation;
   list_strategy_templates: { templates: StrategyTemplate[] };
   create_strategy_draft: { strategy: StrategyDefinition };
   update_strategy_draft: { strategy: StrategyDefinition };
@@ -252,6 +270,12 @@ export const strategyToolDefinitions = [
     endpoint: "/strategy-tools/analyze_market_context"
   },
   {
+    name: "compile_strategy_source",
+    description: "Compilation tool. Use when the strategy is expressed as AST v2 or Pine-like script and you need parser/compiler feedback before saving or backtesting. Produces a normalized engine payload plus a compilation preview.",
+    inputSchema: strategyToolInputSchemas.compile_strategy_source,
+    endpoint: "/strategy-tools/compile_strategy_source"
+  },
+  {
     name: "list_strategy_templates",
     description: "Discovery tool. Use before creating a draft when a built-in template may match the user's goal or market. Do not use once a draft already exists. Produces template candidates.",
     inputSchema: strategyToolInputSchemas.list_strategy_templates,
@@ -259,13 +283,13 @@ export const strategyToolDefinitions = [
   },
   {
     name: "create_strategy_draft",
-    description: "Mutation tool. Use to create a brand-new draft after capabilities are known and when no reusable strategy or template fits. Do not use if an active strategyId already exists. Produces a strategy draft.",
+    description: "Mutation tool. Use to create a brand-new draft after capabilities are known and when no reusable strategy or template fits. Supports either legacy rule payloads or a new engine-backed source via the optional engine field. Do not use if an active strategyId already exists. Produces a strategy draft.",
     inputSchema: strategyToolInputSchemas.create_strategy_draft,
     endpoint: "/strategy-tools/create_strategy_draft"
   },
   {
     name: "update_strategy_draft",
-    description: "Mutation tool. Use to replace the full strategy payload after editing rules, sizing, costs, or repairs. Do not send partial objects or root-level strategyId. Produces an updated strategy draft.",
+    description: "Mutation tool. Use to replace the full strategy payload after editing rules, sizing, costs, repairs, or engine-backed source code. Do not send partial objects or root-level strategyId. Produces an updated strategy draft.",
     inputSchema: strategyToolInputSchemas.update_strategy_draft,
     endpoint: "/strategy-tools/update_strategy_draft"
   },
