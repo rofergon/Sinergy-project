@@ -9,11 +9,16 @@ import type {
 } from "@sinergy/shared";
 import {
   buildIndicatorOverlays,
-  buildIndicatorSeriesMap,
-  resolveOperandValue,
-  type IndicatorSeriesMap,
   type StrategyCandle
 } from "./indicatorEngine.js";
+import {
+  buildRuntimeIndicatorSeriesMap,
+  evaluateRuntimeCondition,
+  runtimeEntryConditionForSide,
+  runtimeExitConditionForSide
+} from "./strategyRuntime.js";
+import { compileEngineToRuntime } from "./strategySourceCompiler.js";
+import { compileStrategyToRuntime } from "./strategyRuntime.js";
 
 type Position = {
   side: "long" | "short";
@@ -26,50 +31,6 @@ type Position = {
   highestClose: number;
   lowestClose: number;
 };
-
-function compareValues(
-  leftCurrent: number | null,
-  leftPrevious: number | null,
-  rightCurrent: number | null,
-  rightPrevious: number | null,
-  operator: StrategyDefinition["entryRules"]["long"][number]["rules"][number]["operator"]
-) {
-  if (leftCurrent === null || rightCurrent === null) return false;
-
-  switch (operator) {
-    case ">":
-      return leftCurrent > rightCurrent;
-    case ">=":
-      return leftCurrent >= rightCurrent;
-    case "<":
-      return leftCurrent < rightCurrent;
-    case "<=":
-      return leftCurrent <= rightCurrent;
-    case "crosses_above":
-      return leftPrevious !== null && rightPrevious !== null && leftPrevious <= rightPrevious && leftCurrent > rightCurrent;
-    case "crosses_below":
-      return leftPrevious !== null && rightPrevious !== null && leftPrevious >= rightPrevious && leftCurrent < rightCurrent;
-  }
-}
-
-function evaluateGroups(
-  strategy: StrategyDefinition,
-  groups: StrategyDefinition["entryRules"]["long"],
-  candles: StrategyCandle[],
-  seriesMap: IndicatorSeriesMap,
-  index: number
-) {
-  return groups.some((group) => {
-    if (!group.rules.length) return false;
-    return group.rules.every((rule) => {
-      const leftCurrent = resolveOperandValue(rule.left, candles, seriesMap, index);
-      const rightCurrent = resolveOperandValue(rule.right, candles, seriesMap, index);
-      const leftPrevious = index > 0 ? resolveOperandValue(rule.left, candles, seriesMap, index - 1) : null;
-      const rightPrevious = index > 0 ? resolveOperandValue(rule.right, candles, seriesMap, index - 1) : null;
-      return compareValues(leftCurrent, leftPrevious, rightCurrent, rightPrevious, rule.operator);
-    });
-  });
-}
 
 function entryFillPrice(close: number, side: "long" | "short", slippageBps: number) {
   const factor = slippageBps / 10_000;
@@ -122,7 +83,10 @@ export function runStrategyBacktest(
   trades: StrategyBacktestTrade[];
   overlay: StrategyChartOverlay;
 } {
-  const seriesMap = buildIndicatorSeriesMap(candles, strategy);
+  const runtime = strategy.engine
+    ? compileEngineToRuntime(strategy, strategy.engine)
+    : compileStrategyToRuntime(strategy);
+  const seriesMap = buildRuntimeIndicatorSeriesMap(candles, runtime);
   const overlayIndicators = buildIndicatorOverlays(candles, strategy, seriesMap);
   const markers: StrategyOverlayMarker[] = [];
   const trades: StrategyBacktestTrade[] = [];
@@ -132,6 +96,7 @@ export function runStrategyBacktest(
   let feeTotal = 0;
   let slippageTotal = 0;
   let position: Position | null = null;
+  let barsWithExposure = 0;
 
   const equityCurve: StrategyBacktestSummary["equityCurve"] = candles.map((candle) => ({
     time: candle.ts,
@@ -213,10 +178,10 @@ export function runStrategyBacktest(
     const candle = candles[index];
 
     const longEntry = strategy.enabledSides.includes("long")
-      ? evaluateGroups(strategy, strategy.entryRules.long, candles, seriesMap, index)
+      ? evaluateRuntimeCondition(runtimeEntryConditionForSide(runtime, "long"), candles, seriesMap, index)
       : false;
     const shortEntry = strategy.enabledSides.includes("short")
-      ? evaluateGroups(strategy, strategy.entryRules.short, candles, seriesMap, index)
+      ? evaluateRuntimeCondition(runtimeEntryConditionForSide(runtime, "short"), candles, seriesMap, index)
       : false;
 
     if (position) {
@@ -244,7 +209,7 @@ export function runStrategyBacktest(
           index - currentPosition.entryIndex >= strategy.riskRules.maxBarsInTrade
         ) {
           exitReason = "max_bars";
-        } else if (evaluateGroups(strategy, strategy.exitRules.long, candles, seriesMap, index)) {
+        } else if (evaluateRuntimeCondition(runtimeExitConditionForSide(runtime, "long"), candles, seriesMap, index)) {
           exitReason = "rule";
         } else if (shortEntry) {
           exitReason = "reverse";
@@ -268,7 +233,7 @@ export function runStrategyBacktest(
           index - currentPosition.entryIndex >= strategy.riskRules.maxBarsInTrade
         ) {
           exitReason = "max_bars";
-        } else if (evaluateGroups(strategy, strategy.exitRules.short, candles, seriesMap, index)) {
+        } else if (evaluateRuntimeCondition(runtimeExitConditionForSide(runtime, "short"), candles, seriesMap, index)) {
           exitReason = "rule";
         } else if (longEntry) {
           exitReason = "reverse";
@@ -294,6 +259,7 @@ export function runStrategyBacktest(
           ? (candle.close - currentPosition.entryPrice) * currentPosition.quantity
           : (currentPosition.entryPrice - candle.close) * currentPosition.quantity;
       equity += unrealized;
+      barsWithExposure += 1;
     }
     equityCurve[index] = {
       time: candle.ts,
@@ -312,6 +278,16 @@ export function runStrategyBacktest(
   const endingEquity = equityCurve[equityCurve.length - 1]?.equity ?? realizedEquity;
   const profitableTrades = trades.filter((trade) => trade.netPnl > 0);
   const losingTrades = trades.filter((trade) => trade.netPnl < 0);
+  const avgTradeNetPnl = trades.length > 0 ? trades.reduce((sum, trade) => sum + trade.netPnl, 0) / trades.length : 0;
+  const avgWinningTradeNetPnl =
+    profitableTrades.length > 0
+      ? profitableTrades.reduce((sum, trade) => sum + trade.netPnl, 0) / profitableTrades.length
+      : 0;
+  const avgLosingTradeNetPnl =
+    losingTrades.length > 0
+      ? losingTrades.reduce((sum, trade) => sum + trade.netPnl, 0) / losingTrades.length
+      : 0;
+  const avgBarsHeld = trades.length > 0 ? trades.reduce((sum, trade) => sum + trade.barsHeld, 0) / trades.length : 0;
   const profitFactor =
     losingTrades.length === 0
       ? profitableTrades.length > 0
@@ -342,6 +318,12 @@ export function runStrategyBacktest(
     tradeCount: trades.length,
     longTradeCount: trades.filter((trade) => trade.side === "long").length,
     shortTradeCount: trades.filter((trade) => trade.side === "short").length,
+    avgTradeNetPnl: Number(avgTradeNetPnl.toFixed(8)),
+    avgWinningTradeNetPnl: Number(avgWinningTradeNetPnl.toFixed(8)),
+    avgLosingTradeNetPnl: Number(avgLosingTradeNetPnl.toFixed(8)),
+    avgBarsHeld: Number(avgBarsHeld.toFixed(4)),
+    expectancy: Number(avgTradeNetPnl.toFixed(8)),
+    exposurePct: Number(((barsWithExposure / Math.max(candles.length, 1)) * 100).toFixed(4)),
     createdAt: new Date().toISOString(),
     equityCurve
   };
