@@ -5,7 +5,10 @@
       "Bash(ss *)",
       "Bash(netstat *)",
       "Bash(docker ps *)",
-      "Bash(chmod *)"
+      "Bash(chmod *)",
+      "Bash(fuser *)",
+      "Bash(grep *)",
+      "Bash(true)"
     ]
   },
   "$version": 3
