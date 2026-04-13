@@ -32,6 +32,11 @@ lsof -ti:8787,8790,5173,5174,26657,1317,8545,8546,3000,8080,8443 | xargs kill -9
 lsof -ti:8787 | xargs kill -9
 ```
 
+### Stop Strategy Agent
+```bash
+lsof -ti:8790 | xargs kill -9
+```
+
 ### Stop Web App
 ```bash
 lsof -ti:5173 | xargs kill -9
