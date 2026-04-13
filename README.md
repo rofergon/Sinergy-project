@@ -107,6 +107,40 @@ Start the dedicated matcher:
 npm run dev:matcher
 ```
 
+Start the strategy agent:
+
+```bash
+npm run dev:agent
+```
+
+#### Strategy Agent Configuration
+
+The Strategy Agent uses OpenAI's GPT-5.4-nano model by default. To configure it:
+
+1. Copy the example environment file:
+```bash
+cp services/strategy-agent/.env.example services/strategy-agent/.env
+```
+
+2. Add your OpenAI API key to `services/strategy-agent/.env`:
+```bash
+AGENT_MODEL_API_KEY=sk-your-openai-api-key-here
+```
+
+3. Configure the reasoning effort for GPT-5.4-nano:
+```bash
+AGENT_MODEL_REASONING_EFFORT=low
+```
+
+Available reasoning levels:
+- `none`: No reasoning, fastest and cheapest
+- `low`: Minimal reasoning (recommended for gpt-5.4-nano)
+- `medium`: Balanced reasoning (default)
+- `high`: More thorough reasoning
+- `xhigh`: Maximum reasoning depth
+
+The agent supports any OpenAI-compatible API endpoint and model.
+
 #### ZK Architecture Support
 
 If you want to exercise the ZK withdrawal path locally, compile and prepare the circuit artifacts first:
