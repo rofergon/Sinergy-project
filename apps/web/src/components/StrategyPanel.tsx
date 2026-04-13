@@ -3,6 +3,7 @@ import type {
   HexString,
   StrategyCapabilities,
   StrategyDefinition,
+  StrategyIndicatorParams,
   StrategyOperand,
   StrategyPriceField,
   StrategyRule,
@@ -66,7 +67,7 @@ function serializeOperandKey(op: StrategyOperand): string | null {
         .map(([k, v]) => `${k}:${v}`)
         .join("|")
     : "";
-  return `${op.indicator}:${op.output}:${params}`;
+  return `${op.indicator}:${op.output}:${op.barsAgo ?? 0}:${params}`;
 }
 
 function formatTimeframe(value: StrategyTimeframe) {
@@ -97,6 +98,56 @@ function findIndicatorDefinition(capabilities: StrategyCapabilities | null, kind
   return capabilities?.indicatorCatalog.find((indicator) => indicator.kind === kind);
 }
 
+function assignIndicatorParam(
+  params: StrategyIndicatorParams,
+  key: keyof StrategyIndicatorParams,
+  value: StrategyIndicatorParams[keyof StrategyIndicatorParams]
+) {
+  switch (key) {
+    case "period":
+      if (typeof value === "number") params.period = value;
+      break;
+    case "fastPeriod":
+      if (typeof value === "number") params.fastPeriod = value;
+      break;
+    case "slowPeriod":
+      if (typeof value === "number") params.slowPeriod = value;
+      break;
+    case "signalPeriod":
+      if (typeof value === "number") params.signalPeriod = value;
+      break;
+    case "smoothK":
+      if (typeof value === "number") params.smoothK = value;
+      break;
+    case "smoothD":
+      if (typeof value === "number") params.smoothD = value;
+      break;
+    case "stdDev":
+      if (typeof value === "number") params.stdDev = value;
+      break;
+    case "lookback":
+      if (typeof value === "number") params.lookback = value;
+      break;
+    case "source":
+      if (typeof value === "string") params.source = value;
+      break;
+  }
+}
+
+function buildIndicatorDefaultParams(
+  indicator: StrategyCapabilities["indicatorCatalog"][number]
+) {
+  const params: StrategyIndicatorParams = {};
+  for (const param of indicator.params) {
+    if (param.type === "source") {
+      assignIndicatorParam(params, param.name, "close");
+    } else if (param.defaultValue !== undefined) {
+      assignIndicatorParam(params, param.name, param.defaultValue);
+    }
+  }
+  return params;
+}
+
 function applyOperandDefaults(capabilities: StrategyCapabilities | null, operand: StrategyOperand): StrategyOperand {
   if (!capabilities || operand.type !== "indicator_output") {
     return operand;
@@ -107,8 +158,10 @@ function applyOperandDefaults(capabilities: StrategyCapabilities | null, operand
 
   const params = { ...(operand.params ?? {}) };
   for (const param of indicator.params) {
-    if (params[param.name] === undefined && param.defaultValue !== undefined) {
-      params[param.name] = param.defaultValue;
+    if (params[param.name] === undefined && param.type === "source") {
+      assignIndicatorParam(params, param.name, "close");
+    } else if (params[param.name] === undefined && param.defaultValue !== undefined) {
+      assignIndicatorParam(params, param.name, param.defaultValue);
     }
   }
 
@@ -160,11 +213,7 @@ function OperandEditor({
                 type: "indicator_output",
                 indicator: defaultIndicator.kind,
                 output: defaultIndicator.outputs[0],
-                params: Object.fromEntries(
-                  defaultIndicator.params
-                    .filter((param) => param.defaultValue !== undefined)
-                    .map((param) => [param.name, param.defaultValue as number])
-                )
+                params: buildIndicatorDefaultParams(defaultIndicator)
               };
               onChange(nextOp);
               if (onGlobalSync) {
@@ -182,18 +231,40 @@ function OperandEditor({
         </select>
 
         {operand.type === "price_field" && (
-          <select
-            value={operand.field}
-            onChange={(event) =>
-              onChange({ type: "price_field", field: event.target.value as StrategyPriceField })
-            }
-          >
-            {capabilities?.priceFields.map((field) => (
-              <option key={field} value={field}>
-                {field}
-              </option>
-            ))}
-          </select>
+          <>
+            <select
+              value={operand.field}
+              onChange={(event) =>
+                onChange({
+                  type: "price_field",
+                  field: event.target.value as StrategyPriceField,
+                  barsAgo: operand.barsAgo
+                })
+              }
+            >
+              {capabilities?.priceFields.map((field) => (
+                <option key={field} value={field}>
+                  {field}
+                </option>
+              ))}
+            </select>
+
+            <label className="strategy-operand-param">
+              <span className="strategy-inline-label">Bars Ago</span>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={operand.barsAgo ?? 0}
+                onChange={(event) =>
+                  onChange({
+                    ...operand,
+                    barsAgo: Math.max(0, Number(event.target.value) || 0)
+                  })
+                }
+              />
+            </label>
+          </>
         )}
 
         {operand.type === "constant" && (
@@ -217,11 +288,8 @@ function OperandEditor({
                     type: "indicator_output",
                     indicator: nextIndicator.kind,
                     output: nextIndicator.outputs[0],
-                    params: Object.fromEntries(
-                      nextIndicator.params
-                        .filter((param) => param.defaultValue !== undefined)
-                        .map((param) => [param.name, param.defaultValue as number])
-                    )
+                    params: buildIndicatorDefaultParams(nextIndicator),
+                    barsAgo: operand.barsAgo
                   };
                   onChange(nextOp);
                   if (onGlobalSync) {
@@ -259,28 +327,81 @@ function OperandEditor({
               </select>
             </label>
 
+            <label className="strategy-operand-param">
+              <span className="strategy-inline-label">Bars Ago</span>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={operand.barsAgo ?? 0}
+                onChange={(event) => {
+                  const nextOp: StrategyOperand = {
+                    ...operand,
+                    barsAgo: Math.max(0, Number(event.target.value) || 0)
+                  };
+                  onChange(nextOp);
+                  if (onGlobalSync) {
+                    const prevKey = serializeOperandKey(operand);
+                    if (prevKey) onGlobalSync(prevKey, nextOp);
+                  }
+                }}
+              />
+            </label>
+
             {indicator.params.map((param) => (
               <label className="strategy-operand-param" key={param.name}>
                 <span className="strategy-inline-label">{param.label}</span>
-                <input
-                  type="number"
-                  value={operand.params?.[param.name] ?? param.defaultValue ?? ""}
-                  onChange={(event) => {
-                    const nextOp: StrategyOperand = {
-                      ...operand,
-                      params: {
-                        ...(operand.params ?? {}),
-                        [param.name]: Number(event.target.value)
+                {param.type === "source" ? (
+                  <select
+                    value={String(operand.params?.[param.name] ?? "close")}
+                    onChange={(event) => {
+                      const nextParams: StrategyIndicatorParams = { ...(operand.params ?? {}) };
+                      assignIndicatorParam(nextParams, param.name, event.target.value as StrategyPriceField);
+                      const nextOp: StrategyOperand = {
+                        ...operand,
+                        params: nextParams
+                      };
+                      onChange(nextOp);
+                      if (onGlobalSync) {
+                        const prevKey = serializeOperandKey(operand);
+                        if (prevKey) onGlobalSync(prevKey, nextOp);
                       }
-                    };
-                    onChange(nextOp);
-                    if (onGlobalSync) {
-                      const prevKey = serializeOperandKey(operand);
-                      if (prevKey) onGlobalSync(prevKey, nextOp);
-                    }
-                  }}
-                  placeholder={param.label}
-                />
+                    }}
+                  >
+                    {(param.options ?? capabilities?.priceFields ?? []).map((field) => (
+                      <option key={field} value={field}>
+                        {field}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="number"
+                    min={param.min}
+                    max={param.max}
+                    step={param.type === "integer" ? 1 : "any"}
+                    value={operand.params?.[param.name] ?? param.defaultValue ?? ""}
+                    onChange={(event) => {
+                      const rawValue = Number(event.target.value);
+                      const nextParams: StrategyIndicatorParams = { ...(operand.params ?? {}) };
+                      assignIndicatorParam(
+                        nextParams,
+                        param.name,
+                        param.type === "integer" ? Math.trunc(rawValue) : rawValue
+                      );
+                      const nextOp: StrategyOperand = {
+                        ...operand,
+                        params: nextParams
+                      };
+                      onChange(nextOp);
+                      if (onGlobalSync) {
+                        const prevKey = serializeOperandKey(operand);
+                        if (prevKey) onGlobalSync(prevKey, nextOp);
+                      }
+                    }}
+                    placeholder={param.label}
+                  />
+                )}
               </label>
             ))}
           </>
