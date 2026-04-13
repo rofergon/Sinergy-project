@@ -1,3 +1,5 @@
+import type { StrategyCompilationPreview, StrategyEngineDefinition, StrategySourceType } from "./strategyEngine";
+
 export const STRATEGY_API_VERSION = "1.0.0";
 export const STRATEGY_SCHEMA_VERSION = "1.0.0";
 export const STRATEGY_CAPABILITIES_VERSION = "1.0.0";
@@ -20,15 +22,28 @@ export type StrategyRuleOperator =
   | ">="
   | "<"
   | "<="
+  | "=="
+  | "!="
   | "crosses_above"
   | "crosses_below";
-export type StrategyPriceField = "open" | "high" | "low" | "close" | "volume";
+export type StrategyPriceField =
+  | "open"
+  | "high"
+  | "low"
+  | "close"
+  | "volume"
+  | "hl2"
+  | "hlc3"
+  | "ohlc4";
 export type StrategyIndicatorKind =
   | "sma"
   | "ema"
   | "rsi"
   | "macd"
   | "bollinger"
+  | "atr"
+  | "roc"
+  | "stoch"
   | "vwap"
   | "rolling_high"
   | "rolling_low"
@@ -42,6 +57,8 @@ export type StrategyIndicatorOutput =
   | "upper"
   | "middle"
   | "lower"
+  | "k"
+  | "d"
   | "direction";
 export type StrategyExitReason =
   | "rule"
@@ -57,6 +74,7 @@ export type StrategyOverlayPane = "price" | "oscillator";
 export type StrategyToolName =
   | "list_strategy_capabilities"
   | "analyze_market_context"
+  | "compile_strategy_source"
   | "list_strategy_templates"
   | "create_strategy_draft"
   | "update_strategy_draft"
@@ -75,20 +93,25 @@ export type StrategyIndicatorParams = {
   fastPeriod?: number;
   slowPeriod?: number;
   signalPeriod?: number;
+  smoothK?: number;
+  smoothD?: number;
   stdDev?: number;
   lookback?: number;
+  source?: StrategyPriceField;
 };
 
 export type StrategyOperand =
   | {
       type: "price_field";
       field: StrategyPriceField;
+      barsAgo?: number;
     }
   | {
       type: "indicator_output";
       indicator: StrategyIndicatorKind;
       output: StrategyIndicatorOutput;
       params?: StrategyIndicatorParams;
+      barsAgo?: number;
     }
   | {
       type: "constant";
@@ -148,6 +171,7 @@ export type StrategyDefinition = {
   riskRules: StrategyRiskRules;
   costModel: StrategyCostModel;
   status: StrategyStatus;
+  engine?: StrategyEngineDefinition;
   schemaVersion: string;
   createdAt: string;
   updatedAt: string;
@@ -207,6 +231,12 @@ export type StrategyBacktestSummary = {
   tradeCount: number;
   longTradeCount: number;
   shortTradeCount: number;
+  avgTradeNetPnl: number;
+  avgWinningTradeNetPnl: number;
+  avgLosingTradeNetPnl: number;
+  avgBarsHeld: number;
+  expectancy: number;
+  exposurePct: number;
   createdAt: string;
   equityCurve: StrategyEquityPoint[];
 };
@@ -258,6 +288,8 @@ export type StrategyCapabilities = {
   operators: StrategyRuleOperator[];
   priceFields: StrategyPriceField[];
   supportedSides: StrategyEnabledSide[];
+  sourceLanguages: StrategySourceType[];
+  sourceFeatures: string[];
   indicatorCatalog: Array<{
     kind: StrategyIndicatorKind;
     label: string;
@@ -265,11 +297,12 @@ export type StrategyCapabilities = {
     params: Array<{
       name: keyof StrategyIndicatorParams;
       label: string;
-      type: "integer" | "number";
+      type: "integer" | "number" | "source";
       required: boolean;
       defaultValue?: number;
       min?: number;
       max?: number;
+      options?: StrategyPriceField[];
     }>;
   }>;
   sizingModes: Array<{
@@ -289,6 +322,11 @@ export type StrategyCapabilities = {
     maxRulesPerGroup: number;
     maxIndicatorLookback: number;
   };
+};
+
+export type StrategySourceCompilation = {
+  engine: StrategyEngineDefinition;
+  preview: StrategyCompilationPreview;
 };
 
 export type StrategyMarketLevel = {
