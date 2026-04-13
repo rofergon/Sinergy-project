@@ -6,7 +6,7 @@ import {
   type HexString,
   type StrategyToolName,
   type StrategyDefinition,
-  type StrategyIdeaKind,
+  type StrategyEngineDefinition,
   type StrategyMarketAnalysis,
   type StrategySideBias
 } from "@sinergy/shared";
@@ -33,16 +33,29 @@ type BasicFastPathConfig = {
 };
 
 type BasicStrategyKind = "ema" | "rsi-mean-reversion" | "range-breakout" | "bollinger-reversion";
+type EngineStrategyKind = BasicStrategyKind | "rsi-ema-hybrid";
 type OptimizationCandidate = {
   label?: string;
   params?: Record<string, unknown>;
 };
 type CreationPlan = {
   analysis?: string;
-  mode?: "clone_template" | "create_custom";
+  mode?: "clone_template" | "create_engine" | "create_custom";
   templateId?: string;
   name?: string;
+  engineHint?: {
+    kind?: EngineStrategyKind;
+    params?: Record<string, unknown>;
+  };
   strategyPatch?: Partial<StrategyDefinition>;
+};
+
+type EngineBuildResult = {
+  name: string;
+  timeframe: StrategyDefinition["timeframe"];
+  enabledSides: StrategyDefinition["enabledSides"];
+  engine: StrategyEngineDefinition;
+  strategyPatch: Partial<StrategyDefinition>;
 };
 
 type AgentRunStreamCallbacks = {
@@ -63,31 +76,6 @@ function defaultRiskRulesForTimeframe(timeframe: StrategyDefinition["timeframe"]
     case "1d":
       return { stopLossPct: 3.5, takeProfitPct: 7, trailingStopPct: 2, maxBarsInTrade: 20 };
   }
-}
-
-function buildTemporaryStrategy(input: {
-  ownerAddress: HexString;
-  marketId: HexString;
-  name: string;
-  timeframe: StrategyDefinition["timeframe"];
-}) {
-  return {
-    id: "temp",
-    ownerAddress: input.ownerAddress,
-    marketId: input.marketId,
-    name: input.name,
-    timeframe: input.timeframe,
-    enabledSides: ["long", "short"],
-    entryRules: { long: [], short: [] } as StrategyDefinition["entryRules"],
-    exitRules: { long: [], short: [] } as StrategyDefinition["exitRules"],
-    sizing: { mode: "percent_of_equity", value: 25 },
-    riskRules: defaultRiskRulesForTimeframe(input.timeframe),
-    costModel: { feeBps: 10, slippageBps: 5, startingEquity: 10_000 },
-    status: "draft",
-    schemaVersion: "1.0.0",
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  } satisfies StrategyDefinition;
 }
 
 function resolvePreferredTimeframe(
@@ -148,6 +136,259 @@ function resolveRiskRulesForGoal(timeframe: StrategyDefinition["timeframe"], goa
   }
 
   return defaults;
+}
+
+function defaultEnabledSidesForKind(kind: EngineStrategyKind): StrategyDefinition["enabledSides"] {
+  switch (kind) {
+    case "ema":
+    case "range-breakout":
+    case "rsi-ema-hybrid":
+      return ["long", "short"];
+    case "rsi-mean-reversion":
+    case "bollinger-reversion":
+      return ["long"];
+  }
+}
+
+function normalizeEnabledSides(
+  requested: unknown,
+  fallback: StrategyDefinition["enabledSides"]
+): StrategyDefinition["enabledSides"] {
+  if (!Array.isArray(requested)) {
+    return fallback;
+  }
+
+  const next = requested.filter(
+    (side): side is StrategyDefinition["enabledSides"][number] => side === "long" || side === "short"
+  );
+  return next.length > 0 ? Array.from(new Set(next)) as StrategyDefinition["enabledSides"] : fallback;
+}
+
+function applySidePreferenceToEnabledSides(
+  enabledSides: StrategyDefinition["enabledSides"],
+  goal: string
+): StrategyDefinition["enabledSides"] {
+  const sideBias = extractRequestedSideBias(goal);
+  if (sideBias === "long_only") return ["long"];
+  if (sideBias === "short_only") return ["short"];
+  return enabledSides;
+}
+
+function buildPineLikeLines(input: {
+  kind: EngineStrategyKind;
+  timeframe: StrategyDefinition["timeframe"];
+  enabledSides: StrategyDefinition["enabledSides"];
+  params: Record<string, unknown>;
+}) {
+  const lines = [
+    `timeframe = "${input.timeframe}"`,
+    `enabledSides = "${input.enabledSides.join(",")}"`
+  ];
+
+  switch (input.kind) {
+    case "ema": {
+      const fast = typeof input.params.fast === "number" ? input.params.fast : 9;
+      const slow = typeof input.params.slow === "number" ? input.params.slow : 21;
+      lines.push(
+        `fast = ta.ema(close, ${fast})`,
+        `slow = ta.ema(close, ${slow})`
+      );
+      if (input.enabledSides.includes("long")) {
+        lines.push(
+          "longEntry = ta.crossover(fast, slow)",
+          "longExit = ta.crossunder(fast, slow)"
+        );
+      }
+      if (input.enabledSides.includes("short")) {
+        lines.push(
+          "shortEntry = ta.crossunder(fast, slow)",
+          "shortExit = ta.crossover(fast, slow)"
+        );
+      }
+      break;
+    }
+    case "rsi-mean-reversion": {
+      const period = typeof input.params.period === "number" ? input.params.period : 14;
+      const entry = typeof input.params.entry === "number" ? input.params.entry : 30;
+      const exit = typeof input.params.exit === "number" ? input.params.exit : 55;
+      lines.push(`rsiValue = ta.rsi(close, ${period})`);
+      if (input.enabledSides.includes("long")) {
+        lines.push(
+          `longEntry = rsiValue <= ${entry}`,
+          `longExit = rsiValue >= ${exit}`
+        );
+      }
+      if (input.enabledSides.includes("short")) {
+        const shortEntry = 100 - entry;
+        const shortExit = 100 - exit;
+        lines.push(
+          `shortEntry = rsiValue >= ${shortEntry}`,
+          `shortExit = rsiValue <= ${shortExit}`
+        );
+      }
+      break;
+    }
+    case "range-breakout": {
+      const lookback = typeof input.params.lookback === "number" ? input.params.lookback : 20;
+      const exitEma = typeof input.params.exitEma === "number" ? input.params.exitEma : 10;
+      lines.push(
+        `rangeHigh = ta.highest(high, ${lookback})`,
+        `rangeLow = ta.lowest(low, ${lookback})`,
+        `exitTrend = ta.ema(close, ${exitEma})`
+      );
+      if (input.enabledSides.includes("long")) {
+        lines.push(
+          "longEntry = close > rangeHigh[1]",
+          "longExit = close < exitTrend"
+        );
+      }
+      if (input.enabledSides.includes("short")) {
+        lines.push(
+          "shortEntry = close < rangeLow[1]",
+          "shortExit = close > exitTrend"
+        );
+      }
+      break;
+    }
+    case "bollinger-reversion": {
+      const period = typeof input.params.period === "number" ? input.params.period : 20;
+      const stdDev = typeof input.params.stdDev === "number" ? input.params.stdDev : 2;
+      lines.push(
+        `bbMid = ta.bb(close, ${period}, ${stdDev}, "middle")`,
+        `bbUpper = ta.bb(close, ${period}, ${stdDev}, "upper")`,
+        `bbLower = ta.bb(close, ${period}, ${stdDev}, "lower")`
+      );
+      if (input.enabledSides.includes("long")) {
+        lines.push(
+          "longEntry = close <= bbLower",
+          "longExit = close >= bbMid"
+        );
+      }
+      if (input.enabledSides.includes("short")) {
+        lines.push(
+          "shortEntry = close >= bbUpper",
+          "shortExit = close <= bbMid"
+        );
+      }
+      break;
+    }
+    case "rsi-ema-hybrid": {
+      const fast = typeof input.params.fast === "number" ? input.params.fast : 9;
+      const slow = typeof input.params.slow === "number" ? input.params.slow : 21;
+      const rsiPeriod = typeof input.params.rsiPeriod === "number" ? input.params.rsiPeriod : 14;
+      const longRsiMin = typeof input.params.longRsiMin === "number" ? input.params.longRsiMin : 55;
+      const shortRsiMax = typeof input.params.shortRsiMax === "number" ? input.params.shortRsiMax : 45;
+      const longExitRsi = typeof input.params.longExitRsi === "number" ? input.params.longExitRsi : 45;
+      const shortExitRsi = typeof input.params.shortExitRsi === "number" ? input.params.shortExitRsi : 55;
+      lines.push(
+        `fast = ta.ema(close, ${fast})`,
+        `slow = ta.ema(close, ${slow})`,
+        `rsiValue = ta.rsi(close, ${rsiPeriod})`
+      );
+      if (input.enabledSides.includes("long")) {
+        lines.push(
+          `longEntry = ta.crossover(fast, slow) and rsiValue >= ${longRsiMin}`,
+          `longExit = ta.crossunder(fast, slow) or rsiValue <= ${longExitRsi}`
+        );
+      }
+      if (input.enabledSides.includes("short")) {
+        lines.push(
+          `shortEntry = ta.crossunder(fast, slow) and rsiValue <= ${shortRsiMax}`,
+          `shortExit = ta.crossover(fast, slow) or rsiValue >= ${shortExitRsi}`
+        );
+      }
+      break;
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function resolveEngineKind(goal: string, marketAnalysis?: StrategyMarketAnalysis): EngineStrategyKind {
+  if (goalLooksLikeRsiEmaHybrid(goal)) return "rsi-ema-hybrid";
+  if (goalLooksLikeEmaCrossover(goal)) return "ema";
+  const explicit = detectBasicFastPath(goal);
+  if (explicit?.kind === "template" && explicit.templateId) {
+    return explicit.templateId;
+  }
+  return marketAnalysis?.recommendedStrategyKinds[0] ?? "ema";
+}
+
+function buildEngineBackedCreation(input: {
+  goal: string;
+  name?: string;
+  preferredTimeframe?: StrategyDefinition["timeframe"];
+  marketAnalysis?: StrategyMarketAnalysis;
+  strategyPatch?: Partial<StrategyDefinition>;
+  engineHint?: CreationPlan["engineHint"];
+}): EngineBuildResult {
+  const strategyPatch = input.strategyPatch ?? {};
+  const engineKind = input.engineHint?.kind ?? resolveEngineKind(input.goal, input.marketAnalysis);
+  const timeframe =
+    typeof strategyPatch.timeframe === "string"
+      ? strategyPatch.timeframe
+      : resolvePreferredTimeframe(input.preferredTimeframe, input.marketAnalysis);
+  const enabledSides = applySidePreferenceToEnabledSides(
+    normalizeEnabledSides(strategyPatch.enabledSides, defaultEnabledSidesForKind(engineKind)),
+    input.goal
+  );
+  const riskRules = strategyPatch.riskRules ?? resolveRiskRulesForGoal(timeframe, input.goal);
+  const params = {
+    ...(input.engineHint?.params ?? {})
+  };
+
+  if (engineKind === "ema" || engineKind === "rsi-ema-hybrid") {
+    params.fast = typeof params.fast === "number" ? params.fast : input.marketAnalysis?.emaSuggestion?.fastPeriod ?? 9;
+    params.slow = typeof params.slow === "number" ? params.slow : input.marketAnalysis?.emaSuggestion?.slowPeriod ?? 21;
+  }
+
+  if (engineKind === "range-breakout") {
+    params.lookback = typeof params.lookback === "number"
+      ? params.lookback
+      : (timeframe === "1h" || timeframe === "4h" ? 24 : 20);
+    params.exitEma = typeof params.exitEma === "number"
+      ? params.exitEma
+      : input.marketAnalysis?.emaSuggestion?.fastPeriod ?? 10;
+  }
+
+  if (engineKind === "bollinger-reversion") {
+    params.period = typeof params.period === "number" ? params.period : (timeframe === "1m" ? 18 : 20);
+    params.stdDev = typeof params.stdDev === "number"
+      ? params.stdDev
+      : (input.marketAnalysis?.overallRegime === "high_noise" ? 2.2 : 2);
+  }
+
+  const script = buildPineLikeLines({
+    kind: engineKind,
+    timeframe,
+    enabledSides,
+    params
+  });
+
+  const defaultNameByKind: Record<EngineStrategyKind, string> = {
+    ema: `EMA Crossover ${params.fast}/${params.slow}`,
+    "rsi-mean-reversion": `RSI Mean Reversion ${typeof params.period === "number" ? params.period : 14}`,
+    "range-breakout": `Range Breakout ${typeof params.lookback === "number" ? params.lookback : 20}`,
+    "bollinger-reversion": `Bollinger Reversion ${typeof params.period === "number" ? params.period : 20}/${typeof params.stdDev === "number" ? params.stdDev : 2}`,
+    "rsi-ema-hybrid": `RSI EMA Hybrid ${params.fast}/${params.slow}`
+  };
+
+  return {
+    name: input.name ?? defaultNameByKind[engineKind],
+    timeframe,
+    enabledSides,
+    engine: {
+      version: "2",
+      sourceType: "pine_like_v0",
+      script
+    },
+    strategyPatch: {
+      ...strategyPatch,
+      timeframe,
+      enabledSides,
+      riskRules
+    }
+  };
 }
 
 function goalRequestsBacktest(goal: string) {
@@ -253,15 +494,6 @@ function emaOperand(period: number): StrategyDefinition["entryRules"]["long"][nu
   return {
     type: "indicator_output",
     indicator: "ema",
-    output: "value",
-    params: { period }
-  };
-}
-
-function rsiOperand(period: number): StrategyDefinition["entryRules"]["long"][number]["rules"][number]["left"] {
-  return {
-    type: "indicator_output",
-    indicator: "rsi",
     output: "value",
     params: { period }
   };
@@ -604,126 +836,6 @@ function buildBollingerVariant(strategy: StrategyDefinition, input: {
   }, `Bollinger Reversion ${input.period}/${input.stdDev}`);
 }
 
-function buildRsiEmaHybridDraft(strategy: StrategyDefinition, input: {
-  timeframe?: StrategyDefinition["timeframe"];
-  fast: number;
-  slow: number;
-  rsiPeriod: number;
-  longRsiMin: number;
-  shortRsiMax: number;
-  longExitRsi: number;
-  shortExitRsi: number;
-  stopLossPct?: number;
-  takeProfitPct?: number;
-  trailingStopPct?: number;
-  maxBarsInTrade?: number;
-}) {
-  const strategyId = strategy.id;
-
-  return withStrategyName({
-    ...strategy,
-    timeframe: input.timeframe ?? strategy.timeframe,
-    enabledSides: ["long", "short"],
-    entryRules: {
-      long: [
-        {
-          id: `${strategyId}-entry-long-1`,
-          rules: [
-            {
-              id: `${strategyId}-entry-long-rule-1`,
-              left: emaOperand(input.fast),
-              operator: "crosses_above",
-              right: emaOperand(input.slow)
-            },
-            {
-              id: `${strategyId}-entry-long-rule-2`,
-              left: rsiOperand(input.rsiPeriod),
-              operator: ">=",
-              right: { type: "constant", value: input.longRsiMin }
-            }
-          ]
-        }
-      ],
-      short: [
-        {
-          id: `${strategyId}-entry-short-1`,
-          rules: [
-            {
-              id: `${strategyId}-entry-short-rule-1`,
-              left: emaOperand(input.fast),
-              operator: "crosses_below",
-              right: emaOperand(input.slow)
-            },
-            {
-              id: `${strategyId}-entry-short-rule-2`,
-              left: rsiOperand(input.rsiPeriod),
-              operator: "<=",
-              right: { type: "constant", value: input.shortRsiMax }
-            }
-          ]
-        }
-      ]
-    },
-    exitRules: {
-      long: [
-        {
-          id: `${strategyId}-exit-long-1`,
-          rules: [
-            {
-              id: `${strategyId}-exit-long-rule-1`,
-              left: emaOperand(input.fast),
-              operator: "crosses_below",
-              right: emaOperand(input.slow)
-            }
-          ]
-        },
-        {
-          id: `${strategyId}-exit-long-2`,
-          rules: [
-            {
-              id: `${strategyId}-exit-long-rule-2`,
-              left: rsiOperand(input.rsiPeriod),
-              operator: "<=",
-              right: { type: "constant", value: input.longExitRsi }
-            }
-          ]
-        }
-      ],
-      short: [
-        {
-          id: `${strategyId}-exit-short-1`,
-          rules: [
-            {
-              id: `${strategyId}-exit-short-rule-1`,
-              left: emaOperand(input.fast),
-              operator: "crosses_above",
-              right: emaOperand(input.slow)
-            }
-          ]
-        },
-        {
-          id: `${strategyId}-exit-short-2`,
-          rules: [
-            {
-              id: `${strategyId}-exit-short-rule-2`,
-              left: rsiOperand(input.rsiPeriod),
-              operator: ">=",
-              right: { type: "constant", value: input.shortExitRsi }
-            }
-          ]
-        }
-      ]
-    },
-    riskRules: {
-      ...strategy.riskRules,
-      stopLossPct: input.stopLossPct ?? strategy.riskRules.stopLossPct,
-      takeProfitPct: input.takeProfitPct ?? strategy.riskRules.takeProfitPct,
-      trailingStopPct: input.trailingStopPct ?? strategy.riskRules.trailingStopPct,
-      maxBarsInTrade: input.maxBarsInTrade ?? strategy.riskRules.maxBarsInTrade
-    }
-  }, `RSI EMA Hybrid ${input.fast}/${input.slow} RSI${input.rsiPeriod}`);
-}
-
 function applyRequestedSidePreference(strategy: StrategyDefinition, goal: string) {
   const sideBias = extractRequestedSideBias(goal);
   if (sideBias === "long_only") {
@@ -861,7 +973,17 @@ function parseCreationPlan(text: string): CreationPlan | null {
   if (start === -1 || end === -1) return null;
   const parsed = JSON.parse(text.slice(start, end + 1)) as CreationPlan;
   if (!parsed || typeof parsed !== "object") return null;
-  if (parsed.mode !== "clone_template" && parsed.mode !== "create_custom") return null;
+  if (
+    parsed.mode !== "clone_template" &&
+    parsed.mode !== "create_engine" &&
+    parsed.mode !== "create_custom"
+  ) {
+    return null;
+  }
+
+  if (parsed.mode === "create_custom") {
+    parsed.mode = "create_engine";
+  }
   return parsed;
 }
 
@@ -875,16 +997,6 @@ function isStrategyMarketAnalysis(value: unknown): value is StrategyMarketAnalys
   );
 }
 
-function chooseFallbackKind(goal: string, marketAnalysis?: StrategyMarketAnalysis): StrategyIdeaKind {
-  if (goalLooksLikeRsiEmaHybrid(goal)) return "ema";
-  if (goalLooksLikeEmaCrossover(goal)) return "ema";
-  const explicit = detectBasicFastPath(goal);
-  if (explicit?.kind === "template" && explicit.templateId) {
-    return explicit.templateId;
-  }
-  return marketAnalysis?.recommendedStrategyKinds[0] ?? "ema";
-}
-
 function buildAnalysisGuidedCreationPlan(input: {
   goal: string;
   ownerAddress: HexString;
@@ -893,85 +1005,36 @@ function buildAnalysisGuidedCreationPlan(input: {
   marketAnalysis?: StrategyMarketAnalysis;
 }) {
   const timeframe = resolvePreferredTimeframe(input.preferredTimeframe, input.marketAnalysis);
-  const sideBias = extractRequestedSideBias(input.goal) ?? "both";
+  const preferredKind = resolveEngineKind(input.goal, input.marketAnalysis);
+  const enabledSides = applySidePreferenceToEnabledSides(
+    defaultEnabledSidesForKind(preferredKind),
+    input.goal
+  );
   const riskRules = resolveRiskRulesForGoal(timeframe, input.goal);
-  if (goalLooksLikeRsiEmaHybrid(input.goal)) {
-    const suggestion = input.marketAnalysis?.emaSuggestion;
-    const base = buildTemporaryStrategy({
-      ownerAddress: input.ownerAddress,
-      marketId: input.marketId,
-      name: "RSI EMA Hybrid Strategy",
-      timeframe
-    });
-    const draft = buildRsiEmaHybridDraft(base, {
-      fast: suggestion?.fastPeriod ?? 9,
-      slow: suggestion?.slowPeriod ?? 21,
-      rsiPeriod: 14,
-      longRsiMin: 55,
-      shortRsiMax: 45,
-      longExitRsi: 45,
-      shortExitRsi: 55,
-      timeframe,
-      ...riskRules
-    });
-
-    return {
-      mode: "create_custom" as const,
-      name: draft.name,
-      strategyPatch: applyRequestedSidePreference(draft, input.goal)
-    };
-  }
-
-  const preferredKind = chooseFallbackKind(input.goal, input.marketAnalysis);
-
-  if (preferredKind === "ema") {
-    const suggestion = input.marketAnalysis?.emaSuggestion;
-    const base = buildTemporaryStrategy({
-      ownerAddress: input.ownerAddress,
-      marketId: input.marketId,
-      name: "EMA Market-Aware Strategy",
-      timeframe
-    });
-    const draft = buildEmaVariant(base, {
-      fast: suggestion?.fastPeriod ?? 9,
-      slow: suggestion?.slowPeriod ?? 21,
-      timeframe,
-      longOnly: sideBias === "long_only",
-      ...riskRules
-    });
-
-    if (sideBias === "short_only") {
-      draft.enabledSides = ["short"];
-      draft.entryRules.long = [];
-      draft.exitRules.long = [];
-    }
-
-    return {
-      mode: "create_custom" as const,
-      name: draft.name,
-      strategyPatch: draft
-    };
-  }
-
-  const nameByKind: Record<Exclude<StrategyIdeaKind, "ema">, string> = {
+  const nameByKind: Record<EngineStrategyKind, string> = {
+    ema: "EMA Market-Aware Strategy",
     "rsi-mean-reversion": "RSI Mean Reversion",
     "range-breakout": "Range Breakout",
-    "bollinger-reversion": "Bollinger Reversion"
+    "bollinger-reversion": "Bollinger Reversion",
+    "rsi-ema-hybrid": "RSI EMA Hybrid Strategy"
   };
 
   return {
-    mode: "clone_template" as const,
-    templateId: preferredKind,
-    name: nameByKind[preferredKind as Exclude<StrategyIdeaKind, "ema">],
+    mode: "create_engine" as const,
+    name: nameByKind[preferredKind],
+    engineHint: {
+      kind: preferredKind,
+      params: preferredKind === "ema" || preferredKind === "rsi-ema-hybrid"
+        ? {
+            fast: input.marketAnalysis?.emaSuggestion?.fastPeriod ?? 9,
+            slow: input.marketAnalysis?.emaSuggestion?.slowPeriod ?? 21
+          }
+        : undefined
+    },
     strategyPatch: {
       timeframe,
       riskRules,
-      enabledSides:
-        sideBias === "long_only"
-          ? ["long"]
-          : sideBias === "short_only"
-            ? ["short"]
-            : ["long", "short"]
+      enabledSides
     } satisfies Partial<StrategyDefinition>
   };
 }
@@ -1413,6 +1476,7 @@ export class StrategyAgentService {
     modelBaseUrl: string;
     modelName: string;
     modelApiKey: string;
+    modelReasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh";
     modelTimeoutMs: number;
     maxSteps: number;
     toolcallRetries: number;
@@ -1426,7 +1490,8 @@ export class StrategyAgentService {
       },
       timeout: options.modelTimeoutMs,
       temperature: 0,
-      maxRetries: 0
+      maxRetries: 0,
+      ...(options.modelReasoningEffort ? { reasoning: { effort: options.modelReasoningEffort } } : {})
     });
     this.planningModel = new ChatOpenAI({
       model: options.modelName,
@@ -1436,7 +1501,8 @@ export class StrategyAgentService {
       },
       timeout: Math.min(options.modelTimeoutMs, 12_000),
       temperature: 0,
-      maxRetries: 0
+      maxRetries: 0,
+      ...(options.modelReasoningEffort ? { reasoning: { effort: options.modelReasoningEffort } } : {})
     });
     this.matcherTransport = createHttpStrategyToolTransport({
       baseUrl: options.matcherUrl
@@ -1705,11 +1771,12 @@ Return JSON like:
       parsed = JSON.parse(rawText.slice(start, end + 1));
     } catch {
       parsed = {
-        finalMessage: "Plan the strategy task by reading capabilities, drafting or cloning, validating, then backtesting.",
+        finalMessage: "Plan the strategy task by reading capabilities, compiling source when custom logic is needed, then drafting, validating, and backtesting.",
         plannedTools: [
           { tool: "list_strategy_capabilities", why: "Read the supported indicators, operators and limits." },
+          { tool: "compile_strategy_source", why: "Normalize new custom strategy logic into an engine-backed script or AST." },
           { tool: "list_strategy_templates", why: "Check whether an existing template already matches the request." },
-          { tool: "create_strategy_draft", why: "Create a draft when no suitable strategy exists." },
+          { tool: "create_strategy_draft", why: "Create a draft and attach the compiled engine when no suitable template exists." },
           { tool: "validate_strategy_draft", why: "Verify schema and rule correctness before saving or testing." },
           { tool: "run_strategy_backtest", why: "Measure performance after the draft is valid." }
         ]
@@ -2203,6 +2270,7 @@ Return JSON like:
     }
 
     let activeStrategy: StrategyDefinition;
+    let engineBackedCreation: EngineBuildResult | null = null;
 
     if (creationPlan.mode === "clone_template" && creationPlan.templateId) {
       const cloneEntry: AgentToolTraceEntry = {
@@ -2233,15 +2301,63 @@ Return JSON like:
       }
       activeStrategy = cloned.strategy as StrategyDefinition;
     } else {
+      engineBackedCreation = buildEngineBackedCreation({
+        goal: input.goal,
+        name: creationPlan.name,
+        preferredTimeframe: input.preferredTimeframe,
+        marketAnalysis,
+        strategyPatch: creationPlan.strategyPatch,
+        engineHint: creationPlan.engineHint
+      });
+
+      const compileEntry: AgentToolTraceEntry = {
+        step: trace.length + 1,
+        tool: "compile_strategy_source",
+        input: {
+          ownerAddress: input.ownerAddress,
+          marketId: input.marketId,
+          name: engineBackedCreation.name,
+          timeframe: engineBackedCreation.timeframe,
+          enabledSides: engineBackedCreation.enabledSides,
+          engine: engineBackedCreation.engine
+        },
+        reason: "Creation fast path: compile Pine-like source into an engine-backed strategy payload",
+        expectedArtifact: "compiled strategy engine",
+        startedAt: new Date().toISOString()
+      };
+      trace.push(compileEntry);
+
+      const compiled = await this.matcherTransport("compile_strategy_source", {
+        ownerAddress: input.ownerAddress as HexString,
+        marketId: input.marketId as HexString,
+        name: engineBackedCreation.name,
+        timeframe: engineBackedCreation.timeframe,
+        enabledSides: engineBackedCreation.enabledSides,
+        engine: engineBackedCreation.engine
+      });
+      compileEntry.output = compiled as Record<string, unknown>;
+      compileEntry.completedAt = new Date().toISOString();
+      Object.assign(compileEntry, summarizeToolProgress(compileEntry));
+
+      const compiledEngine =
+        compiled.engine && typeof compiled.engine === "object"
+          ? (compiled.engine as StrategyEngineDefinition)
+          : engineBackedCreation.engine;
+      engineBackedCreation = {
+        ...engineBackedCreation,
+        engine: compiledEngine
+      };
+
       const createEntry: AgentToolTraceEntry = {
         step: trace.length + 1,
         tool: "create_strategy_draft",
         input: {
           ownerAddress: input.ownerAddress,
           marketId: input.marketId,
-          name: creationPlan.name ?? "Strategy Draft"
+          name: engineBackedCreation.name,
+          engine: compiledEngine
         },
-        reason: "Creation fast path: create a custom draft selected by the model",
+        reason: "Creation fast path: create a custom draft backed by the compiled engine",
         expectedArtifact: "strategy draft",
         startedAt: new Date().toISOString()
       };
@@ -2250,7 +2366,8 @@ Return JSON like:
       const created = await this.matcherTransport("create_strategy_draft", {
         ownerAddress: input.ownerAddress as HexString,
         marketId: input.marketId as HexString,
-        name: creationPlan.name ?? "Strategy Draft"
+        name: engineBackedCreation.name,
+        engine: compiledEngine
       });
       createEntry.output = created as Record<string, unknown>;
       createEntry.completedAt = new Date().toISOString();
@@ -2262,11 +2379,12 @@ Return JSON like:
       activeStrategy = created.strategy as StrategyDefinition;
     }
 
-    const strategyPatch = creationPlan.strategyPatch ?? {};
+    const strategyPatch = engineBackedCreation?.strategyPatch ?? creationPlan.strategyPatch ?? {};
     const nextStrategy: StrategyDefinition = {
       ...activeStrategy,
-      ...(creationPlan.name ? { name: creationPlan.name } : {}),
+      ...((engineBackedCreation?.name ?? creationPlan.name) ? { name: engineBackedCreation?.name ?? creationPlan.name } : {}),
       ...strategyPatch,
+      ...(engineBackedCreation ? { engine: engineBackedCreation.engine } : {}),
       timeframe:
         typeof strategyPatch.timeframe === "string"
           ? strategyPatch.timeframe
@@ -2287,7 +2405,9 @@ Return JSON like:
         ownerAddress: input.ownerAddress,
         strategy: nextStrategy
       },
-      reason: "Creation fast path: apply the model-selected strategy structure",
+      reason: engineBackedCreation
+        ? "Creation fast path: align the draft metadata and risk settings with the compiled engine"
+        : "Creation fast path: apply the model-selected strategy structure",
       expectedArtifact: "updated strategy draft",
       startedAt: new Date().toISOString()
     };
@@ -2428,16 +2548,16 @@ Return JSON like:
 
       return {
         finalMessage: summary
-          ? `Created and validated ${activeStrategy.name}, then ran the backtest. Net PnL: ${summary.netPnl ?? "n/a"}, win rate: ${summary.winRate ?? "n/a"}, trades: ${summary.tradeCount ?? "n/a"}, max drawdown: ${summary.maxDrawdownPct ?? "n/a"}, profit factor: ${summary.profitFactor ?? "n/a"}.`
-          : `Created, validated, and backtested ${activeStrategy.name}.`,
+          ? `Created and validated ${finalStrategy.name}, then ran the backtest. Net PnL: ${summary.netPnl ?? "n/a"}, win rate: ${summary.winRate ?? "n/a"}, trades: ${summary.tradeCount ?? "n/a"}, max drawdown: ${summary.maxDrawdownPct ?? "n/a"}, profit factor: ${summary.profitFactor ?? "n/a"}.`
+          : `Created, validated, and backtested ${finalStrategy.name}.`,
         artifacts: collectArtifactsFromTrace(trace, artifacts)
       };
     }
 
     return {
       finalMessage: validationOk
-        ? `Created and validated ${activeStrategy.name}.`
-        : `Created ${activeStrategy.name}, but validation still has issues after one quick repair pass.`,
+        ? `Created and validated ${finalStrategy.name}.`
+        : `Created ${finalStrategy.name}, but validation still has issues after one quick repair pass.`,
       artifacts
     };
   }
