@@ -110,7 +110,7 @@ npm run dev:matcher
 Start the strategy agent:
 
 ```bash
-npm run dev:agent
+npm run dev:strategy-agent
 ```
 
 #### Strategy Agent Configuration
