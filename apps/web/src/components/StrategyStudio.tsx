@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import type { StrategyTimeframe } from "@sinergy/shared";
 import type { ChartViewport, StrategyBacktestBundle, MarketSnapshot } from "../types";
 import { TradingViewChart } from "./TradingViewChart";
-import { BottomTabs } from "./BottomTabs";
 import { StrategyPanel } from "./StrategyPanel";
 import { StrategyAgentPanel } from "./StrategyAgentPanel";
 
@@ -13,20 +12,8 @@ type Props = {
   timeframe: StrategyTimeframe;
   onSelectMarket: (marketId: `0x${string}`) => void;
   onTimeframeChange: (timeframe: StrategyTimeframe) => void;
-  orders: Array<{
-    id: string;
-    marketId: `0x${string}`;
-    side: "BUY" | "SELL";
-    remainingAtomic: string;
-    createdAt: string;
-    status: string;
-  }>;
-  onCancelOrder: (orderId: string) => Promise<void>;
   strategyBacktest: StrategyBacktestBundle | null;
   onBacktestResult: (result: StrategyBacktestBundle | null) => void;
-  workspaceMode: "manual" | "agentic";
-  onWorkspaceModeChange: (mode: "manual" | "agentic") => void;
-  onGoTrade: () => void;
 };
 
 export function StrategyStudio({
@@ -36,17 +23,13 @@ export function StrategyStudio({
   timeframe,
   onSelectMarket,
   onTimeframeChange,
-  orders,
-  onCancelOrder,
   strategyBacktest,
   onBacktestResult,
-  workspaceMode,
-  onWorkspaceModeChange,
-  onGoTrade
 }: Props) {
   const [focusStrategyId, setFocusStrategyId] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const [viewport, setViewport] = useState<ChartViewport | null>(null);
+  const [manualBuilderOpen, setManualBuilderOpen] = useState(false);
 
   const selectedMarket = useMemo(
     () => markets.find((market) => market.id === selectedMarketId) ?? markets[0],
@@ -59,7 +42,7 @@ export function StrategyStudio({
     if (bundle) {
       onBacktestResult(bundle);
     }
-    onWorkspaceModeChange("manual");
+    setManualBuilderOpen(true);
   }
 
   return (
@@ -67,38 +50,26 @@ export function StrategyStudio({
       <div className="strategy-studio-main">
         <div className="strategy-studio-topbar">
           <div className="strategy-studio-toolbar-copy">
-            <span className="panel-title">Strategy Workspace</span>
+            <span className="panel-title">Agent Workspace</span>
             <div className="strategy-studio-toolbar-meta">
               <span>{selectedMarket?.symbol ?? "--"}</span>
               <span>{timeframe}</span>
-              <span>{workspaceMode === "manual" ? "Manual Builder" : "Agent Workspace"}</span>
+              <span>{manualBuilderOpen ? "Manual Builder" : "Agent Workspace"}</span>
               <span>{strategyBacktest ? `${strategyBacktest.summary.tradeCount} trades` : "No backtest yet"}</span>
             </div>
           </div>
           <div className="strategy-studio-toolbar-actions">
-            <div className="strategy-studio-mode-tabs">
-              <button
-                type="button"
-                className={`trade-mode-tab ${workspaceMode === "manual" ? "active" : ""}`}
-                onClick={() => onWorkspaceModeChange("manual")}
-              >
-                Manual Builder
-              </button>
-              <button
-                type="button"
-                className={`trade-mode-tab ${workspaceMode === "agentic" ? "active" : ""}`}
-                onClick={() => onWorkspaceModeChange("agentic")}
-              >
-                Agent Workspace
-              </button>
-            </div>
-            <button type="button" className="strategy-studio-trade-btn" onClick={onGoTrade}>
-              Return To Trade
+            <button
+              type="button"
+              className="strategy-studio-secondary-link"
+              onClick={() => setManualBuilderOpen((current) => !current)}
+            >
+              {manualBuilderOpen ? "Back to agent" : "Open manual builder"}
             </button>
           </div>
         </div>
 
-        <div className={`strategy-studio-grid ${workspaceMode === "agentic" ? "agentic-mode" : "manual-mode"}`}>
+        <div className={`strategy-studio-grid ${manualBuilderOpen ? "manual-open" : "agent-primary"}`}>
           <div className="strategy-studio-chart-col">
             <TradingViewChart
               market={selectedMarket}
@@ -107,31 +78,40 @@ export function StrategyStudio({
               overlay={strategyBacktest?.overlay ?? null}
               onVisibleBarsChange={setViewport}
             />
-            <BottomTabs
-              address={address}
-              market={selectedMarket}
-              orders={orders}
-              markets={markets}
-              onCancelOrder={onCancelOrder}
-              backtestSummary={strategyBacktest?.summary ?? null}
-              backtestTrades={strategyBacktest?.trades ?? []}
-            />
           </div>
 
           <div className="strategy-studio-workspace-col">
-            {workspaceMode === "manual" ? (
-              <StrategyPanel
-                address={address}
-                markets={markets}
-                selectedMarketId={selectedMarket?.id}
-                timeframe={timeframe}
-                viewport={viewport}
-                onSelectMarket={onSelectMarket}
-                onTimeframeChange={onTimeframeChange}
-                onBacktestResult={onBacktestResult}
-                focusStrategyId={focusStrategyId}
-                refreshToken={refreshToken}
-              />
+            {manualBuilderOpen ? (
+              <div className="strategy-studio-secondary-panel">
+                <div className="strategy-studio-secondary-banner">
+                  <div>
+                    <strong>Manual builder</strong>
+                    <p>
+                      Kept as a secondary workspace for reviewing or fine-tuning ideas that came out
+                      of the agent.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="strategy-studio-secondary-link"
+                    onClick={() => setManualBuilderOpen(false)}
+                  >
+                    Back to agent
+                  </button>
+                </div>
+                <StrategyPanel
+                  address={address}
+                  markets={markets}
+                  selectedMarketId={selectedMarket?.id}
+                  timeframe={timeframe}
+                  viewport={viewport}
+                  onSelectMarket={onSelectMarket}
+                  onTimeframeChange={onTimeframeChange}
+                  onBacktestResult={onBacktestResult}
+                  focusStrategyId={focusStrategyId}
+                  refreshToken={refreshToken}
+                />
+              </div>
             ) : (
               <StrategyAgentPanel
                 address={address}

@@ -1108,17 +1108,11 @@ a { color: inherit; text-decoration: none; }
 .strategy-studio-toolbar-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   justify-content: flex-end;
 }
 
-.strategy-studio-mode-tabs {
-  display: flex;
-  gap: 8px;
-  min-width: 320px;
-}
-
-.strategy-studio-trade-btn {
+.strategy-studio-secondary-link {
   border: 1px solid var(--border);
   background: var(--bg-secondary);
   color: var(--text-primary);
@@ -1128,21 +1122,26 @@ a { color: inherit; text-decoration: none; }
   white-space: nowrap;
 }
 
+.strategy-studio-secondary-link:hover {
+  border-color: var(--border-focus);
+  background: var(--bg-elevated);
+}
+
 .strategy-studio-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) 440px;
+  grid-template-columns: minmax(0, 1.08fr) minmax(620px, 760px);
   gap: 16px;
   min-height: 0;
   flex: 1;
   overflow: hidden;
 }
 
-.strategy-studio-grid.manual-mode {
-  grid-template-columns: minmax(0, 1fr) minmax(620px, 760px);
+.strategy-studio-grid.agent-primary {
+  grid-template-columns: minmax(0, 0.96fr) minmax(680px, 860px);
 }
 
-.strategy-studio-grid.agentic-mode {
-  grid-template-columns: minmax(0, 1fr) minmax(560px, 640px);
+.strategy-studio-grid.manual-open {
+  grid-template-columns: minmax(0, 1fr) minmax(640px, 780px);
 }
 
 .strategy-studio-chart-col,
@@ -1163,6 +1162,39 @@ a { color: inherit; text-decoration: none; }
 .strategy-studio-workspace-col {
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+.strategy-studio-secondary-panel {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, rgba(18, 22, 28, 0.96), rgba(11, 14, 17, 0.98));
+}
+
+.strategy-studio-secondary-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(18, 22, 28, 0.72);
+}
+
+.strategy-studio-secondary-banner strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.strategy-studio-secondary-banner p {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  max-width: 420px;
 }
 
 .strategy-agent-panel {
@@ -3266,11 +3298,7 @@ a { color: inherit; text-decoration: none; }
     flex-direction: column;
     align-items: stretch;
   }
-  .strategy-studio-mode-tabs {
-    width: 100%;
-    min-width: 0;
-  }
-  .strategy-studio-trade-btn {
+  .strategy-studio-secondary-link {
     width: 100%;
   }
   .strategy-agent-context {
@@ -3317,6 +3345,10 @@ a { color: inherit; text-decoration: none; }
   }
   .strategy-agent-context {
     grid-template-columns: 1fr;
+  }
+  .strategy-studio-secondary-banner {
+    flex-direction: column;
+    align-items: stretch;
   }
   .strategy-agent-actions,
   .strategy-panel-footer {

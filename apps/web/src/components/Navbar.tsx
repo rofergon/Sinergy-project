@@ -15,8 +15,8 @@ type Props = {
   markets: MarketSnapshot[];
   selectedMarketId?: Hex;
   onSelectMarket: (id: Hex) => void;
-  activeView: "trade" | "strategies" | "markets" | "portfolio" | "bridge";
-  onNavigate: (view: "trade" | "strategies" | "markets" | "portfolio" | "bridge") => void;
+  activeView: "agent" | "portfolio" | "bridge";
+  onNavigate: (view: "agent" | "portfolio" | "bridge") => void;
   isConnected: boolean;
   initiaAddress?: string;
   username?: string | null;
@@ -112,22 +112,10 @@ export function Navbar({
 
       <div className="nav-links">
         <button
-          className={`nav-link ${activeView === "trade" ? "active" : ""}`}
-          onClick={() => onNavigate("trade")}
+          className={`nav-link ${activeView === "agent" ? "active" : ""}`}
+          onClick={() => onNavigate("agent")}
         >
-          Trade
-        </button>
-        <button
-          className={`nav-link ${activeView === "strategies" ? "active" : ""}`}
-          onClick={() => onNavigate("strategies")}
-        >
-          Strategies
-        </button>
-        <button
-          className={`nav-link ${activeView === "markets" ? "active" : ""}`}
-          onClick={() => onNavigate("markets")}
-        >
-          Markets
+          Agent
         </button>
         <button
           className={`nav-link ${activeView === "portfolio" ? "active" : ""}`}
