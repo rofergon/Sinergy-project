@@ -8,6 +8,7 @@ import {
   type StrategyEnabledSide,
   type StrategyIndicatorKind,
   type StrategyIndicatorOutput,
+  type StrategyIndicatorParams,
   type StrategyRuleGroup,
   type StrategyTemplate,
   type StrategyTimeframe
@@ -77,7 +78,7 @@ function operandPrice(field: "open" | "high" | "low" | "close" | "volume") {
 function operandIndicator(
   indicator: StrategyIndicatorKind,
   output: StrategyIndicatorOutput,
-  params: Record<string, number>
+  params: StrategyIndicatorParams
 ) {
   return {
     type: "indicator_output",
@@ -100,16 +101,34 @@ export function buildStrategyCapabilities(): StrategyCapabilities {
     strategySchemaVersion: STRATEGY_SCHEMA_VERSION,
     capabilitiesVersion: STRATEGY_CAPABILITIES_VERSION,
     timeframes: [...STRATEGY_TIMEFRAMES],
-    operators: [">", ">=", "<", "<=", "crosses_above", "crosses_below"],
-    priceFields: ["open", "high", "low", "close", "volume"],
+    operators: [">", ">=", "<", "<=", "==", "!=", "crosses_above", "crosses_below"],
+    priceFields: ["open", "high", "low", "close", "volume", "hl2", "hlc3", "ohlc4"],
     supportedSides: ["long", "short"],
+    sourceLanguages: ["ast_v2", "pine_like_v0"],
+    sourceFeatures: [
+      "bindings",
+      "price_offsets",
+      "indicator_calls",
+      "math_expressions",
+      "logical_conditions",
+      "pine_like_assignments",
+      "ta.crossover",
+      "ta.crossunder"
+    ],
     indicatorCatalog: [
       {
         kind: "sma",
         label: "Simple Moving Average",
         outputs: ["value"],
         params: [
-          { name: "period", label: "Period", type: "integer", required: true, defaultValue: 20, min: 1, max: 400 }
+          { name: "period", label: "Period", type: "integer", required: true, defaultValue: 20, min: 1, max: 400 },
+          {
+            name: "source",
+            label: "Source",
+            type: "source",
+            required: false,
+            options: ["open", "high", "low", "close", "volume", "hl2", "hlc3", "ohlc4"]
+          }
         ]
       },
       {
@@ -117,7 +136,14 @@ export function buildStrategyCapabilities(): StrategyCapabilities {
         label: "Exponential Moving Average",
         outputs: ["value"],
         params: [
-          { name: "period", label: "Period", type: "integer", required: true, defaultValue: 20, min: 1, max: 400 }
+          { name: "period", label: "Period", type: "integer", required: true, defaultValue: 20, min: 1, max: 400 },
+          {
+            name: "source",
+            label: "Source",
+            type: "source",
+            required: false,
+            options: ["open", "high", "low", "close", "volume", "hl2", "hlc3", "ohlc4"]
+          }
         ]
       },
       {
@@ -125,7 +151,14 @@ export function buildStrategyCapabilities(): StrategyCapabilities {
         label: "Relative Strength Index",
         outputs: ["value"],
         params: [
-          { name: "period", label: "Period", type: "integer", required: true, defaultValue: 14, min: 1, max: 200 }
+          { name: "period", label: "Period", type: "integer", required: true, defaultValue: 14, min: 1, max: 200 },
+          {
+            name: "source",
+            label: "Source",
+            type: "source",
+            required: false,
+            options: ["open", "high", "low", "close", "volume", "hl2", "hlc3", "ohlc4"]
+          }
         ]
       },
       {
@@ -135,7 +168,14 @@ export function buildStrategyCapabilities(): StrategyCapabilities {
         params: [
           { name: "fastPeriod", label: "Fast", type: "integer", required: true, defaultValue: 12, min: 1, max: 200 },
           { name: "slowPeriod", label: "Slow", type: "integer", required: true, defaultValue: 26, min: 1, max: 200 },
-          { name: "signalPeriod", label: "Signal", type: "integer", required: true, defaultValue: 9, min: 1, max: 200 }
+          { name: "signalPeriod", label: "Signal", type: "integer", required: true, defaultValue: 9, min: 1, max: 200 },
+          {
+            name: "source",
+            label: "Source",
+            type: "source",
+            required: false,
+            options: ["open", "high", "low", "close", "volume", "hl2", "hlc3", "ohlc4"]
+          }
         ]
       },
       {
@@ -144,7 +184,47 @@ export function buildStrategyCapabilities(): StrategyCapabilities {
         outputs: ["upper", "middle", "lower"],
         params: [
           { name: "period", label: "Period", type: "integer", required: true, defaultValue: 20, min: 1, max: 200 },
-          { name: "stdDev", label: "Std Dev", type: "number", required: true, defaultValue: 2, min: 0.1, max: 10 }
+          { name: "stdDev", label: "Std Dev", type: "number", required: true, defaultValue: 2, min: 0.1, max: 10 },
+          {
+            name: "source",
+            label: "Source",
+            type: "source",
+            required: false,
+            options: ["open", "high", "low", "close", "volume", "hl2", "hlc3", "ohlc4"]
+          }
+        ]
+      },
+      {
+        kind: "atr",
+        label: "Average True Range",
+        outputs: ["value"],
+        params: [
+          { name: "period", label: "Period", type: "integer", required: true, defaultValue: 14, min: 1, max: 200 }
+        ]
+      },
+      {
+        kind: "roc",
+        label: "Rate of Change",
+        outputs: ["value"],
+        params: [
+          { name: "period", label: "Period", type: "integer", required: true, defaultValue: 9, min: 1, max: 200 },
+          {
+            name: "source",
+            label: "Source",
+            type: "source",
+            required: false,
+            options: ["open", "high", "low", "close", "volume", "hl2", "hlc3", "ohlc4"]
+          }
+        ]
+      },
+      {
+        kind: "stoch",
+        label: "Stochastic Oscillator",
+        outputs: ["k", "d"],
+        params: [
+          { name: "period", label: "Period", type: "integer", required: true, defaultValue: 14, min: 1, max: 200 },
+          { name: "smoothK", label: "Smooth K", type: "integer", required: true, defaultValue: 3, min: 1, max: 50 },
+          { name: "smoothD", label: "Smooth D", type: "integer", required: true, defaultValue: 3, min: 1, max: 50 }
         ]
       },
       {
