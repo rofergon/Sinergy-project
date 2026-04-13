@@ -40,6 +40,18 @@ export function BacktestResults({ summary, trades }: Props) {
           <strong>{summary.tradeCount}</strong>
         </div>
         <div className="backtest-metric-card">
+          <span>Avg Trade / Expectancy</span>
+          <strong>
+            {formatMetric(summary.avgTradeNetPnl)} / {formatMetric(summary.expectancy)}
+          </strong>
+        </div>
+        <div className="backtest-metric-card">
+          <span>Exposure / Avg Bars</span>
+          <strong>
+            {formatMetric(summary.exposurePct)}% / {formatMetric(summary.avgBarsHeld)}
+          </strong>
+        </div>
+        <div className="backtest-metric-card">
           <span>Fees / Slippage</span>
           <strong>
             {formatMetric(summary.feesPaid)} / {formatMetric(summary.slippagePaid)}
