@@ -1,5 +1,6 @@
 import type {
   StrategyDefinition,
+  StrategyIndicatorParams,
   StrategyValidationIssue,
   StrategyValidationResult,
   StrategyRuleGroup,
@@ -8,6 +9,7 @@ import type {
   StrategyCapabilities,
   StrategyRuleOperator,
   StrategyIndicatorOutput,
+  StrategyPriceField,
   StrategyRule
 } from "@sinergy/shared";
 
@@ -24,14 +26,31 @@ export type RepairResult = {
   patchedStrategy: StrategyDefinition;
 };
 
-const SUPPORTED_INDICATORS = ["ema", "sma", "rsi", "macd", "bollinger", "vwap", "rolling_high", "rolling_low", "candle_body_pct", "candle_direction"] as const;
+const SUPPORTED_INDICATORS = [
+  "ema",
+  "sma",
+  "rsi",
+  "macd",
+  "bollinger",
+  "atr",
+  "roc",
+  "stoch",
+  "vwap",
+  "rolling_high",
+  "rolling_low",
+  "candle_body_pct",
+  "candle_direction"
+] as const;
 
-const DEFAULT_INDICATOR_PARAMS: Record<string, Record<string, number>> = {
-  sma: { period: 20 },
-  ema: { period: 20 },
-  rsi: { period: 14 },
-  macd: { fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
-  bollinger: { period: 20, stdDev: 2 },
+const DEFAULT_INDICATOR_PARAMS: Partial<Record<StrategyIndicatorKind, StrategyIndicatorParams>> = {
+  sma: { period: 20, source: "close" },
+  ema: { period: 20, source: "close" },
+  rsi: { period: 14, source: "close" },
+  macd: { fastPeriod: 12, slowPeriod: 26, signalPeriod: 9, source: "close" },
+  bollinger: { period: 20, stdDev: 2, source: "close" },
+  atr: { period: 14 },
+  roc: { period: 9, source: "close" },
+  stoch: { period: 14, smoothK: 3, smoothD: 3 },
   rolling_high: { lookback: 20 },
   rolling_low: { lookback: 20 }
 };
@@ -42,6 +61,9 @@ const DEFAULT_INDICATOR_OUTPUTS: Record<string, StrategyIndicatorOutput> = {
   rsi: "value",
   macd: "line",
   bollinger: "middle",
+  atr: "value",
+  roc: "value",
+  stoch: "k",
   vwap: "value",
   rolling_high: "value",
   rolling_low: "value",
@@ -49,9 +71,52 @@ const DEFAULT_INDICATOR_OUTPUTS: Record<string, StrategyIndicatorOutput> = {
   candle_direction: "direction"
 };
 
-function makeOperand(kind: StrategyIndicatorKind | "price", fieldOrParams?: string, params?: Record<string, number>): StrategyOperand {
+function assignIndicatorParam(
+  params: StrategyIndicatorParams,
+  key: keyof StrategyIndicatorParams,
+  value: StrategyIndicatorParams[keyof StrategyIndicatorParams]
+) {
+  switch (key) {
+    case "period":
+      if (typeof value === "number") params.period = value;
+      break;
+    case "fastPeriod":
+      if (typeof value === "number") params.fastPeriod = value;
+      break;
+    case "slowPeriod":
+      if (typeof value === "number") params.slowPeriod = value;
+      break;
+    case "signalPeriod":
+      if (typeof value === "number") params.signalPeriod = value;
+      break;
+    case "smoothK":
+      if (typeof value === "number") params.smoothK = value;
+      break;
+    case "smoothD":
+      if (typeof value === "number") params.smoothD = value;
+      break;
+    case "stdDev":
+      if (typeof value === "number") params.stdDev = value;
+      break;
+    case "lookback":
+      if (typeof value === "number") params.lookback = value;
+      break;
+    case "source":
+      if (typeof value === "string") params.source = value;
+      break;
+  }
+}
+
+function makeOperand(
+  kind: StrategyIndicatorKind | "price",
+  fieldOrParams?: string,
+  params?: StrategyIndicatorParams
+): StrategyOperand {
   if (kind === "price") {
-    return { type: "price_field", field: (fieldOrParams ?? "close") as "open" | "high" | "low" | "close" | "volume" };
+    return {
+      type: "price_field",
+      field: (fieldOrParams ?? "close") as StrategyPriceField
+    };
   }
   return {
     type: "indicator_output",
@@ -117,7 +182,11 @@ function applyMissingIndicatorParamFix(strategy: StrategyDefinition, issue: Stra
               const defaults = DEFAULT_INDICATOR_PARAMS[indicatorKind];
               if (defaults && paramName in defaults) {
                 if (!operand.params) operand.params = {};
-                operand.params[paramName as keyof typeof operand.params] = defaults[paramName];
+                const paramKey = paramName as keyof StrategyIndicatorParams;
+                const defaultValue = defaults[paramKey];
+                if (defaultValue !== undefined) {
+                  assignIndicatorParam(operand.params, paramKey, defaultValue);
+                }
                 return {
                   issueCode: issue.code,
                   path: issue.path,
@@ -178,12 +247,13 @@ function applyInvalidIndicatorParamFix(strategy: StrategyDefinition, issue: Stra
           for (const operandKey of ["left", "right"] as const) {
             const operand = rule[operandKey];
             if (operand.type === "indicator_output" && operand.params && paramName in operand.params) {
-              const currentValue = operand.params[paramName as keyof typeof operand.params];
+              const paramKey = paramName as keyof StrategyIndicatorParams;
+              const currentValue = operand.params[paramKey];
               if (typeof currentValue === "number") {
                 const min = paramMinValues[paramName] ?? 1;
                 const max = paramMaxValues[paramName] ?? 400;
                 if (currentValue < min) {
-                  operand.params[paramName as keyof typeof operand.params] = min as never;
+                  assignIndicatorParam(operand.params, paramKey, min);
                   return {
                     issueCode: issue.code,
                     path: issue.path,
@@ -192,7 +262,7 @@ function applyInvalidIndicatorParamFix(strategy: StrategyDefinition, issue: Stra
                   };
                 }
                 if (currentValue > max) {
-                  operand.params[paramName as keyof typeof operand.params] = max as never;
+                  assignIndicatorParam(operand.params, paramKey, max);
                   return {
                     issueCode: issue.code,
                     path: issue.path,
@@ -202,7 +272,7 @@ function applyInvalidIndicatorParamFix(strategy: StrategyDefinition, issue: Stra
                 }
               }
               if (currentValue === undefined || currentValue === null) {
-                operand.params[paramName as keyof typeof operand.params] = (paramDefaults[paramName] ?? 20) as never;
+                assignIndicatorParam(operand.params, paramKey, paramDefaults[paramName] ?? 20);
                 return {
                   issueCode: issue.code,
                   path: issue.path,
@@ -526,7 +596,7 @@ function operandsMatch(left: StrategyOperand, right: StrategyOperand): boolean {
   }
 
   if (left.type === "price_field" && right.type === "price_field") {
-    return left.field === right.field;
+    return left.field === right.field && (left.barsAgo ?? 0) === (right.barsAgo ?? 0);
   }
 
   if (left.type !== "indicator_output" || right.type !== "indicator_output") {
@@ -541,12 +611,16 @@ function operandsMatch(left: StrategyOperand, right: StrategyOperand): boolean {
   if (
     left.indicator !== right.indicator ||
     left.output !== right.output ||
+    (left.barsAgo ?? 0) !== (right.barsAgo ?? 0) ||
     leftKeys.length !== rightKeys.length
   ) {
     return false;
   }
 
-  return leftKeys.every((key, index) => key === rightKeys[index] && leftParams[key] === rightParams[key]);
+  return leftKeys.every((key, index) => {
+    const paramKey = key as keyof StrategyIndicatorParams;
+    return key === rightKeys[index] && leftParams[paramKey] === rightParams[paramKey];
+  });
 }
 
 function rulesMatch(left: StrategyRule, right: StrategyRule): boolean {
