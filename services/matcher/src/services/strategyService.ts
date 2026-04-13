@@ -9,7 +9,10 @@ import type {
   StrategyBacktestTrade,
   StrategyCapabilities,
   StrategyChartOverlay,
+  StrategyCompilationPreview,
+  StrategyEngineDefinition,
   StrategyMarketAnalysis,
+  StrategySourceCompilation,
   StrategyTimeframe,
   StrategyTemplate,
   StrategyValidationResult
@@ -23,6 +26,7 @@ import {
 import { runStrategyBacktest } from "./strategyBacktest.js";
 import { analyzeMarketContext } from "./strategyMarketAnalysis.js";
 import { normalizeStrategyDefinition, validateStrategyDefinition, ensureSavedStrategy } from "./strategyValidation.js";
+import { buildCompilationPreview, normalizeStrategyEngine } from "./strategySourceCompiler.js";
 import type { PriceService } from "./priceService.js";
 import type { ResolvedMarket } from "../types.js";
 import { StrategyToolError } from "./strategyToolSecurity.js";
@@ -161,15 +165,54 @@ export class StrategyService {
     });
   }
 
-  createDraft(input: { ownerAddress: HexString; marketId: HexString; name?: string }) {
+  compileStrategySource(input: {
+    ownerAddress: HexString;
+    marketId: HexString;
+    name?: string;
+    timeframe?: StrategyTimeframe;
+    enabledSides?: Array<"long" | "short">;
+    engine: unknown;
+  }): StrategySourceCompilation {
     this.assertKnownMarket(input.marketId);
     this.assertOwnerAddress(input.ownerAddress);
     const strategy = createEmptyStrategyDraft(
       randomUUID(),
       input.ownerAddress,
       input.marketId,
+      input.name?.trim() || "Compiled Strategy Draft"
+    );
+    if (input.timeframe) {
+      strategy.timeframe = input.timeframe;
+    }
+    if (input.enabledSides?.length) {
+      strategy.enabledSides = input.enabledSides;
+    }
+    const engine = normalizeStrategyEngine(input.engine);
+    if (!engine) {
+      throw new StrategyToolError("Strategy source compilation requires a valid engine payload.", "invalid_strategy_engine", 422);
+    }
+    strategy.engine = engine;
+    return {
+      engine,
+      preview: buildCompilationPreview(strategy, engine)
+    };
+  }
+
+  createDraft(input: { ownerAddress: HexString; marketId: HexString; name?: string; engine?: unknown }) {
+    this.assertKnownMarket(input.marketId);
+    this.assertOwnerAddress(input.ownerAddress);
+    let strategy = createEmptyStrategyDraft(
+      randomUUID(),
+      input.ownerAddress,
+      input.marketId,
       input.name?.trim() || "New Strategy Draft"
     );
+    if (input.engine !== undefined) {
+      strategy = normalizeStrategyDefinition({
+        ...strategy,
+        engine: input.engine
+      });
+    }
     this.assertStrategyWritable(strategy);
     this.writeStrategy(strategy);
     return strategy;
