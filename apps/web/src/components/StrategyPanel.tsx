@@ -3,6 +3,8 @@ import type {
   HexString,
   StrategyCapabilities,
   StrategyDefinition,
+  StrategyIndicatorKind,
+  StrategyIndicatorOutput,
   StrategyIndicatorParams,
   StrategyOperand,
   StrategyPriceField,
@@ -11,6 +13,10 @@ import type {
   StrategyTemplate,
   StrategyTimeframe,
   StrategyValidationResult
+} from "@sinergy/shared";
+import type {
+  StrategyValueExpressionV2,
+  StrategyConditionExpressionV2
 } from "@sinergy/shared";
 import { strategyTool } from "../lib/api";
 import type { ChartViewport, MarketSnapshot, StrategyBacktestBundle } from "../types";
@@ -57,6 +63,124 @@ function emptyGroup(): StrategyRuleGroup {
 
 function cloneStrategy(strategy: StrategyDefinition) {
   return JSON.parse(JSON.stringify(strategy)) as StrategyDefinition;
+}
+
+type ActiveIndicatorEntry = {
+  key: string;
+  kind: StrategyIndicatorKind;
+  label: string;
+  output: StrategyIndicatorOutput;
+  params: StrategyIndicatorParams;
+  barsAgo: number;
+  source: "rules" | "engine";
+};
+
+function serializeIndicatorKey(
+  indicator: StrategyIndicatorKind,
+  output: StrategyIndicatorOutput,
+  barsAgo: number,
+  params?: StrategyIndicatorParams
+): string {
+  const paramStr = params
+    ? Object.entries(params)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => `${k}:${v}`)
+        .join("|")
+    : "";
+  return `${indicator}:${output}:${barsAgo}:${paramStr}`;
+}
+
+function extractActiveIndicators(
+  draft: StrategyDefinition,
+  capabilities: StrategyCapabilities | null
+): ActiveIndicatorEntry[] {
+  const seenKeys = new Set<string>();
+  const result: ActiveIndicatorEntry[] = [];
+
+  const addIndicator = (
+    kind: StrategyIndicatorKind,
+    output: StrategyIndicatorOutput,
+    params: StrategyIndicatorParams,
+    barsAgo: number,
+    source: "rules" | "engine"
+  ) => {
+    const key = serializeIndicatorKey(kind, output, barsAgo, params);
+    if (seenKeys.has(key)) return;
+    seenKeys.add(key);
+    const catalogEntry = capabilities?.indicatorCatalog.find((i) => i.kind === kind);
+    result.push({
+      key,
+      kind,
+      label: catalogEntry?.label ?? kind.toUpperCase(),
+      output,
+      params: { ...params },
+      barsAgo,
+      source
+    });
+  };
+
+  // ── Scan manual rules (entryRules / exitRules) ──
+  const visitOperand = (op: StrategyOperand) => {
+    if (op.type !== "indicator_output") return;
+    addIndicator(op.indicator, op.output, op.params ?? {}, op.barsAgo ?? 0, "rules");
+  };
+
+  const visitGroups = (groups: StrategyRuleGroup[]) => {
+    for (const group of groups) {
+      for (const rule of group.rules) {
+        visitOperand(rule.left);
+        visitOperand(rule.right);
+      }
+    }
+  };
+
+  visitGroups(draft.entryRules.long);
+  visitGroups(draft.entryRules.short);
+  visitGroups(draft.exitRules.long);
+  visitGroups(draft.exitRules.short);
+
+  // ── Scan engine AST (bindings + signals) ──
+  const ast = draft.engine?.ast;
+  if (ast) {
+    const visitValueExpr = (expr: StrategyValueExpressionV2): void => {
+      if (expr.type === "indicator") {
+        addIndicator(
+          expr.indicator,
+          expr.output,
+          expr.params ?? {},
+          expr.barsAgo ?? 0,
+          "engine"
+        );
+      } else if (expr.type === "binary_op") {
+        visitValueExpr(expr.left);
+        visitValueExpr(expr.right);
+      } else if (expr.type === "unary_op") {
+        visitValueExpr(expr.expression);
+      } else if (expr.type === "history_ref") {
+        visitValueExpr(expr.expression);
+      }
+    };
+
+    const visitCondition = (cond: StrategyConditionExpressionV2): void => {
+      if (cond.type === "comparison") {
+        visitValueExpr(cond.left);
+        visitValueExpr(cond.right);
+      } else if (cond.type === "logical") {
+        for (const sub of cond.conditions) visitCondition(sub);
+      } else if (cond.type === "not") {
+        visitCondition(cond.condition);
+      }
+    };
+
+    for (const binding of ast.bindings) {
+      visitValueExpr(binding.expression);
+    }
+    for (const signal of Object.values(ast.signals)) {
+      if (signal) visitCondition(signal);
+    }
+  }
+
+  return result;
 }
 
 function serializeOperandKey(op: StrategyOperand): string | null {
@@ -601,6 +725,12 @@ export function StrategyPanel({
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState<"loading" | "saving" | "validating" | "running" | null>(null);
   const [templateId, setTemplateId] = useState("");
+  const [rulesExpanded, setRulesExpanded] = useState(false);
+
+  const activeIndicators = useMemo(
+    () => (draft ? extractActiveIndicators(draft, capabilities) : []),
+    [draft, capabilities]
+  );
 
   const handleGlobalSync = (prevKey: string, nextOp: StrategyOperand) => {
     setDraft((current) => {
@@ -856,363 +986,371 @@ export function StrategyPanel({
     );
   }
 
+  function updateIndicatorParam(
+    indicatorEntry: ActiveIndicatorEntry,
+    paramName: keyof StrategyIndicatorParams,
+    rawValue: string | number
+  ) {
+    if (!draft) return;
+    const nextDraft = cloneStrategy(draft);
+    const value = typeof rawValue === "string" ? (paramName === "source" ? rawValue : Number(rawValue)) : rawValue;
+
+    // ── Patch manual rule operands ──
+    const patchOperand = (op: StrategyOperand): StrategyOperand => {
+      if (op.type !== "indicator_output") return op;
+      const key = serializeIndicatorKey(op.indicator, op.output, op.barsAgo ?? 0, op.params);
+      if (key !== indicatorEntry.key) return op;
+      const nextParams = { ...(op.params ?? {}) };
+      assignIndicatorParam(nextParams, paramName, value as StrategyIndicatorParams[keyof StrategyIndicatorParams]);
+      return { ...op, params: nextParams };
+    };
+
+    const patchGroups = (groups: StrategyRuleGroup[]) =>
+      groups.map((g) => ({
+        ...g,
+        rules: g.rules.map((r) => ({
+          ...r,
+          left: patchOperand(r.left),
+          right: patchOperand(r.right)
+        }))
+      }));
+
+    nextDraft.entryRules.long = patchGroups(nextDraft.entryRules.long);
+    nextDraft.entryRules.short = patchGroups(nextDraft.entryRules.short);
+    nextDraft.exitRules.long = patchGroups(nextDraft.exitRules.long);
+    nextDraft.exitRules.short = patchGroups(nextDraft.exitRules.short);
+
+    // ── Patch engine AST ──
+    if (nextDraft.engine?.ast) {
+      const patchValueExpr = (expr: StrategyValueExpressionV2): StrategyValueExpressionV2 => {
+        if (expr.type === "indicator") {
+          const key = serializeIndicatorKey(expr.indicator, expr.output, expr.barsAgo ?? 0, expr.params);
+          if (key === indicatorEntry.key) {
+            const nextParams = { ...(expr.params ?? {}) };
+            assignIndicatorParam(nextParams, paramName, value as StrategyIndicatorParams[keyof StrategyIndicatorParams]);
+            return { ...expr, params: nextParams };
+          }
+          return expr;
+        }
+        if (expr.type === "binary_op") {
+          return { ...expr, left: patchValueExpr(expr.left), right: patchValueExpr(expr.right) };
+        }
+        if (expr.type === "unary_op") {
+          return { ...expr, expression: patchValueExpr(expr.expression) };
+        }
+        if (expr.type === "history_ref") {
+          return { ...expr, expression: patchValueExpr(expr.expression) };
+        }
+        return expr;
+      };
+
+      const patchCondition = (cond: StrategyConditionExpressionV2): StrategyConditionExpressionV2 => {
+        if (cond.type === "comparison") {
+          return { ...cond, left: patchValueExpr(cond.left), right: patchValueExpr(cond.right) };
+        }
+        if (cond.type === "logical") {
+          return { ...cond, conditions: cond.conditions.map(patchCondition) };
+        }
+        if (cond.type === "not") {
+          return { ...cond, condition: patchCondition(cond.condition) };
+        }
+        return cond;
+      };
+
+      nextDraft.engine.ast.bindings = nextDraft.engine.ast.bindings.map((b) => ({
+        ...b,
+        expression: patchValueExpr(b.expression)
+      }));
+
+      const signals = nextDraft.engine.ast.signals;
+      for (const signalKey of Object.keys(signals) as Array<keyof typeof signals>) {
+        const signal = signals[signalKey];
+        if (signal) {
+          signals[signalKey] = patchCondition(signal);
+        }
+      }
+    }
+
+    nextDraft.updatedAt = new Date().toISOString();
+    setDraft(nextDraft);
+  }
+
   return (
     <div className="strategy-panel">
-      <div className="strategy-panel-head">
-        <div>
-          <span className="panel-title">Strategy Builder</span>
-          <p>Configura el borrador por secciones: origen, ejecución, riesgo y reglas por lado.</p>
-        </div>
-        <div className="strategy-head-actions">
-          <button type="button" onClick={() => void refreshData()} disabled={busy !== null}>
-            Refresh
-          </button>
-        </div>
-      </div>
-
       <div className="strategy-panel-body">
-        <div className="strategy-toolbar-grid">
-          <div className="strategy-subsection">
-            <div className="strategy-section-head">
-              <div className="strategy-section-copy">
-                <strong>Draft Workspace</strong>
-                <small>Abre un borrador existente o empieza uno nuevo.</small>
-              </div>
-              <button type="button" onClick={() => void createDraft()} disabled={busy !== null}>
-                New Draft
-              </button>
-            </div>
-            <label>
-              Strategy
-              <select
-                value={selectedStrategyId}
-                onChange={(event) => void selectStrategy(event.target.value)}
-              >
-                <option value="">Select draft</option>
-                {strategies.map((strategy) => (
-                  <option key={strategy.id} value={strategy.id}>
-                    {strategy.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <div className="strategy-subsection">
-            <div className="strategy-section-head">
-              <div className="strategy-section-copy">
-                <strong>Template Starter</strong>
-                <small>Usa una base prehecha y luego ajústala.</small>
-              </div>
-              <button type="button" onClick={() => void cloneTemplate()} disabled={!templateId || busy !== null}>
-                Clone Template
-              </button>
-            </div>
-            <label>
-              Template
-              <select value={templateId} onChange={(event) => setTemplateId(event.target.value)}>
-                <option value="">Select template</option>
-                {templates.map((template) => (
-                  <option key={template.id} value={template.id}>
-                    {template.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </div>
-
         {!draft ? (
-          <div className="strategy-empty-state">Create a draft or clone a template to start.</div>
+          <div className="strategy-empty-state">
+            No hay estrategia cargada. Crea una desde el agente o abre una sesión existente.
+          </div>
         ) : (
           <>
-            <div className="strategy-subsection">
-              <div className="strategy-section-head">
-                <div className="strategy-section-copy">
-                  <strong>Strategy Basics</strong>
-                  <small>Define nombre, mercado y periodicidad principal.</small>
+            {/* ── HEADER COMPACTO ── */}
+            <div className="se-header">
+              <div className="se-header-name-row">
+                <span className="se-header-icon" aria-hidden="true">✏️</span>
+                <input
+                  type="text"
+                  className="se-header-name-input"
+                  value={draft.name}
+                  onChange={(event) =>
+                    setDraft({ ...cloneStrategy(draft), name: event.target.value, updatedAt: new Date().toISOString() })
+                  }
+                  spellCheck={false}
+                />
+              </div>
+              <div className="se-header-chips">
+                <span className="se-chip">{selectedMarket?.symbol ?? "--"}</span>
+                <span className="se-chip">{formatTimeframe(timeframe)}</span>
+                <span className="se-chip">
+                  {draft.enabledSides.map((s) => formatSideLabel(s)).join(" + ")}
+                </span>
+                <span className={`se-chip ${draft.status === "saved" ? "se-chip-ok" : "se-chip-draft"}`}>
+                  {draft.status === "saved" ? "Saved" : "Draft"}
+                </span>
+              </div>
+            </div>
+
+            {/* ── INDICADORES ACTIVOS ── */}
+            <div className="se-section">
+              <div className="se-section-head">
+                <div className="se-section-icon" aria-hidden="true">📊</div>
+                <div className="se-section-copy">
+                  <strong>Indicadores activos</strong>
+                  <small>Parámetros de los indicadores usados en las reglas</small>
                 </div>
               </div>
-              <div className="strategy-card-grid">
-                <label>
-                  Name
+
+              {activeIndicators.length === 0 ? (
+                <div className="strategy-empty-state">
+                  No se detectaron indicadores. Las reglas usan solo precio o constantes.
+                </div>
+              ) : (
+                <div className="se-indicator-grid">
+                  {activeIndicators.map((entry) => {
+                    const catalogEntry = capabilities?.indicatorCatalog.find(
+                      (i) => i.kind === entry.kind
+                    );
+                    return (
+                      <div className="se-indicator-card" key={entry.key}>
+                        <div className="se-indicator-card-head">
+                          <span className="se-indicator-dot" />
+                          <strong>{entry.label}</strong>
+                          <small>{entry.output}</small>
+                        </div>
+                        <div className="se-indicator-params">
+                          {catalogEntry?.params.map((param) => (
+                            <label key={param.name} className="se-indicator-param">
+                              <span>{param.label}</span>
+                              {param.type === "source" ? (
+                                <select
+                                  value={String(entry.params[param.name] ?? "close")}
+                                  onChange={(ev) =>
+                                    updateIndicatorParam(entry, param.name, ev.target.value)
+                                  }
+                                >
+                                  {(param.options ?? capabilities?.priceFields ?? []).map((f) => (
+                                    <option key={f} value={f}>{f}</option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <input
+                                  type="number"
+                                  min={param.min}
+                                  max={param.max}
+                                  step={param.type === "integer" ? 1 : "any"}
+                                  value={entry.params[param.name] ?? param.defaultValue ?? ""}
+                                  onChange={(ev) =>
+                                    updateIndicatorParam(entry, param.name, ev.target.value)
+                                  }
+                                />
+                              )}
+                            </label>
+                          ))}
+                          {entry.barsAgo > 0 && (
+                            <label className="se-indicator-param">
+                              <span>Bars Ago</span>
+                              <input type="number" value={entry.barsAgo} readOnly />
+                            </label>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* ── GESTIÓN DE RIESGO ── */}
+            <div className="se-section">
+              <div className="se-section-head">
+                <div className="se-section-icon" aria-hidden="true">🛡️</div>
+                <div className="se-section-copy">
+                  <strong>Gestión de riesgo</strong>
+                  <small>Salidas automáticas y costes de ejecución</small>
+                </div>
+              </div>
+              <div className="se-risk-grid">
+                <label className="se-risk-field">
+                  <span>Stop Loss %</span>
                   <input
-                    type="text"
-                    value={draft.name}
-                    onChange={(event) =>
-                      setDraft({ ...cloneStrategy(draft), name: event.target.value, updatedAt: new Date().toISOString() })
+                    type="number"
+                    value={draft.riskRules.stopLossPct ?? ""}
+                    placeholder="--"
+                    onChange={(ev) =>
+                      setDraft({
+                        ...cloneStrategy(draft),
+                        riskRules: { ...draft.riskRules, stopLossPct: Number(ev.target.value) },
+                        updatedAt: new Date().toISOString()
+                      })
                     }
                   />
                 </label>
-
-                <label>
-                  Market
-                  <select
-                    value={draft.marketId}
-                    onChange={(event) => {
-                      const nextMarketId = event.target.value as HexString;
-                      setDraft({ ...cloneStrategy(draft), marketId: nextMarketId, updatedAt: new Date().toISOString() });
-                      onSelectMarket(nextMarketId);
-                      onBacktestResult(null);
-                    }}
-                  >
-                    {markets.map((market) => (
-                      <option key={market.id} value={market.id}>
-                        {market.symbol}
-                      </option>
-                    ))}
-                  </select>
+                <label className="se-risk-field">
+                  <span>Take Profit %</span>
+                  <input
+                    type="number"
+                    value={draft.riskRules.takeProfitPct ?? ""}
+                    placeholder="--"
+                    onChange={(ev) =>
+                      setDraft({
+                        ...cloneStrategy(draft),
+                        riskRules: { ...draft.riskRules, takeProfitPct: Number(ev.target.value) },
+                        updatedAt: new Date().toISOString()
+                      })
+                    }
+                  />
                 </label>
-
-                <label>
-                  Timeframe
-                  <select
-                    value={timeframe}
-                    onChange={(event) => {
-                      onTimeframeChange(event.target.value as StrategyTimeframe);
-                      onBacktestResult(null);
-                    }}
-                  >
-                    {capabilities?.timeframes.map((value) => (
-                      <option key={value} value={value}>
-                        {formatTimeframe(value)}
-                      </option>
-                    ))}
-                  </select>
+                <label className="se-risk-field">
+                  <span>Trailing Stop %</span>
+                  <input
+                    type="number"
+                    value={draft.riskRules.trailingStopPct ?? ""}
+                    placeholder="--"
+                    onChange={(ev) =>
+                      setDraft({
+                        ...cloneStrategy(draft),
+                        riskRules: { ...draft.riskRules, trailingStopPct: Number(ev.target.value) },
+                        updatedAt: new Date().toISOString()
+                      })
+                    }
+                  />
+                </label>
+                <label className="se-risk-field">
+                  <span>Max Bars</span>
+                  <input
+                    type="number"
+                    value={draft.riskRules.maxBarsInTrade ?? ""}
+                    placeholder="--"
+                    onChange={(ev) =>
+                      setDraft({
+                        ...cloneStrategy(draft),
+                        riskRules: { ...draft.riskRules, maxBarsInTrade: Number(ev.target.value) },
+                        updatedAt: new Date().toISOString()
+                      })
+                    }
+                  />
+                </label>
+                <label className="se-risk-field">
+                  <span>Fees (bps)</span>
+                  <input
+                    type="number"
+                    value={draft.costModel.feeBps}
+                    onChange={(ev) =>
+                      setDraft({
+                        ...cloneStrategy(draft),
+                        costModel: { ...draft.costModel, feeBps: Number(ev.target.value) },
+                        updatedAt: new Date().toISOString()
+                      })
+                    }
+                  />
+                </label>
+                <label className="se-risk-field">
+                  <span>Slippage (bps)</span>
+                  <input
+                    type="number"
+                    value={draft.costModel.slippageBps}
+                    onChange={(ev) =>
+                      setDraft({
+                        ...cloneStrategy(draft),
+                        costModel: { ...draft.costModel, slippageBps: Number(ev.target.value) },
+                        updatedAt: new Date().toISOString()
+                      })
+                    }
+                  />
                 </label>
               </div>
             </div>
 
-            <div className="strategy-layout-split">
-              <div className="strategy-subsection">
-                <div className="strategy-section-head">
-                  <div className="strategy-section-copy">
-                    <strong>Position Setup</strong>
-                    <small>Elige lados activos, tamaño y capital de prueba.</small>
+            {/* ── REGLAS AVANZADAS (COLAPSABLE) ── */}
+            <div className="se-section">
+              <button
+                type="button"
+                className="se-advanced-toggle"
+                onClick={() => setRulesExpanded((c) => !c)}
+                aria-expanded={rulesExpanded}
+              >
+                <div className="se-section-icon" aria-hidden="true">⚙️</div>
+                <div className="se-section-copy">
+                  <strong>Reglas de trading</strong>
+                  <small>Condiciones de entrada/salida por lado</small>
+                </div>
+                <span className={`se-toggle-arrow ${rulesExpanded ? "open" : ""}`} aria-hidden="true">
+                  ▾
+                </span>
+              </button>
+
+              {rulesExpanded && (
+                <div className="se-advanced-body">
+                  <div className="strategy-rules-stack">
+                    {(["long", "short"] as const).map((side) => {
+                      const sideEnabled = draft.enabledSides.includes(side);
+                      return (
+                        <div key={side} className={`strategy-side-section ${sideEnabled ? "" : "is-disabled"}`}>
+                          <div className="strategy-section-head">
+                            <div className="strategy-section-copy">
+                              <strong>{formatSideLabel(side)} Side</strong>
+                              <small>
+                                {sideEnabled
+                                  ? `Define cuándo abrir y cerrar posiciones ${formatSideLabel(side).toLowerCase()}.`
+                                  : `Activa ${formatSideLabel(side)} para editar estas reglas.`}
+                              </small>
+                            </div>
+                            <span className={`strategy-side-badge ${sideEnabled ? "enabled" : "disabled"}`}>
+                              {sideEnabled ? "Enabled" : "Disabled"}
+                            </span>
+                          </div>
+
+                          {sideEnabled ? (
+                            <>
+                              <RuleBuilder
+                                title="Entry Rules"
+                                groups={draft.entryRules[side]}
+                                capabilities={capabilities}
+                                onChange={(next) => setDraft(setRuleGroups(cloneStrategy(draft), "entryRules", side, next))}
+                                onGlobalSync={handleGlobalSync}
+                              />
+                              <RuleBuilder
+                                title="Exit Rules"
+                                groups={draft.exitRules[side]}
+                                capabilities={capabilities}
+                                onChange={(next) => setDraft(setRuleGroups(cloneStrategy(draft), "exitRules", side, next))}
+                                onGlobalSync={handleGlobalSync}
+                              />
+                            </>
+                          ) : (
+                            <div className="strategy-empty-state">
+                              Habilita {formatSideLabel(side)} para configurar estas reglas.
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-                <div className="strategy-checkboxes">
-                  {(["long", "short"] as const).map((side) => (
-                    <label key={side} className="strategy-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={draft.enabledSides.includes(side)}
-                        onChange={(event) => {
-                          const nextSides = event.target.checked
-                            ? [...draft.enabledSides, side]
-                            : draft.enabledSides.filter((entry) => entry !== side);
-                          setDraft({
-                            ...cloneStrategy(draft),
-                            enabledSides: Array.from(new Set(nextSides)),
-                            updatedAt: new Date().toISOString()
-                          });
-                        }}
-                      />
-                      {formatSideLabel(side)}
-                    </label>
-                  ))}
-                </div>
-                <div className="strategy-card-grid strategy-card-grid-compact">
-                  <label>
-                    Sizing Mode
-                    <select
-                      value={draft.sizing.mode}
-                      onChange={(event) =>
-                        setDraft({
-                          ...cloneStrategy(draft),
-                          sizing: {
-                            ...draft.sizing,
-                            mode: event.target.value as StrategyDefinition["sizing"]["mode"]
-                          },
-                          updatedAt: new Date().toISOString()
-                        })
-                      }
-                    >
-                      {capabilities?.sizingModes.map((mode) => (
-                        <option key={mode.mode} value={mode.mode}>
-                          {mode.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Sizing Value
-                    <input
-                      type="number"
-                      value={draft.sizing.value}
-                      onChange={(event) =>
-                        setDraft({
-                          ...cloneStrategy(draft),
-                          sizing: { ...draft.sizing, value: Number(event.target.value) },
-                          updatedAt: new Date().toISOString()
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Starting Equity
-                    <input
-                      type="number"
-                      value={draft.costModel.startingEquity}
-                      onChange={(event) =>
-                        setDraft({
-                          ...cloneStrategy(draft),
-                          costModel: { ...draft.costModel, startingEquity: Number(event.target.value) },
-                          updatedAt: new Date().toISOString()
-                        })
-                      }
-                    />
-                  </label>
-                </div>
-              </div>
-
-              <div className="strategy-subsection">
-                <div className="strategy-section-head">
-                  <div className="strategy-section-copy">
-                    <strong>Risk And Costs</strong>
-                    <small>Costes de ejecución y salidas automáticas del backtest.</small>
-                  </div>
-                </div>
-                <div className="strategy-card-grid strategy-card-grid-compact">
-                  <label>
-                    Fee Bps
-                    <input
-                      type="number"
-                      value={draft.costModel.feeBps}
-                      onChange={(event) =>
-                        setDraft({
-                          ...cloneStrategy(draft),
-                          costModel: { ...draft.costModel, feeBps: Number(event.target.value) },
-                          updatedAt: new Date().toISOString()
-                        })
-                      }
-                    />
-                  </label>
-
-                  <label>
-                    Slippage Bps
-                    <input
-                      type="number"
-                      value={draft.costModel.slippageBps}
-                      onChange={(event) =>
-                        setDraft({
-                          ...cloneStrategy(draft),
-                          costModel: { ...draft.costModel, slippageBps: Number(event.target.value) },
-                          updatedAt: new Date().toISOString()
-                        })
-                      }
-                    />
-                  </label>
-
-                  <label>
-                    Stop Loss %
-                    <input
-                      type="number"
-                      value={draft.riskRules.stopLossPct ?? ""}
-                      onChange={(event) =>
-                        setDraft({
-                          ...cloneStrategy(draft),
-                          riskRules: { ...draft.riskRules, stopLossPct: Number(event.target.value) },
-                          updatedAt: new Date().toISOString()
-                        })
-                      }
-                    />
-                  </label>
-
-                  <label>
-                    Take Profit %
-                    <input
-                      type="number"
-                      value={draft.riskRules.takeProfitPct ?? ""}
-                      onChange={(event) =>
-                        setDraft({
-                          ...cloneStrategy(draft),
-                          riskRules: { ...draft.riskRules, takeProfitPct: Number(event.target.value) },
-                          updatedAt: new Date().toISOString()
-                        })
-                      }
-                    />
-                  </label>
-
-                  <label>
-                    Trailing Stop %
-                    <input
-                      type="number"
-                      value={draft.riskRules.trailingStopPct ?? ""}
-                      onChange={(event) =>
-                        setDraft({
-                          ...cloneStrategy(draft),
-                          riskRules: { ...draft.riskRules, trailingStopPct: Number(event.target.value) },
-                          updatedAt: new Date().toISOString()
-                        })
-                      }
-                    />
-                  </label>
-
-                  <label>
-                    Max Bars In Trade
-                    <input
-                      type="number"
-                      value={draft.riskRules.maxBarsInTrade ?? ""}
-                      onChange={(event) =>
-                        setDraft({
-                          ...cloneStrategy(draft),
-                          riskRules: { ...draft.riskRules, maxBarsInTrade: Number(event.target.value) },
-                          updatedAt: new Date().toISOString()
-                        })
-                      }
-                    />
-                  </label>
-                </div>
-              </div>
+              )}
             </div>
 
-            <div className="strategy-rules-stack">
-              {(["long", "short"] as const).map((side) => {
-                const sideEnabled = draft.enabledSides.includes(side);
-                return (
-                  <div key={side} className={`strategy-side-section ${sideEnabled ? "" : "is-disabled"}`}>
-                    <div className="strategy-section-head">
-                      <div className="strategy-section-copy">
-                        <strong>{formatSideLabel(side)} Side</strong>
-                        <small>
-                          {sideEnabled
-                            ? `Define cuándo abrir y cerrar posiciones ${formatSideLabel(side).toLowerCase()}.`
-                            : `Activa ${formatSideLabel(side)} arriba para editar estas reglas.`}
-                        </small>
-                      </div>
-                      <span className={`strategy-side-badge ${sideEnabled ? "enabled" : "disabled"}`}>
-                        {sideEnabled ? "Enabled" : "Disabled"}
-                      </span>
-                    </div>
-
-                    {sideEnabled ? (
-                      <>
-                        <RuleBuilder
-                          title="Entry Rules"
-                          groups={draft.entryRules[side]}
-                          capabilities={capabilities}
-                          onChange={(next) => setDraft(setRuleGroups(cloneStrategy(draft), "entryRules", side, next))}
-                          onGlobalSync={handleGlobalSync}
-                        />
-                        <RuleBuilder
-                          title="Exit Rules"
-                          groups={draft.exitRules[side]}
-                          capabilities={capabilities}
-                          onChange={(next) => setDraft(setRuleGroups(cloneStrategy(draft), "exitRules", side, next))}
-                          onGlobalSync={handleGlobalSync}
-                        />
-                      </>
-                    ) : (
-                      <div className="strategy-empty-state">
-                        Enable {formatSideLabel(side)} in Position Setup to configure these rules.
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
+            {/* ── FOOTER ── */}
             <div className="strategy-panel-footer">
               <button type="button" onClick={() => void validateDraft()} disabled={busy !== null}>
                 Validate
@@ -1220,8 +1358,13 @@ export function StrategyPanel({
               <button type="button" onClick={() => void saveDraft()} disabled={busy !== null}>
                 Save
               </button>
-              <button type="button" className="strategy-primary-btn" onClick={() => void runBacktest()} disabled={busy !== null}>
-                Run Backtest
+              <button
+                type="button"
+                className="strategy-primary-btn"
+                onClick={() => void runBacktest()}
+                disabled={busy !== null}
+              >
+                {busy === "running" ? "Running..." : "▶ Run Backtest"}
               </button>
             </div>
           </>
@@ -1229,7 +1372,7 @@ export function StrategyPanel({
 
         {validation && (
           <div className={`strategy-validation ${validation.ok ? "ok" : "error"}`}>
-            <strong>{validation.ok ? "Validation passed" : "Validation issues"}</strong>
+            <strong>{validation.ok ? "✓ Validation passed" : "⚠ Validation issues"}</strong>
             {!validation.ok && (
               <div className="strategy-validation-list">
                 {validation.issues.slice(0, 8).map((issue) => (
@@ -1237,7 +1380,7 @@ export function StrategyPanel({
                     <span>{issue.path}</span>
                     <small>
                       {issue.message}
-                      {issue.suggestion ? ` Suggestion: ${issue.suggestion}` : ""}
+                      {issue.suggestion ? ` — ${issue.suggestion}` : ""}
                     </small>
                   </div>
                 ))}

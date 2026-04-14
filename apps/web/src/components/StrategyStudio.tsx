@@ -66,7 +66,7 @@ export function StrategyStudio({
             <div className="strategy-studio-toolbar-meta">
               <span>{selectedMarket?.symbol ?? "--"}</span>
               <span>{timeframe}</span>
-              <span>{manualBuilderOpen ? "Manual Builder" : "Agent Workspace"}</span>
+              <span>{manualBuilderOpen ? "Strategy Editor" : "Agent Workspace"}</span>
               <span>{strategyBacktest ? `${strategyBacktest.summary.tradeCount} trades` : "No backtest yet"}</span>
             </div>
           </div>
@@ -76,7 +76,7 @@ export function StrategyStudio({
               className="strategy-studio-secondary-link"
               onClick={() => setManualBuilderOpen((current) => !current)}
             >
-              {manualBuilderOpen ? "Back to agent" : "Open manual builder"}
+              {manualBuilderOpen ? "Back to agent" : "Edit strategy"}
             </button>
           </div>
         </div>
@@ -97,10 +97,9 @@ export function StrategyStudio({
               <div className="strategy-studio-secondary-panel">
                 <div className="strategy-studio-secondary-banner">
                   <div>
-                    <strong>Manual builder</strong>
+                    <strong>Strategy Editor</strong>
                     <p>
-                      Kept as a secondary workspace for reviewing or fine-tuning ideas that came out
-                      of the agent.
+                      Edita los parámetros clave de tu estrategia: indicadores, riesgo y reglas.
                     </p>
                   </div>
                   <button
