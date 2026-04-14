@@ -1101,7 +1101,7 @@ a { color: inherit; text-decoration: none; }
   border-radius: 16px;
   background:
     radial-gradient(circle at top right, rgba(30, 157, 242, 0.12), transparent 45%),
-    linear-gradient(180deg, rgba(18, 22, 28, 0.98), rgba(11, 14, 17, 0.98));
+    var(--bg-tertiary);
 }
 
 .strategy-quick-card strong {
@@ -1145,7 +1145,7 @@ a { color: inherit; text-decoration: none; }
   border-radius: 16px;
   background:
     radial-gradient(circle at top right, rgba(240, 185, 11, 0.06), transparent 50%),
-    rgba(18, 22, 28, 0.8);
+    var(--bg-tertiary);
 }
 
 .se-header-name-row {
@@ -1190,7 +1190,7 @@ a { color: inherit; text-decoration: none; }
   padding: 5px 10px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: rgba(30, 35, 41, 0.58);
+  background: var(--bg-secondary);
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 700;

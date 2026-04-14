@@ -1080,14 +1080,13 @@ export function StrategyPanel({
       <div className="strategy-panel-body">
         {!draft ? (
           <div className="strategy-empty-state">
-            No hay estrategia cargada. Crea una desde el agente o abre una sesión existente.
+            No strategy loaded. Create one from the agent or open an existing session.
           </div>
         ) : (
           <>
             {/* ── HEADER COMPACTO ── */}
             <div className="se-header">
               <div className="se-header-name-row">
-                <span className="se-header-icon" aria-hidden="true">✏️</span>
                 <input
                   type="text"
                   className="se-header-name-input"
@@ -1113,16 +1112,15 @@ export function StrategyPanel({
             {/* ── INDICADORES ACTIVOS ── */}
             <div className="se-section">
               <div className="se-section-head">
-                <div className="se-section-icon" aria-hidden="true">📊</div>
                 <div className="se-section-copy">
-                  <strong>Indicadores activos</strong>
-                  <small>Parámetros de los indicadores usados en las reglas</small>
+                  <strong>Active indicators</strong>
+                  <small>Parameters for the indicators used in the rules</small>
                 </div>
               </div>
 
               {activeIndicators.length === 0 ? (
                 <div className="strategy-empty-state">
-                  No se detectaron indicadores. Las reglas usan solo precio o constantes.
+                  No indicators detected. The rules use only price or constants.
                 </div>
               ) : (
                 <div className="se-indicator-grid">
@@ -1183,10 +1181,9 @@ export function StrategyPanel({
             {/* ── GESTIÓN DE RIESGO ── */}
             <div className="se-section">
               <div className="se-section-head">
-                <div className="se-section-icon" aria-hidden="true">🛡️</div>
                 <div className="se-section-copy">
-                  <strong>Gestión de riesgo</strong>
-                  <small>Salidas automáticas y costes de ejecución</small>
+                  <strong>Risk management</strong>
+                  <small>Automatic exits and execution costs</small>
                 </div>
               </div>
               <div className="se-risk-grid">
@@ -1289,10 +1286,9 @@ export function StrategyPanel({
                 onClick={() => setRulesExpanded((c) => !c)}
                 aria-expanded={rulesExpanded}
               >
-                <div className="se-section-icon" aria-hidden="true">⚙️</div>
                 <div className="se-section-copy">
-                  <strong>Reglas de trading</strong>
-                  <small>Condiciones de entrada/salida por lado</small>
+                  <strong>Trading rules</strong>
+                  <small>Entry and exit conditions by side</small>
                 </div>
                 <span className={`se-toggle-arrow ${rulesExpanded ? "open" : ""}`} aria-hidden="true">
                   ▾
@@ -1311,8 +1307,8 @@ export function StrategyPanel({
                               <strong>{formatSideLabel(side)} Side</strong>
                               <small>
                                 {sideEnabled
-                                  ? `Define cuándo abrir y cerrar posiciones ${formatSideLabel(side).toLowerCase()}.`
-                                  : `Activa ${formatSideLabel(side)} para editar estas reglas.`}
+                                  ? `Define when to open and close ${formatSideLabel(side).toLowerCase()} positions.`
+                                  : `Enable ${formatSideLabel(side)} to edit these rules.`}
                               </small>
                             </div>
                             <span className={`strategy-side-badge ${sideEnabled ? "enabled" : "disabled"}`}>
@@ -1339,7 +1335,7 @@ export function StrategyPanel({
                             </>
                           ) : (
                             <div className="strategy-empty-state">
-                              Habilita {formatSideLabel(side)} para configurar estas reglas.
+                              Enable {formatSideLabel(side)} to configure these rules.
                             </div>
                           )}
                         </div>

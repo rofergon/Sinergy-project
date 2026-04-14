@@ -99,7 +99,7 @@ export function StrategyStudio({
                   <div>
                     <strong>Strategy Editor</strong>
                     <p>
-                      Edita los parámetros clave de tu estrategia: indicadores, riesgo y reglas.
+                      Edit the key parameters of your strategy: indicators, risk, and rules.
                     </p>
                   </div>
                   <button
