@@ -9,21 +9,12 @@ import InterwovenKitStyles from "@initia/interwovenkit-react/styles.js";
 import { WagmiProvider, createConfig, http } from "wagmi";
 import { sepolia } from "wagmi/chains";
 import { buildInterwovenCustomChain, SINERGY_EVM_CHAIN, SINERGY_ROLLUP_CHAIN_ID } from "./initia";
+import { ThemeProvider, useTheme } from "./ThemeContext";
 
 injectStyles(InterwovenKitStyles);
 
 const queryClient = new QueryClient();
 const customChain = buildInterwovenCustomChain();
-const interwovenKitProps = {
-  ...TESTNET,
-  defaultChainId: SINERGY_ROLLUP_CHAIN_ID,
-  customChain,
-  customChains: [customChain],
-  enableAutoSign: {
-    [SINERGY_ROLLUP_CHAIN_ID]: ["/minievm.evm.v1.MsgCall"],
-  },
-  theme: "dark",
-} as const;
 
 const wagmiConfig = createConfig({
   chains: [SINERGY_EVM_CHAIN, sepolia],
@@ -33,14 +24,37 @@ const wagmiConfig = createConfig({
   },
 });
 
+function InterwovenKitWithTheme({ children }: PropsWithChildren) {
+  const { theme } = useTheme();
+  
+  const interwovenKitProps = {
+    ...TESTNET,
+    defaultChainId: SINERGY_ROLLUP_CHAIN_ID,
+    customChain,
+    customChains: [customChain],
+    enableAutoSign: {
+      [SINERGY_ROLLUP_CHAIN_ID]: ["/minievm.evm.v1.MsgCall"],
+    },
+    theme: theme,
+  } as const;
+
+  return (
+    <InterwovenKitProvider {...(interwovenKitProps as any)}>
+      {children}
+    </InterwovenKitProvider>
+  );
+}
+
 export function Providers({ children }: PropsWithChildren) {
   return (
-    <WagmiProvider config={wagmiConfig}>
-      <QueryClientProvider client={queryClient}>
-        <InterwovenKitProvider {...(interwovenKitProps as any)}>
-          {children}
-        </InterwovenKitProvider>
-      </QueryClientProvider>
-    </WagmiProvider>
+    <ThemeProvider>
+      <WagmiProvider config={wagmiConfig}>
+        <QueryClientProvider client={queryClient}>
+          <InterwovenKitWithTheme>
+            {children}
+          </InterwovenKitWithTheme>
+        </QueryClientProvider>
+      </WagmiProvider>
+    </ThemeProvider>
   );
 }

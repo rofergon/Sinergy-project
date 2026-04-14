@@ -158,6 +158,10 @@ function summarizeThinking(text: string, maxLength = 140) {
   return `${compact.slice(0, maxLength).trimEnd()}...`;
 }
 
+function buildEmptyConversationSuggestion() {
+  return 'Try something like: "Create an EMA crossover strategy for this market, validate it, and run a backtest." Sessions and linked strategies stay available in the right rail.';
+}
+
 function shouldAskStrategyClarification(goal: string) {
   const normalized = goal.trim().toLowerCase();
   if (!normalized) return false;
@@ -206,6 +210,7 @@ export function StrategyAgentPanel({
   const [liveThinkingCollapsed, setLiveThinkingCollapsed] = useState(false);
   const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const threadRef = useRef<HTMLDivElement | null>(null);
+  const emptyConversationSuggestion = buildEmptyConversationSuggestion();
 
   const storageKey = useMemo(() => {
     if (!address || !selectedMarket?.id) return null;
@@ -634,10 +639,7 @@ export function StrategyAgentPanel({
 
           <div className="strategy-agent-thread" ref={threadRef}>
             {messages.length === 0 ? (
-              <div className="strategy-empty-state">
-                Try something like: "Create an EMA crossover strategy for this market, validate it, and run a
-                backtest." Sessions and linked strategies stay available in the right rail.
-              </div>
+              null
             ) : (
               messages.map((message) => (
                 <div
@@ -771,6 +773,11 @@ export function StrategyAgentPanel({
           </div>
 
           <div className="strategy-agent-compose">
+            {messages.length === 0 && (
+              <div className="strategy-agent-suggestion" aria-live="polite">
+                {emptyConversationSuggestion}
+              </div>
+            )}
             <textarea
               ref={promptTextareaRef}
               value={prompt}
@@ -882,10 +889,8 @@ export function StrategyAgentPanel({
                   : busy === "run"
                     ? "Running..."
                     : planModeEnabled
-                      ? "Plan With AI"
-                      : clarifierOpen && clarificationRequired
-                        ? "Continue With AI"
-                        : "Run With AI"}
+                      ? "Plan"
+                      : "Send"}
               </button>
             </div>
           </div>

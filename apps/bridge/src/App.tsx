@@ -6,6 +6,7 @@ import { formatUnits, parseUnits } from "viem";
 import { useBalance } from "wagmi";
 import { sepolia } from "wagmi/chains";
 import { buildPublicSubdomainHost, isDirectHost } from "@sinergy/shared";
+import { ThemeToggle } from "./ThemeToggle";
 import {
   buildBridgeDefaults,
   DEFAULT_SINERGY_BRIDGE_ASSET,
@@ -426,6 +427,7 @@ export default function App() {
         </div>
 
         <div className="bridge-nav-actions">
+          <ThemeToggle />
           {isConnected && initiaAddress ? (
             <button className="wallet-pill" onClick={openWallet}>
               {formatInitiaIdentity(username, initiaAddress, { includeAddress: true })}

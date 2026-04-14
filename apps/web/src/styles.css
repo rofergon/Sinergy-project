@@ -5,6 +5,52 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 :root {
+  color-scheme: light;
+
+  /* Core palette - Light Mode (default) */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8f9fa;
+  --bg-tertiary: #f0f1f3;
+  --bg-elevated: #ffffff;
+  --bg-hover: #e8eaed;
+
+  /* Borders */
+  --border: #e0e3e7;
+  --border-light: #d0d3d7;
+  --border-focus: #a0a6b0;
+
+  /* Text */
+  --text-primary: #1a1d23;
+  --text-secondary: #5e6673;
+  --text-tertiary: #848e9c;
+  --text-disabled: #b0b6c0;
+
+  /* Accents */
+  --green: #0ecb81;
+  --green-soft: rgba(14, 203, 129, 0.15);
+  --green-hover: #0ab873;
+  --red: #f6465d;
+  --red-soft: rgba(246, 70, 93, 0.15);
+  --red-hover: #e03e54;
+  --accent: #f0b90b;
+  --accent-soft: rgba(240, 185, 11, 0.15);
+  --blue: #1e9df2;
+  --blue-soft: rgba(30, 157, 242, 0.15);
+
+  /* Fonts */
+  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Sizing */
+  --navbar-h: 56px;
+  --ticker-h: 44px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+/* Dark Mode */
+:root[data-theme="dark"] {
   color-scheme: dark;
 
   /* Core palette */
@@ -36,17 +82,6 @@
   --accent-soft: rgba(240, 185, 11, 0.12);
   --blue: #1e9df2;
   --blue-soft: rgba(30, 157, 242, 0.12);
-
-  /* Fonts */
-  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-
-  /* Sizing */
-  --navbar-h: 56px;
-  --ticker-h: 44px;
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
 }
 
 /* ── Reset ───────────────────────────────────────────── */
@@ -520,8 +555,8 @@ a { color: inherit; text-decoration: none; }
   gap: 6px;
   padding: 4px 8px;
   border-radius: 10px;
-  border: 1px solid rgba(63, 72, 84, 0.75);
-  background: rgba(11, 14, 17, 0.82);
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
   backdrop-filter: blur(8px);
   min-width: 0;
 }
@@ -719,7 +754,7 @@ a { color: inherit; text-decoration: none; }
   min-height: 100%;
   overflow: hidden;
   border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(18, 22, 28, 0.95), rgba(11, 14, 17, 0.98));
+  background: var(--bg-secondary);
 }
 
 .strategy-panel-head {
@@ -831,7 +866,7 @@ a { color: inherit; text-decoration: none; }
 .strategy-validation {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: rgba(18, 22, 28, 0.8);
+  background: var(--bg-tertiary);
   padding: 12px;
 }
 
@@ -870,7 +905,7 @@ a { color: inherit; text-decoration: none; }
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: rgba(30, 35, 41, 0.45);
+  background: var(--bg-tertiary);
   color: var(--text-primary) !important;
 }
 
@@ -881,7 +916,7 @@ a { color: inherit; text-decoration: none; }
 .strategy-side-section {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: rgba(18, 22, 28, 0.72);
+  background: var(--bg-tertiary);
   padding: 12px;
 }
 
@@ -908,7 +943,7 @@ a { color: inherit; text-decoration: none; }
 
 .strategy-side-badge.disabled {
   color: var(--text-secondary);
-  background: rgba(30, 35, 41, 0.55);
+  background: var(--bg-secondary);
 }
 
 .strategy-rule-group {
@@ -916,7 +951,7 @@ a { color: inherit; text-decoration: none; }
   border-radius: var(--radius-sm);
   padding: 12px;
   margin-bottom: 10px;
-  background: rgba(30, 35, 41, 0.55);
+  background: var(--bg-secondary);
 }
 
 .strategy-rule-row {
@@ -925,9 +960,9 @@ a { color: inherit; text-decoration: none; }
   gap: 10px;
   margin-bottom: 10px;
   padding: 10px;
-  border: 1px solid rgba(63, 72, 84, 0.6);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: rgba(11, 14, 17, 0.35);
+  background: var(--bg-primary);
 }
 
 .strategy-rule-row-head {
@@ -1017,7 +1052,7 @@ a { color: inherit; text-decoration: none; }
   border: 1px dashed var(--border);
   border-radius: var(--radius-md);
   color: var(--text-secondary);
-  background: rgba(18, 22, 28, 0.7);
+  background: var(--bg-tertiary);
 }
 
 .strategy-validation.ok {
@@ -1055,7 +1090,7 @@ a { color: inherit; text-decoration: none; }
   position: sticky;
   bottom: 0;
   padding-top: 10px;
-  background: linear-gradient(180deg, rgba(11, 14, 17, 0), rgba(11, 14, 17, 0.96) 35%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), var(--bg-secondary) 35%);
   z-index: 2;
 }
 
@@ -1177,7 +1212,7 @@ a { color: inherit; text-decoration: none; }
 .se-section {
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(18, 22, 28, 0.75);
+  background: var(--bg-tertiary);
   padding: 14px;
 }
 
@@ -1222,12 +1257,12 @@ a { color: inherit; text-decoration: none; }
 }
 
 .se-indicator-card {
-  border: 1px solid rgba(63, 72, 84, 0.65);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px 14px;
   background:
     linear-gradient(135deg, rgba(30, 157, 242, 0.04), transparent 55%),
-    rgba(22, 27, 34, 0.7);
+    var(--bg-secondary);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -1422,7 +1457,7 @@ a { color: inherit; text-decoration: none; }
   padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 18px;
-  background: linear-gradient(180deg, rgba(18, 22, 28, 0.96), rgba(11, 14, 17, 0.98));
+  background: var(--bg-secondary);
 }
 
 .strategy-studio-toolbar-copy {
@@ -1442,7 +1477,7 @@ a { color: inherit; text-decoration: none; }
   padding: 6px 10px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: rgba(30, 35, 41, 0.58);
+  background: var(--bg-tertiary);
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 700;
@@ -1494,7 +1529,7 @@ a { color: inherit; text-decoration: none; }
   border: 1px solid var(--border);
   border-radius: 18px;
   overflow: hidden;
-  background: rgba(11, 14, 17, 0.88);
+  background: var(--bg-secondary);
 }
 
 .strategy-studio-chart-col {
@@ -1511,7 +1546,7 @@ a { color: inherit; text-decoration: none; }
   min-height: 100%;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, rgba(18, 22, 28, 0.96), rgba(11, 14, 17, 0.98));
+  background: var(--bg-secondary);
 }
 
 .strategy-studio-secondary-banner {
@@ -1521,7 +1556,7 @@ a { color: inherit; text-decoration: none; }
   gap: 16px;
   padding: 16px;
   border-bottom: 1px solid var(--border);
-  background: rgba(18, 22, 28, 0.72);
+  background: var(--bg-tertiary);
 }
 
 .strategy-studio-secondary-banner strong {
@@ -1545,12 +1580,12 @@ a { color: inherit; text-decoration: none; }
   flex-direction: column;
   min-height: 100%;
   overflow: hidden;
-  background: linear-gradient(180deg, rgba(18, 22, 28, 0.96), rgba(11, 14, 17, 0.98));
+  background: var(--bg-secondary);
 }
 
 .strategy-agent-workspace {
   position: relative;
-  display: block;
+  display: flex;
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -1568,8 +1603,7 @@ a { color: inherit; text-decoration: none; }
   min-height: 0;
   border: 1px solid var(--border);
   border-radius: 18px;
-  background:
-    linear-gradient(180deg, rgba(22, 27, 34, 0.98), rgba(14, 18, 24, 0.96));
+  background: var(--bg-secondary);
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
   transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease;
 }
@@ -1584,6 +1618,7 @@ a { color: inherit; text-decoration: none; }
 .strategy-agent-main {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-width: 0;
   min-height: 0;
 }
@@ -1611,7 +1646,7 @@ a { color: inherit; text-decoration: none; }
   gap: 12px;
   padding: 14px 16px;
   border-bottom: 1px solid var(--border);
-  background: rgba(18, 22, 28, 0.36);
+  background: var(--bg-tertiary);
 }
 
 .strategy-agent-main-copy {
@@ -1869,12 +1904,12 @@ a { color: inherit; text-decoration: none; }
   border: 1px solid var(--border);
   border-radius: 16px;
   padding: 14px;
-  background: rgba(18, 22, 28, 0.88);
+  background: var(--bg-tertiary);
 }
 
 .strategy-agent-message.user {
   border-color: rgba(30, 157, 242, 0.25);
-  background: rgba(30, 157, 242, 0.08);
+  background: var(--blue-soft);
 }
 
 .strategy-agent-message-head {
@@ -1906,7 +1941,7 @@ a { color: inherit; text-decoration: none; }
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(30, 35, 41, 0.55);
+  background: var(--bg-tertiary);
 }
 
 .strategy-agent-thinking-card {
@@ -1914,7 +1949,7 @@ a { color: inherit; text-decoration: none; }
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(30, 35, 41, 0.55);
+  background: var(--bg-tertiary);
   color: inherit;
   text-align: left;
   cursor: pointer;
@@ -1926,7 +1961,7 @@ a { color: inherit; text-decoration: none; }
 
 .strategy-agent-thinking-card:hover {
   border-color: var(--border-focus);
-  background: rgba(37, 41, 48, 0.72);
+  background: var(--bg-hover);
 }
 
 .strategy-agent-thinking-title {
@@ -2006,7 +2041,16 @@ a { color: inherit; text-decoration: none; }
   display: flex;
   flex-direction: column;
   gap: 12px;
-  background: rgba(14, 18, 24, 0.82);
+  background: var(--bg-secondary);
+}
+
+.strategy-agent-suggestion {
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  line-height: 1.5;
 }
 
 .strategy-agent-compose textarea {
@@ -2065,6 +2109,10 @@ a { color: inherit; text-decoration: none; }
 .strategy-agent-submit-btn {
   min-width: 144px;
   color: #fff !important;
+}
+
+.strategy-agent-submit-btn:disabled {
+  opacity: 1;
 }
 
 .strategy-primary-btn:disabled {
@@ -4556,4 +4604,212 @@ a { color: inherit; text-decoration: none; }
   background: var(--bg-hover);
   color: var(--text-primary);
   border-color: var(--border-focus);
+}
+
+/* ── Theme Toggle Button ─────────────────────────────── */
+.theme-toggle-btn {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.15s;
+  padding: 0;
+}
+
+.theme-toggle-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-focus);
+  color: var(--accent);
+}
+
+/* ── Dark Mode Specific Overrides ────────────────────── */
+/* These ensure components that had hardcoded dark backgrounds work in both themes */
+
+:root[data-theme="dark"] .strategy-panel {
+  background: linear-gradient(180deg, rgba(18, 22, 28, 0.95), rgba(11, 14, 17, 0.98));
+}
+
+:root[data-theme="dark"] .tv-chart-container {
+  background: var(--bg-primary);
+}
+
+:root[data-theme="dark"] .ob-row {
+  background: rgba(18, 22, 28, 0.8);
+}
+
+:root[data-theme="dark"] .se-indicator-card {
+  background: rgba(30, 35, 41, 0.45);
+}
+
+:root[data-theme="dark"] .se-indicator-card-head {
+  background: rgba(18, 22, 28, 0.72);
+}
+
+:root[data-theme="dark"] .strategy-panel-footer {
+  background: linear-gradient(180deg, rgba(11, 14, 17, 0), rgba(11, 14, 17, 0.96) 35%);
+}
+
+:root[data-theme="dark"] .strategy-studio-page {
+  background: linear-gradient(180deg, #0b0e11, #0f1318 48%, #0b0e11);
+}
+
+:root[data-theme="dark"] .strategy-studio-topbar {
+  background: linear-gradient(180deg, rgba(18, 22, 28, 0.96), rgba(11, 14, 17, 0.98));
+}
+
+:root[data-theme="dark"] .strategy-studio-chart-col,
+:root[data-theme="dark"] .strategy-studio-workspace-col {
+  background: rgba(11, 14, 17, 0.88);
+}
+
+:root[data-theme="dark"] .strategy-studio-secondary-panel {
+  background: linear-gradient(180deg, rgba(18, 22, 28, 0.96), rgba(11, 14, 17, 0.98));
+}
+
+:root[data-theme="dark"] .strategy-agent-panel {
+  background: linear-gradient(180deg, rgba(18, 22, 28, 0.96), rgba(11, 14, 17, 0.98));
+}
+
+:root[data-theme="dark"] .strategy-agent-sidebar {
+  background: linear-gradient(180deg, rgba(22, 27, 34, 0.98), rgba(14, 18, 24, 0.96));
+}
+
+:root[data-theme="dark"] .strategy-agent-message.user {
+  background: rgba(18, 22, 28, 0.76);
+}
+
+:root[data-theme="dark"] .strategy-agent-message.assistant {
+  background: rgba(18, 22, 28, 0.88);
+}
+
+:root[data-theme="dark"] .strategy-agent-thinking-card {
+  background: rgba(30, 35, 41, 0.55);
+}
+
+:root[data-theme="dark"] .strategy-editor-code-block {
+  background: linear-gradient(180deg, rgba(18, 22, 28, 0.96), rgba(11, 14, 17, 0.98));
+}
+
+:root[data-theme="dark"] .transaction-popup {
+  background: rgba(18, 22, 28, 0.6);
+}
+
+:root[data-theme="dark"] .markets-page {
+  background: linear-gradient(180deg, #0b0e11, #0f1318 48%, #0b0e11);
+}
+
+:root[data-theme="dark"] .markets-hero {
+  background: rgba(18, 22, 28, 0.92);
+}
+
+:root[data-theme="dark"] .markets-filter-panel {
+  background: linear-gradient(180deg, rgba(24, 28, 35, 0.92), rgba(18, 22, 28, 0.96));
+}
+
+:root[data-theme="dark"] .session-history-panel {
+  background: linear-gradient(170deg, rgba(18, 22, 28, 0.96), rgba(11, 14, 17, 0.98));
+}
+
+/* Light mode defaults for components that previously had hardcoded dark backgrounds */
+.strategy-panel {
+  background: var(--bg-secondary);
+}
+
+.tv-chart-container {
+  background: var(--bg-primary);
+}
+
+.ob-row {
+  background: transparent;
+}
+
+.se-indicator-card {
+  background: var(--bg-tertiary);
+}
+
+.se-indicator-card-head {
+  background: var(--bg-secondary);
+}
+
+.strategy-panel-footer {
+  background: var(--bg-secondary);
+}
+
+.strategy-studio-page {
+  background: var(--bg-primary);
+}
+
+.strategy-studio-topbar {
+  background: var(--bg-secondary);
+}
+
+.strategy-studio-chart-col,
+.strategy-studio-workspace-col {
+  background: var(--bg-secondary);
+}
+
+.strategy-studio-secondary-panel {
+  background: var(--bg-secondary);
+}
+
+.strategy-agent-panel {
+  background: var(--bg-secondary);
+}
+
+.strategy-agent-sidebar {
+  background: var(--bg-tertiary);
+}
+
+.strategy-agent-message.user {
+  background: var(--bg-tertiary);
+}
+
+.strategy-agent-message.assistant {
+  background: var(--bg-tertiary);
+}
+
+.strategy-agent-thinking-card {
+  background: var(--bg-tertiary);
+}
+
+.strategy-editor-code-block {
+  background: var(--bg-secondary);
+}
+
+.transaction-popup {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+}
+
+.markets-page {
+  background: var(--bg-primary);
+}
+
+.markets-hero {
+  background: var(--bg-secondary);
+}
+
+.markets-filter-panel {
+  background: var(--bg-secondary);
+}
+
+.session-history-panel {
+  background: var(--bg-secondary);
+}
+
+.tv-indicator-chip {
+  background: var(--bg-tertiary);
+}
+
+.tf-btn.active {
+  background: var(--bg-hover);
+}
+
+.markets-primary-btn {
+  color: var(--text-primary);
 }

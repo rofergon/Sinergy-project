@@ -14,6 +14,7 @@ import {
   type SeriesType,
   type UTCTimestamp
 } from "lightweight-charts";
+import { useTheme } from "../ThemeContext";
 import { api } from "../lib/api";
 import type { ChartViewport, MarketSnapshot } from "../types";
 
@@ -137,6 +138,7 @@ export function TradingViewChart({
   overlay,
   onVisibleBarsChange
 }: Props) {
+  const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<SeriesType> | null>(null);
@@ -351,32 +353,32 @@ export function TradingViewChart({
 
     const chart = createChart(containerRef.current, {
       layout: {
-        background: { type: ColorType.Solid, color: "#0b0e11" },
-        textColor: "#848e9c",
+        background: { type: ColorType.Solid, color: theme === "dark" ? "#0b0e11" : "#ffffff" },
+        textColor: theme === "dark" ? "#848e9c" : "#5e6673",
         fontFamily: "'Inter', sans-serif",
         fontSize: 11
       },
       grid: {
-        vertLines: { color: "rgba(43, 49, 57, 0.5)" },
-        horzLines: { color: "rgba(43, 49, 57, 0.5)" }
+        vertLines: { color: theme === "dark" ? "rgba(43, 49, 57, 0.5)" : "rgba(224, 227, 231, 0.5)" },
+        horzLines: { color: theme === "dark" ? "rgba(43, 49, 57, 0.5)" : "rgba(224, 227, 231, 0.5)" }
       },
       crosshair: {
         mode: CrosshairMode.Normal,
         vertLine: {
           color: "rgba(240, 185, 11, 0.3)",
-          labelBackgroundColor: "#2b3139"
+          labelBackgroundColor: theme === "dark" ? "#2b3139" : "#e0e3e7"
         },
         horzLine: {
           color: "rgba(240, 185, 11, 0.3)",
-          labelBackgroundColor: "#2b3139"
+          labelBackgroundColor: theme === "dark" ? "#2b3139" : "#e0e3e7"
         }
       },
       rightPriceScale: {
-        borderColor: "#2b3139",
+        borderColor: theme === "dark" ? "#2b3139" : "#e0e3e7",
         scaleMargins: { top: 0.1, bottom: 0.2 }
       },
       timeScale: {
-        borderColor: "#2b3139",
+        borderColor: theme === "dark" ? "#2b3139" : "#e0e3e7",
         timeVisible: true,
         secondsVisible: false
       },
@@ -522,7 +524,7 @@ export function TradingViewChart({
 
     ro.observe(containerRef.current);
     cleanupRef.current = () => ro.disconnect();
-  }, [activeOverlay, candles, chartType, emitVisibleBars, hiddenIndicatorIds, loadCandles, market, timeframe]);
+  }, [activeOverlay, candles, chartType, emitVisibleBars, hiddenIndicatorIds, loadCandles, market, theme, timeframe]);
 
   useEffect(() => {
     buildChart();

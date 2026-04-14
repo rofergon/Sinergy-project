@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Hex } from "viem";
 import logoUrl from "../../../../docs/logo.png";
+import { ThemeToggle } from "../ThemeToggle";
 
 type MarketSnapshot = {
   id: Hex;
@@ -137,6 +138,7 @@ export function Navbar({
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <ThemeToggle />
         {!isConnected ? (
           <button className="nav-wallet-btn connect" onClick={onConnect}>
             Connect Wallet

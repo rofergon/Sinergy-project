@@ -9,7 +9,8 @@
       "Bash(fuser *)",
       "Bash(grep *)",
       "Bash(true)",
-      "Bash(npx *)"
+      "Bash(npx *)",
+      "Bash(npm run *)"
     ]
   },
   "$version": 3
