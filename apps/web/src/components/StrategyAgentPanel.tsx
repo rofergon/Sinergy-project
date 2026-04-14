@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   HexString,
   StrategyBacktestSummary,
@@ -204,6 +204,8 @@ export function StrategyAgentPanel({
   const [liveTools, setLiveTools] = useState<Array<{ label: string; detail?: string }>>([]);
   const [collapsedThinkingIds, setCollapsedThinkingIds] = useState<Record<string, boolean>>({});
   const [liveThinkingCollapsed, setLiveThinkingCollapsed] = useState(false);
+  const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const threadRef = useRef<HTMLDivElement | null>(null);
 
   const storageKey = useMemo(() => {
     if (!address || !selectedMarket?.id) return null;
@@ -339,6 +341,22 @@ export function StrategyAgentPanel({
 
     window.sessionStorage.setItem(storageKey, JSON.stringify(payload));
   }, [prompt, session?.sessionId, storageKey]);
+
+  useEffect(() => {
+    const textarea = promptTextareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "0px";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 220)}px`;
+  }, [prompt]);
+
+  useEffect(() => {
+    const thread = threadRef.current;
+    if (!thread) return;
+    thread.scrollTo({
+      top: thread.scrollHeight,
+      behavior: "smooth"
+    });
+  }, [messages.length, liveThinking, liveFinalText, liveTools.length, status]);
 
   useEffect(() => {
     if (!clarificationRequired && clarifierOpen) {
@@ -614,7 +632,7 @@ export function StrategyAgentPanel({
             </button>
           </div>
 
-          <div className="strategy-agent-thread">
+          <div className="strategy-agent-thread" ref={threadRef}>
             {messages.length === 0 ? (
               <div className="strategy-empty-state">
                 Try something like: "Create an EMA crossover strategy for this market, validate it, and run a
@@ -754,8 +772,10 @@ export function StrategyAgentPanel({
 
           <div className="strategy-agent-compose">
             <textarea
+              ref={promptTextareaRef}
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
+              rows={1}
               placeholder="Describe the strategy you want to build, validate, improve, or continue..."
             />
             {clarifierOpen && clarificationRequired && (

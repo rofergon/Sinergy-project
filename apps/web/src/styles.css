@@ -1719,8 +1719,10 @@ a { color: inherit; text-decoration: none; }
 }
 
 .strategy-agent-compose textarea {
-  min-height: 110px;
-  resize: vertical;
+  min-height: 52px;
+  max-height: 220px;
+  resize: none;
+  overflow-y: auto;
   border: 1px solid var(--border);
   background: var(--bg-secondary);
   color: var(--text-primary);
@@ -1771,6 +1773,7 @@ a { color: inherit; text-decoration: none; }
 
 .strategy-agent-submit-btn {
   min-width: 144px;
+  color: #fff !important;
 }
 
 .strategy-primary-btn:disabled {
