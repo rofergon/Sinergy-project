@@ -290,6 +290,8 @@ The `strategy-agent` now reflects that flow directly:
 
 For simple strategy families, the agent now generates Pine-like source deterministically from a compact `engineHint` instead of constructing legacy `entryRules` and `exitRules` first.
 
+The optimization fast path also respects engine-backed strategies by recompiling updated Pine-like source before validating and backtesting.
+
 ## Why This Helps the Agent
 
 The long-term target is for the strategy agent to reason in terms closer to trading logic and less in terms of UI-specific rule rows.

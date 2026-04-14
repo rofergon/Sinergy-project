@@ -228,3 +228,112 @@ test("creation fast path compiles engine-backed source before drafting", async (
   assert.equal(result.artifacts.strategyId, strategyId);
   assert.equal(result.artifacts.runId, runId);
 });
+
+test("optimization fast path recompiles engine-backed strategies", async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), "strategy-agent-test-"));
+  const service = new StrategyAgentService({
+    matcherUrl: "http://localhost:3999",
+    sessionDbFile: join(tempDir, "sessions.sqlite"),
+    modelBaseUrl: "http://localhost:3998",
+    modelName: "test-model",
+    modelApiKey: "test-key",
+    modelTimeoutMs: 2_000,
+    maxSteps: 8,
+    toolcallRetries: 0,
+    forceFallbackJson: true
+  });
+
+  const strategyId = "33333333-3333-4333-8333-333333333333";
+
+  (service as any).invokePlanningModel = async () => ({
+    content: JSON.stringify({
+      analysis: "Tune EMA params.",
+      candidates: [
+        {
+          label: "ema-opt",
+          params: { fast: 6, slow: 18, timeframe: "15m" }
+        }
+      ]
+    })
+  });
+
+  let lastUpdated: Record<string, unknown> | undefined;
+  (service as any).matcherTransport = async (tool: string, input: Record<string, unknown>) => {
+    switch (tool) {
+      case "get_strategy":
+        return {
+          strategy: {
+            id: strategyId,
+            ownerAddress: input.ownerAddress,
+            marketId: "0x0000000000000000000000000000000000000000000000000000000000000111",
+            name: "EMA Engine Base",
+            timeframe: "15m",
+            enabledSides: ["long", "short"],
+            entryRules: { long: [], short: [] },
+            exitRules: { long: [], short: [] },
+            sizing: { mode: "percent_of_equity", value: 25 },
+            riskRules: { stopLossPct: 2, takeProfitPct: 4, trailingStopPct: 1, maxBarsInTrade: 40 },
+            costModel: { feeBps: 10, slippageBps: 5, startingEquity: 10_000 },
+            status: "draft",
+            schemaVersion: "1.0.0",
+            createdAt: "2026-04-14T00:00:00.000Z",
+            updatedAt: "2026-04-14T00:00:00.000Z",
+            engine: {
+              version: "2",
+              sourceType: "pine_like_v0",
+              script: "fast = ta.ema(close, 9)\nslow = ta.ema(close, 21)\nlongEntry = ta.crossover(fast, slow)\nlongExit = ta.crossunder(fast, slow)"
+            }
+          }
+        };
+      case "analyze_market_context":
+        return {
+          analysis: {
+            recommendedTimeframe: "15m",
+            recommendedStrategyKinds: ["ema"],
+            emaSuggestion: { fastPeriod: 6, slowPeriod: 18 },
+            overallRegime: "trending"
+          }
+        };
+      case "run_strategy_backtest":
+        return {
+          summary: { netPnl: 9, tradeCount: 4, winRate: 50, maxDrawdownPct: 3, profitFactor: 1.2 },
+          trades: [],
+          overlay: { entries: [], exits: [], indicators: [] }
+        };
+      case "compile_strategy_source":
+        return {
+          engine: input.engine,
+          preview: {
+            sourceType: "pine_like_v0",
+            bindingCount: 2,
+            signalsPresent: ["longEntry", "longExit", "shortEntry", "shortExit"],
+            enabledSides: input.enabledSides ?? ["long", "short"],
+            timeframe: input.timeframe ?? "15m",
+            indicatorRefs: [],
+            warnings: []
+          }
+        };
+      case "update_strategy_draft":
+        lastUpdated = input.strategy as Record<string, unknown>;
+        return { strategy: input.strategy };
+      case "validate_strategy_draft":
+        return { validation: { ok: true, issues: [] } };
+      default:
+        return { capabilities: {} };
+    }
+  };
+
+  const result = await service.run({
+    ownerAddress: "0x00000000000000000000000000000000000000c3",
+    marketId: "0x0000000000000000000000000000000000000000000000000000000000000111",
+    strategyId,
+    goal: "Optimiza la estrategia para mejor PnL",
+    preferredTimeframe: "15m",
+    mode: "run"
+  });
+
+  const compileIndex = result.toolTrace.findIndex((entry) => entry.tool === "compile_strategy_source");
+  assert.notEqual(compileIndex, -1);
+  assert.equal((lastUpdated?.engine as { sourceType?: string } | undefined)?.sourceType, "pine_like_v0");
+  assert.match(String((lastUpdated?.engine as { script?: string } | undefined)?.script ?? ""), /ta\.ema\(close, 6\)/);
+});

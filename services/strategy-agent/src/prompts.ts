@@ -315,6 +315,7 @@ Allowed knobs by strategy kind:
 - rsi-mean-reversion: timeframe, period, entry, exit, stopLossPct, takeProfitPct
 - range-breakout: timeframe, lookback, exitEma, stopLossPct, takeProfitPct
 - bollinger-reversion: timeframe, period, stdDev, stopLossPct, takeProfitPct
+- rsi-ema-hybrid: timeframe, fast, slow, rsiPeriod, longRsiMin, shortRsiMax, longExitRsi, shortExitRsi, stopLossPct, takeProfitPct, trailingStopPct, maxBarsInTrade
 
 Return JSON with this exact shape:
 {

@@ -391,6 +391,32 @@ function buildEngineBackedCreation(input: {
   };
 }
 
+function inferEngineKindFromScript(script: string): EngineStrategyKind {
+  const normalized = script.toLowerCase();
+  if (normalized.includes("ta.bb(")) return "bollinger-reversion";
+  if (normalized.includes("ta.highest(") || normalized.includes("ta.lowest(")) return "range-breakout";
+  const hasRsi = normalized.includes("ta.rsi(");
+  const hasEma = normalized.includes("ta.ema(");
+  if (hasRsi && hasEma && (normalized.includes(" and ") || normalized.includes(" or "))) {
+    return "rsi-ema-hybrid";
+  }
+  if (hasRsi) return "rsi-mean-reversion";
+  return "ema";
+}
+
+function mergeRiskRules(
+  base: StrategyDefinition["riskRules"],
+  params: Record<string, unknown>
+): StrategyDefinition["riskRules"] {
+  return {
+    ...base,
+    stopLossPct: typeof params.stopLossPct === "number" ? params.stopLossPct : base.stopLossPct,
+    takeProfitPct: typeof params.takeProfitPct === "number" ? params.takeProfitPct : base.takeProfitPct,
+    trailingStopPct: typeof params.trailingStopPct === "number" ? params.trailingStopPct : base.trailingStopPct,
+    maxBarsInTrade: typeof params.maxBarsInTrade === "number" ? params.maxBarsInTrade : base.maxBarsInTrade
+  };
+}
+
 function goalRequestsBacktest(goal: string) {
   return /backtest|test|evaluat|probar|prueba|evaluar/i.test(goal);
 }
@@ -2599,7 +2625,16 @@ Return JSON like:
     }
 
     const baseStrategy = existing.strategy as StrategyDefinition;
-    const strategyKind = classifyBasicStrategy(baseStrategy);
+    const engineSource = typeof baseStrategy.engine === "object" && baseStrategy.engine
+      ? (baseStrategy.engine as StrategyEngineDefinition)
+      : undefined;
+    const engineOptimizable = engineSource?.sourceType === "pine_like_v0";
+    const inferredEngineKind = engineOptimizable && typeof engineSource.script === "string"
+      ? inferEngineKindFromScript(engineSource.script)
+      : undefined;
+    const strategyKind = inferredEngineKind && inferredEngineKind !== "rsi-ema-hybrid"
+      ? inferredEngineKind
+      : classifyBasicStrategy(baseStrategy);
     if (!strategyKind) {
       return null;
     }
@@ -2681,7 +2716,7 @@ Return JSON like:
     try {
       const optimizationPrompt = buildOptimizationPlanPrompt({
         goal: input.goal,
-        strategyKind,
+        strategyKind: inferredEngineKind === "rsi-ema-hybrid" ? "ema" : strategyKind,
         strategy: baseStrategy as unknown as Record<string, unknown>,
         currentSummary,
         preferredTimeframe: input.preferredTimeframe,
@@ -2780,8 +2815,161 @@ Return JSON like:
       })();
     }
 
-    const candidates: StrategyDefinition[] = candidateConfigs.map((candidate) => {
-      const params = candidate.params ?? {};
+    let bestStrategy = baseStrategy;
+    let bestSummary: Record<string, unknown> | null = null;
+    let bestPnl = Number.NEGATIVE_INFINITY;
+
+    for (const candidateConfig of candidateConfigs) {
+      const params = candidateConfig.params ?? {};
+      if (engineOptimizable && inferredEngineKind) {
+        const timeframe =
+          typeof params.timeframe === "string"
+            ? params.timeframe as StrategyDefinition["timeframe"]
+            : baseStrategy.timeframe;
+        const enabledSides = baseStrategy.enabledSides;
+        const riskRules = mergeRiskRules(baseStrategy.riskRules, params);
+        const engineCandidate = buildEngineBackedCreation({
+          goal: input.goal,
+          name: baseStrategy.name,
+          preferredTimeframe: timeframe,
+          marketAnalysis,
+          strategyPatch: {
+            timeframe,
+            enabledSides,
+            riskRules
+          },
+          engineHint: {
+            kind: inferredEngineKind,
+            params
+          }
+        });
+
+        const compileEntry: AgentToolTraceEntry = {
+          step: trace.length + 1,
+          tool: "compile_strategy_source",
+          input: {
+            ownerAddress: input.ownerAddress,
+            marketId: baseStrategy.marketId,
+            name: engineCandidate.name,
+            timeframe: engineCandidate.timeframe,
+            enabledSides: engineCandidate.enabledSides,
+            engine: engineCandidate.engine
+          },
+          reason: "Optimization fast path: compile the updated engine source",
+          expectedArtifact: "compiled strategy engine",
+          startedAt: new Date().toISOString()
+        };
+        trace.push(compileEntry);
+
+        const compiled = await this.matcherTransport("compile_strategy_source", {
+          ownerAddress: input.ownerAddress as HexString,
+          marketId: baseStrategy.marketId as HexString,
+          name: engineCandidate.name,
+          timeframe: engineCandidate.timeframe,
+          enabledSides: engineCandidate.enabledSides,
+          engine: engineCandidate.engine
+        });
+        compileEntry.output = compiled as Record<string, unknown>;
+        compileEntry.completedAt = new Date().toISOString();
+        Object.assign(compileEntry, summarizeToolProgress(compileEntry));
+
+        const compiledEngine =
+          compiled.engine && typeof compiled.engine === "object"
+            ? (compiled.engine as StrategyEngineDefinition)
+            : engineCandidate.engine;
+
+        const nextCandidate: StrategyDefinition = {
+          ...baseStrategy,
+          name: baseStrategy.name,
+          timeframe: engineCandidate.timeframe,
+          enabledSides: engineCandidate.enabledSides,
+          riskRules: engineCandidate.strategyPatch.riskRules ?? baseStrategy.riskRules,
+          engine: compiledEngine
+        };
+
+        const updateEntry: AgentToolTraceEntry = {
+          step: trace.length + 1,
+          tool: "update_strategy_draft",
+          input: {
+            ownerAddress: input.ownerAddress,
+            strategy: nextCandidate
+          },
+          reason: "Optimization fast path: apply compiled engine candidate",
+          expectedArtifact: "updated strategy draft",
+          startedAt: new Date().toISOString()
+        };
+        trace.push(updateEntry);
+
+        const updated = await this.matcherTransport("update_strategy_draft", {
+          ownerAddress: input.ownerAddress as HexString,
+          strategy: nextCandidate
+        });
+        updateEntry.output = updated as Record<string, unknown>;
+        updateEntry.completedAt = new Date().toISOString();
+        Object.assign(updateEntry, summarizeToolProgress(updateEntry));
+
+        const validateEntry: AgentToolTraceEntry = {
+          step: trace.length + 1,
+          tool: "validate_strategy_draft",
+          input: {
+            ownerAddress: input.ownerAddress,
+            strategyId: baseStrategy.id
+          },
+          reason: "Optimization fast path: validate engine candidate before backtest",
+          expectedArtifact: "validation result",
+          startedAt: new Date().toISOString()
+        };
+        trace.push(validateEntry);
+
+        const validation = await this.matcherTransport("validate_strategy_draft", {
+          ownerAddress: input.ownerAddress as HexString,
+          strategyId: baseStrategy.id
+        });
+        validateEntry.output = validation as Record<string, unknown>;
+        validateEntry.completedAt = new Date().toISOString();
+        Object.assign(validateEntry, summarizeToolProgress(validateEntry));
+
+        if ((validation.validation as { ok?: boolean } | undefined)?.ok !== true) {
+          continue;
+        }
+
+        const backtestEntry: AgentToolTraceEntry = {
+          step: trace.length + 1,
+          tool: "run_strategy_backtest",
+          input: {
+            ownerAddress: input.ownerAddress,
+            strategyId: baseStrategy.id,
+            ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
+            ...(resolveChartRange(input) ?? {})
+          },
+          reason: "Optimization fast path: score engine candidate by backtest result",
+          expectedArtifact: "backtest summary",
+          startedAt: new Date().toISOString()
+        };
+        trace.push(backtestEntry);
+
+        const backtest = await this.matcherTransport("run_strategy_backtest", {
+          ownerAddress: input.ownerAddress as HexString,
+          strategyId: baseStrategy.id,
+          ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
+          ...(resolveChartRange(input) ?? {})
+        });
+        backtestEntry.output = backtest as Record<string, unknown>;
+        backtestEntry.completedAt = new Date().toISOString();
+        Object.assign(backtestEntry, summarizeToolProgress(backtestEntry));
+
+        const pnl = typeof backtest.summary?.netPnl === "number" ? backtest.summary.netPnl : Number.NEGATIVE_INFINITY;
+        if (pnl > bestPnl) {
+          bestPnl = pnl;
+          bestStrategy = (updated.strategy && typeof updated.strategy === "object"
+            ? updated.strategy
+            : nextCandidate) as StrategyDefinition;
+          bestSummary = backtest.summary as Record<string, unknown>;
+        }
+
+        continue;
+      }
+
       const built = (() => {
         switch (strategyKind) {
         case "ema":
@@ -2823,14 +3011,7 @@ Return JSON like:
         }
       })();
 
-      return applyRequestedSidePreference(built, input.goal);
-    });
-
-    let bestStrategy = baseStrategy;
-    let bestSummary: Record<string, unknown> | null = null;
-    let bestPnl = Number.NEGATIVE_INFINITY;
-
-    for (const candidate of candidates) {
+      const candidate = applyRequestedSidePreference(built, input.goal);
       const updateEntry: AgentToolTraceEntry = {
         step: trace.length + 1,
         tool: "update_strategy_draft",
