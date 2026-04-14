@@ -18,6 +18,7 @@ import type {
   StrategyAgentToolTraceEntry,
   StrategyBacktestBundle
 } from "../types";
+import { fetchBacktestBundle } from "../lib/api";
 
 type Props = {
   address?: HexString;
@@ -26,7 +27,7 @@ type Props = {
   viewport: ChartViewport | null;
   onBacktestResult: (result: StrategyBacktestBundle | null) => void;
   onTimeframeChange: (timeframe: StrategyTimeframe) => void;
-  onReviewStrategy: (strategyId: string, bundle: StrategyBacktestBundle | null) => void;
+  onReviewStrategy: (strategyId: string, bundle: StrategyBacktestBundle | null, runId?: string) => void;
 };
 
 type AgentMessage = {
@@ -157,6 +158,20 @@ function summarizeThinking(text: string, maxLength = 140) {
   return `${compact.slice(0, maxLength).trimEnd()}...`;
 }
 
+function shouldAskStrategyClarification(goal: string) {
+  const normalized = goal.trim().toLowerCase();
+  if (!normalized) return false;
+
+  const creationPatterns = [
+    /\b(create|build|generate|make|design|draft|start)\b[\s\S]{0,80}\b(strategy|bot|system)\b/u,
+    /\b(strategy|bot|system)\b[\s\S]{0,80}\b(from scratch|new)\b/u,
+    /\b(crea|crear|genera|generar|disena|diseña|arma|construye|haz|desarrolla)\b[\s\S]{0,80}\b(estrategia|bot|sistema)\b/u,
+    /\b(estrategia|bot|sistema)\b[\s\S]{0,80}\b(desde cero|nueva)\b/u
+  ];
+
+  return creationPatterns.some((pattern) => pattern.test(normalized));
+}
+
 export function StrategyAgentPanel({
   address,
   selectedMarket,
@@ -222,6 +237,7 @@ export function StrategyAgentPanel({
     if (!runtime.model.reachable || !runtime.model.healthOk) return "Offline";
     return runtime.model.toolCallingObserved ? "Native tools" : "Fallback JSON";
   }, [runtime]);
+  const clarificationRequired = useMemo(() => shouldAskStrategyClarification(prompt), [prompt]);
 
   async function loadSession(sessionId: string, options?: { updateStatus?: boolean }) {
     if (!address) return;
@@ -235,7 +251,18 @@ export function StrategyAgentPanel({
     setLiveFinalText("");
     setLiveTools([]);
     setLiveThinkingCollapsed(false);
-    onBacktestResult(null);
+
+    if (payload.result.session.runId) {
+      try {
+        const restoredBundle = await fetchBacktestBundle(address, payload.result.session.runId);
+        onTimeframeChange(restoredBundle.summary.timeframe);
+        onBacktestResult(restoredBundle);
+      } catch {
+        onBacktestResult(null);
+      }
+    } else {
+      onBacktestResult(null);
+    }
 
     if (payload.result.session.strategy?.timeframe) {
       onTimeframeChange(payload.result.session.strategy.timeframe);
@@ -313,11 +340,19 @@ export function StrategyAgentPanel({
     window.sessionStorage.setItem(storageKey, JSON.stringify(payload));
   }, [prompt, session?.sessionId, storageKey]);
 
+  useEffect(() => {
+    if (!clarificationRequired && clarifierOpen) {
+      setClarifierOpen(false);
+      setClarifierGoal("");
+      setClarifierMode(null);
+    }
+  }, [clarificationRequired, clarifierOpen]);
+
   async function submit(mode: "plan" | "run") {
     const goal = prompt.trim();
     if (!address || !goal || !selectedMarket) return;
 
-    if (!clarifierOpen || clarifierGoal !== goal || clarifierMode !== mode) {
+    if (clarificationRequired && (!clarifierOpen || clarifierGoal !== goal || clarifierMode !== mode)) {
       setClarifierOpen(true);
       setClarifierGoal(goal);
       setClarifierMode(mode);
@@ -358,6 +393,7 @@ export function StrategyAgentPanel({
               body: JSON.stringify({
                 ownerAddress: address,
                 marketId: selectedMarket.id,
+                strategyId: session?.strategyId,
                 preferredTimeframe: selectedTimeframe,
                 chartBars: viewport?.bars,
                 chartFromTs: viewport?.fromTs,
@@ -400,6 +436,7 @@ export function StrategyAgentPanel({
           body: JSON.stringify({
             ownerAddress: address,
             marketId: selectedMarket.id,
+            strategyId: session?.strategyId,
             preferredTimeframe: selectedTimeframe,
             chartBars: viewport?.bars,
             chartFromTs: viewport?.fromTs,
@@ -661,7 +698,13 @@ export function StrategyAgentPanel({
                     <button
                       type="button"
                       className="strategy-agent-review-btn"
-                      onClick={() => onReviewStrategy(message.strategyId!, message.bundle ?? null)}
+                      onClick={() =>
+                        onReviewStrategy(
+                          message.strategyId!,
+                          message.bundle ?? null,
+                          message.bundle?.summary.runId
+                        )
+                      }
                     >
                       Review In Builder
                     </button>
@@ -715,7 +758,7 @@ export function StrategyAgentPanel({
               onChange={(event) => setPrompt(event.target.value)}
               placeholder="Describe the strategy you want to build, validate, improve, or continue..."
             />
-            {clarifierOpen && (
+            {clarifierOpen && clarificationRequired && (
               <div className="strategy-agent-trace">
                 <div>
                   <strong>Agent needs two quick preferences before running</strong>
@@ -809,6 +852,7 @@ export function StrategyAgentPanel({
                   busy !== null ||
                   !prompt.trim() ||
                   (clarifierOpen &&
+                    clarificationRequired &&
                     clarification.stopLossMode === "custom" &&
                     !clarification.customStopLossPct.trim())
                 }
@@ -819,7 +863,7 @@ export function StrategyAgentPanel({
                     ? "Running..."
                     : planModeEnabled
                       ? "Plan With AI"
-                      : clarifierOpen
+                      : clarifierOpen && clarificationRequired
                         ? "Continue With AI"
                         : "Run With AI"}
               </button>
@@ -851,7 +895,7 @@ export function StrategyAgentPanel({
               {session?.strategyId && (
                 <button
                   type="button"
-                  onClick={() => onReviewStrategy(session.strategyId!, null)}
+                  onClick={() => onReviewStrategy(session.strategyId!, null, session.runId)}
                   disabled={busy !== null}
                 >
                   Open Strategy In Builder
@@ -905,7 +949,7 @@ export function StrategyAgentPanel({
                       {item.strategyId && (
                         <button
                           type="button"
-                          onClick={() => onReviewStrategy(item.strategyId!, null)}
+                          onClick={() => onReviewStrategy(item.strategyId!, null, item.runId)}
                           disabled={busy !== null}
                         >
                           Open Strategy

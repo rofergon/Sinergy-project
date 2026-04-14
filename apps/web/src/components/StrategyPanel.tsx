@@ -675,7 +675,7 @@ export function StrategyPanel({
 
   useEffect(() => {
     if (!address || !focusStrategyId || focusStrategyId === selectedStrategyId) return;
-    void selectStrategy(focusStrategyId);
+    void selectStrategy(focusStrategyId, { preserveBacktest: true });
   }, [address, focusStrategyId, selectedStrategyId]);
 
   useEffect(() => {
@@ -698,7 +698,7 @@ export function StrategyPanel({
     });
   }, [selectedMarket?.id]);
 
-  async function selectStrategy(strategyId: string) {
+  async function selectStrategy(strategyId: string, options?: { preserveBacktest?: boolean }) {
     if (!address) return;
     setSelectedStrategyId(strategyId);
     const result = await strategyTool<{ strategy: StrategyDefinition }>("get_strategy", {
@@ -709,7 +709,9 @@ export function StrategyPanel({
     onSelectMarket(result.strategy.marketId);
     onTimeframeChange(result.strategy.timeframe);
     setValidation(null);
-    onBacktestResult(null);
+    if (!options?.preserveBacktest) {
+      onBacktestResult(null);
+    }
   }
 
   async function createDraft() {

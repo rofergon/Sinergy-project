@@ -506,9 +506,10 @@ function buildConstantOverlays(candles: StrategyCandle[], strategy: StrategyDefi
 export function buildIndicatorOverlays(
   candles: StrategyCandle[],
   strategy: StrategyDefinition,
-  seriesMap: IndicatorSeriesMap
+  seriesMap: IndicatorSeriesMap,
+  refsOverride?: IndicatorReference[]
 ): StrategyOverlaySeries[] {
-  const refs = collectIndicatorReferences(strategy);
+  const refs = refsOverride ?? collectIndicatorReferences(strategy);
   const indicatorOverlays: StrategyOverlaySeries[] = refs.map((ref) => ({
     id: ref.key,
     label: indicatorLabel(ref),

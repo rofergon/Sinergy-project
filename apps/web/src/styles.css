@@ -505,51 +505,103 @@ a { color: inherit; text-decoration: none; }
 .tv-indicator-legend {
   position: absolute;
   top: 46px;
-  right: 14px;
+  left: 14px;
   z-index: 3;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-width: min(320px, calc(100% - 28px));
-  pointer-events: none;
+  gap: 6px;
+  max-width: min(460px, calc(100% - 28px));
+  pointer-events: auto;
 }
 
 .tv-indicator-chip {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 6px 10px;
   border-radius: 12px;
   border: 1px solid rgba(63, 72, 84, 0.75);
   background: rgba(11, 14, 17, 0.82);
   backdrop-filter: blur(8px);
+  min-width: 0;
+}
+
+.tv-indicator-chip.is-hidden {
+  opacity: 0.55;
 }
 
 .tv-indicator-dot {
   width: 9px;
   height: 9px;
   border-radius: 999px;
-  margin-top: 4px;
   flex: 0 0 auto;
 }
 
 .tv-indicator-copy {
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: baseline;
+  gap: 8px;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
 .tv-indicator-copy strong {
   font-size: 11px;
   color: var(--text-primary);
   line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tv-indicator-copy small {
   font-size: 10px;
   color: var(--text-secondary);
   line-height: 1.3;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.tv-indicator-visibility-btn {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.tv-indicator-visibility-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+}
+
+.tv-indicator-visibility-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+@media (max-width: 720px) {
+  .tv-indicator-legend {
+    max-width: calc(100% - 20px);
+    left: 10px;
+    top: 44px;
+  }
+
+  .tv-indicator-copy {
+    gap: 6px;
+  }
+
+  .tv-indicator-copy small {
+    display: none;
+  }
 }
 
 /* ══════════════ BOTTOM TABS ════════════════════════════ */

@@ -146,6 +146,7 @@ export function TradingViewChart({
   const [feedState, setFeedState] = useState<"live" | "fallback" | "loading">("loading");
   const [hasMoreHistory, setHasMoreHistory] = useState(false);
   const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
+  const [hiddenIndicatorIds, setHiddenIndicatorIds] = useState<Record<string, boolean>>({});
   const candlesRef = useRef<Candle[]>([]);
   const hasMoreHistoryRef = useRef(false);
   const loadingMoreHistoryRef = useRef(false);
@@ -172,6 +173,21 @@ export function TradingViewChart({
     return overlay;
   }, [market, overlay, timeframe]);
 
+  useEffect(() => {
+    if (!activeOverlay) {
+      setHiddenIndicatorIds({});
+      return;
+    }
+
+    const activeIds = new Set(activeOverlay.indicators.map((indicator) => indicator.id));
+    setHiddenIndicatorIds((current) => {
+      const next = Object.fromEntries(
+        Object.entries(current).filter(([id, hidden]) => hidden && activeIds.has(id))
+      );
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
+    });
+  }, [activeOverlay]);
+
   const indicatorLegendItems = useMemo(() => {
     if (!activeOverlay) return [];
     return activeOverlay.indicators
@@ -183,7 +199,8 @@ export function TradingViewChart({
           label: indicator.label,
           color: indicator.color,
           pane: indicator.pane,
-          value: lastPoint.value
+          value: lastPoint.value,
+          hidden: Boolean(hiddenIndicatorIds[indicator.id])
         };
       })
       .filter((item): item is {
@@ -192,8 +209,9 @@ export function TradingViewChart({
         color: string;
         pane: "price" | "oscillator";
         value: number;
+        hidden: boolean;
       } => item !== null);
-  }, [activeOverlay]);
+  }, [activeOverlay, hiddenIndicatorIds]);
 
   const emitVisibleBars = useCallback(
     (range: LogicalRange | null, sourceCandles: Candle[]) => {
@@ -415,6 +433,9 @@ export function TradingViewChart({
       if (activeOverlay) {
         let hasOscillatorPane = false;
         for (const indicator of activeOverlay.indicators) {
+          if (hiddenIndicatorIds[indicator.id]) {
+            continue;
+          }
           const paneIndex = indicator.pane === "oscillator" ? 1 : 0;
           if (indicator.pane === "oscillator") {
             hasOscillatorPane = true;
@@ -501,7 +522,7 @@ export function TradingViewChart({
 
     ro.observe(containerRef.current);
     cleanupRef.current = () => ro.disconnect();
-  }, [activeOverlay, candles, chartType, emitVisibleBars, loadCandles, market, timeframe]);
+  }, [activeOverlay, candles, chartType, emitVisibleBars, hiddenIndicatorIds, loadCandles, market, timeframe]);
 
   useEffect(() => {
     buildChart();
@@ -549,14 +570,49 @@ export function TradingViewChart({
       {indicatorLegendItems.length > 0 && (
         <div className="tv-indicator-legend">
           {indicatorLegendItems.map((item) => (
-            <div key={item.id} className="tv-indicator-chip">
+            <div key={item.id} className={`tv-indicator-chip ${item.hidden ? "is-hidden" : ""}`}>
               <span className="tv-indicator-dot" style={{ backgroundColor: item.color }} />
-              <div className="tv-indicator-copy">
+              <div className="tv-indicator-copy" title={`${item.label} · ${item.pane === "oscillator" ? "Oscillator" : "Price"} · ${item.value.toFixed(2)}`}>
                 <strong>{item.label}</strong>
-                <small>
-                  {item.pane === "oscillator" ? "Oscillator" : "Price"} · {item.value.toFixed(2)}
-                </small>
+                <small>{item.pane === "oscillator" ? "Oscillator" : "Price"} · {item.value.toFixed(2)}</small>
               </div>
+              <button
+                type="button"
+                className="tv-indicator-visibility-btn"
+                onClick={() =>
+                  setHiddenIndicatorIds((current) => ({
+                    ...current,
+                    [item.id]: !current[item.id]
+                  }))
+                }
+                aria-label={item.hidden ? `Show ${item.label}` : `Hide ${item.label}`}
+                title={item.hidden ? "Show indicator" : "Hide indicator"}
+              >
+                {item.hidden ? (
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M3 3l18 18M10.6 10.7a2 2 0 002.8 2.8M9.9 5.2A10.8 10.8 0 0112 5c5.5 0 9.5 5.3 9.7 5.5a1 1 0 010 1c-.2.2-1.8 2.4-4.3 4.1M6.5 6.6C3.9 8.3 2.3 10.5 2.1 10.7a1 1 0 000 1C2.3 11.9 6.3 17 12 17c1 0 2-.2 2.9-.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M2.1 12.3C2.3 12.1 6.3 7 12 7s9.7 5.1 9.9 5.3a1 1 0 010 1C21.7 13.5 17.7 18 12 18S2.3 12.5 2.1 12.3a1 1 0 010-1z"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <circle cx="12" cy="12.8" r="3" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                  </svg>
+                )}
+              </button>
             </div>
           ))}
         </div>

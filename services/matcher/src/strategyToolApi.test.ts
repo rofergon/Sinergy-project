@@ -258,6 +258,65 @@ test("RSI strategies expose oscillator overlays and threshold guide lines", asyn
   }
 });
 
+test("engine-backed EMA plus RSI strategies expose runtime RSI overlays", async () => {
+  const harness = makeHarness();
+  const ownerAddress = "0x00000000000000000000000000000000000000c4" as HexString;
+  const script = `
+fast = ta.ema(close, 9)
+slow = ta.ema(close, 21)
+rsiValue = ta.rsi(close, 14)
+longEntry = ta.crossover(fast, slow) and rsiValue >= 55
+longExit = ta.crossunder(fast, slow) or rsiValue <= 45
+`;
+
+  try {
+    const compiled = await harness.api.execute("compile_strategy_source", {
+      ownerAddress,
+      marketId: harness.market.id,
+      name: "EMA RSI Hybrid",
+      timeframe: "15m",
+      enabledSides: ["long"],
+      engine: {
+        version: "2",
+        sourceType: "pine_like_v0",
+        script
+      }
+    }) as import("@sinergy/shared").StrategySourceCompilation;
+
+    const created = await harness.api.execute("create_strategy_draft", {
+      ownerAddress,
+      marketId: harness.market.id,
+      name: "EMA RSI Hybrid",
+      engine: compiled.engine
+    }) as { strategy: import("@sinergy/shared").StrategyDefinition };
+
+    const updated = await harness.api.execute("update_strategy_draft", {
+      ownerAddress,
+      strategy: {
+        ...created.strategy,
+        timeframe: "15m",
+        enabledSides: ["long"],
+        engine: compiled.engine
+      }
+    }) as { strategy: import("@sinergy/shared").StrategyDefinition };
+
+    const run = await harness.api.execute("run_strategy_backtest", {
+      ownerAddress,
+      strategyId: updated.strategy.id,
+      bars: 90
+    }) as {
+      overlay: import("@sinergy/shared").StrategyChartOverlay;
+    };
+
+    assert.equal(
+      run.overlay.indicators.some((indicator) => indicator.pane === "oscillator" && indicator.label.startsWith("RSI value")),
+      true
+    );
+  } finally {
+    harness.cleanup();
+  }
+});
+
 test("pine-like source can be compiled, saved as a draft, validated, and backtested through the tool API", async () => {
   const harness = makeHarness();
   const ownerAddress = "0x00000000000000000000000000000000000000c3" as HexString;

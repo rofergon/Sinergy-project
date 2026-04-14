@@ -404,6 +404,67 @@ function inferEngineKindFromScript(script: string): EngineStrategyKind {
   return "ema";
 }
 
+function extractRsiPeriod(goal: string) {
+  const match = goal.match(/rsi[^0-9]{0,12}(\d{1,2})|(\d{1,2})[^a-z0-9]{0,6}rsi/i);
+  const raw = match?.[1] ?? match?.[2];
+  if (!raw) return undefined;
+  const value = Number(raw);
+  return Number.isInteger(value) && value >= 2 && value <= 99 ? value : undefined;
+}
+
+function extractEmaPeriodsFromStrategy(
+  strategy: StrategyDefinition,
+  marketAnalysis?: StrategyMarketAnalysis
+) {
+  const fallback = {
+    fast: marketAnalysis?.emaSuggestion?.fastPeriod ?? 9,
+    slow: marketAnalysis?.emaSuggestion?.slowPeriod ?? 21
+  };
+
+  const script = strategy.engine?.sourceType === "pine_like_v0" ? strategy.engine.script : undefined;
+  if (typeof script === "string") {
+    const periods = [...script.matchAll(/ta\.ema\(close,\s*(\d+)\s*\)/gi)]
+      .map((match) => Number(match[1]))
+      .filter((value) => Number.isInteger(value) && value > 0);
+    if (periods.length >= 2) {
+      return {
+        fast: periods[0],
+        slow: periods[1]
+      };
+    }
+  }
+
+  const emaPeriods = [
+    strategy.entryRules.long[0]?.rules[0],
+    strategy.exitRules.long[0]?.rules[0],
+    strategy.entryRules.short[0]?.rules[0],
+    strategy.exitRules.short[0]?.rules[0]
+  ]
+    .flatMap((rule) => {
+      if (!rule) return [];
+      return [rule.left, rule.right];
+    })
+    .flatMap((operand) => {
+      if (operand?.type !== "indicator_output" || operand.indicator !== "ema") {
+        return [];
+      }
+      const period = operand.params?.period;
+      return typeof period === "number" && Number.isFinite(period) ? [period] : [];
+    });
+
+  if (emaPeriods.length >= 2) {
+    const unique = [...new Set(emaPeriods)].sort((left, right) => left - right);
+    if (unique.length >= 2) {
+      return {
+        fast: unique[0],
+        slow: unique[1]
+      };
+    }
+  }
+
+  return fallback;
+}
+
 function mergeRiskRules(
   base: StrategyDefinition["riskRules"],
   params: Record<string, unknown>
@@ -417,8 +478,29 @@ function mergeRiskRules(
   };
 }
 
+function applyEngineOverrides(
+  engine: StrategyEngineDefinition,
+  overrides: { timeframe?: StrategyDefinition["timeframe"]; enabledSides?: StrategyDefinition["enabledSides"] }
+): StrategyEngineDefinition {
+  if (engine.sourceType === "ast_v2") {
+    return {
+      ...engine,
+      ast: {
+        ...engine.ast,
+        ...(overrides.timeframe ? { timeframe: overrides.timeframe } : {}),
+        ...(overrides.enabledSides ? { enabledSides: overrides.enabledSides } : {})
+      }
+    };
+  }
+  return engine;
+}
+
 function goalRequestsBacktest(goal: string) {
   return /backtest|test|evaluat|probar|prueba|evaluar/i.test(goal);
+}
+
+function shouldAutoRunBacktestForCreation(goal: string) {
+  return goalLooksLikeFreshCreation(goal) || goalLooksLikeAnalysisDrivenCreation(goal);
 }
 
 function goalLooksLikeEmaCrossover(goal: string) {
@@ -469,12 +551,20 @@ function goalLooksLikeOptimization(goal: string) {
   return /improve|optimi|positive pnl|positive|better pnl|make.*profit|mejor|optimiza|positivo|rentable/i.test(goal);
 }
 
+function goalLooksLikeModification(goal: string) {
+  return /add|agrega|agregar|anade|añade|anadir|añadir|include|incluye|with|con|filter|filtro|modify|modifica|change|cambia|adjust|ajusta|tweak/i.test(goal);
+}
+
 function goalLooksLikeFreshCreation(goal: string) {
   return /create|build|make|new strategy|from scratch|crea|construye|nueva estrategia/i.test(goal);
 }
 
 function goalLooksLikeAnalysisDrivenCreation(goal: string) {
   return /analy|analiza|analysis|support|resistance|soporte|resistencia|timeframe|periodicidad|periodicity/i.test(goal);
+}
+
+function goalLooksLikeRsiFilterRequest(goal: string) {
+  return /rsi/i.test(goal) && goalLooksLikeModification(goal);
 }
 
 function classifyBasicStrategy(strategy: StrategyDefinition): BasicStrategyKind | null {
@@ -1881,6 +1971,35 @@ Return JSON like:
       };
     }
 
+    const modificationFastPathResult = await this.tryRunModificationFastPath(activeInput, trace, warnings, metrics);
+    if (modificationFastPathResult) {
+      artifacts = collectArtifactsFromTrace(trace, modificationFastPathResult.artifacts);
+      metrics = finalizeMetrics(metrics, trace);
+
+      this.sessions.applyArtifacts(session, artifacts);
+      this.sessions.applyRunDiagnostics(session, { mode: "fallback-json", metrics });
+      this.sessions.appendTrace(session, trace);
+      this.sessions.addTurn(session, {
+        role: "assistant",
+        mode: "run",
+        text: modificationFastPathResult.finalMessage,
+        usedTools: Array.from(new Set(trace.map((entry) => entry.tool))),
+        warnings
+      });
+
+      return {
+        requestId,
+        finalMessage: modificationFastPathResult.finalMessage,
+        usedTools: Array.from(new Set(trace.map((entry) => entry.tool))),
+        toolTrace: trace,
+        artifacts,
+        session: this.sessions.snapshot(session),
+        modelModeUsed: "fallback-json",
+        warnings,
+        metrics
+      };
+    }
+
     const optimizationFastPathResult = await this.tryRunOptimizationFastPath(activeInput, trace, warnings, metrics, stream);
     if (optimizationFastPathResult) {
       artifacts = collectArtifactsFromTrace(trace, optimizationFastPathResult.artifacts);
@@ -2544,7 +2663,7 @@ Return JSON like:
 
     const artifacts = collectArtifactsFromTrace(trace);
 
-    if (goalRequestsBacktest(input.goal) && validationOk) {
+    if ((goalRequestsBacktest(input.goal) || shouldAutoRunBacktestForCreation(input.goal)) && validationOk) {
       const backtestEntry: AgentToolTraceEntry = {
         step: trace.length + 1,
         tool: "run_strategy_backtest",
@@ -2554,7 +2673,9 @@ Return JSON like:
           ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
           ...(resolveChartRange(input) ?? {})
         },
-        reason: "Fast path: run requested backtest",
+        reason: goalRequestsBacktest(input.goal)
+          ? "Fast path: run requested backtest"
+          : "Fast path: auto-run backtest for a newly created strategy",
         expectedArtifact: "backtest summary",
         startedAt: new Date().toISOString()
       };
@@ -2585,6 +2706,264 @@ Return JSON like:
         ? `Created and validated ${finalStrategy.name}.`
         : `Created ${finalStrategy.name}, but validation still has issues after one quick repair pass.`,
       artifacts
+    };
+  }
+
+  private async tryRunModificationFastPath(
+    input: AgentStrategyRequest,
+    trace: AgentToolTraceEntry[],
+    warnings: string[],
+    metrics: AgentResponse["metrics"]
+  ): Promise<{ finalMessage: string; artifacts: AgentResponse["artifacts"] } | null> {
+    if (!input.strategyId || !goalLooksLikeRsiFilterRequest(input.goal)) {
+      return null;
+    }
+
+    const getEntry: AgentToolTraceEntry = {
+      step: trace.length + 1,
+      tool: "get_strategy",
+      input: {
+        ownerAddress: input.ownerAddress,
+        strategyId: input.strategyId
+      },
+      reason: "Modification fast path: load the active strategy before adding the RSI filter",
+      expectedArtifact: "strategy payload",
+      startedAt: new Date().toISOString()
+    };
+    trace.push(getEntry);
+
+    const existing = await this.matcherTransport("get_strategy", {
+      ownerAddress: input.ownerAddress as HexString,
+      strategyId: input.strategyId
+    });
+    getEntry.output = existing as Record<string, unknown>;
+    getEntry.completedAt = new Date().toISOString();
+    Object.assign(getEntry, summarizeToolProgress(getEntry));
+
+    if (!existing.strategy || typeof existing.strategy !== "object") {
+      return null;
+    }
+
+    const baseStrategy = existing.strategy as StrategyDefinition;
+    const inferredEngineKind = baseStrategy.engine?.sourceType === "pine_like_v0" && typeof baseStrategy.engine.script === "string"
+      ? inferEngineKindFromScript(baseStrategy.engine.script)
+      : undefined;
+    const strategyKind = inferredEngineKind ?? classifyBasicStrategy(baseStrategy);
+    if (strategyKind !== "ema" && strategyKind !== "rsi-ema-hybrid") {
+      return null;
+    }
+
+    warnings.push(`Used modification fast path to update ${baseStrategy.name} in place.`);
+    metrics.enforcementTriggered = true;
+    metrics.finalizationGuardrailsApplied.push("modify_existing_strategy_rsi_filter");
+
+    let marketAnalysis: StrategyMarketAnalysis | undefined;
+    const marketAnalysisEntry: AgentToolTraceEntry = {
+      step: trace.length + 1,
+      tool: "analyze_market_context",
+      input: {
+        ownerAddress: input.ownerAddress,
+        marketId: baseStrategy.marketId,
+        ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
+        ...(resolveChartRange(input) ?? {})
+      },
+      reason: "Modification fast path: inspect the current market before tightening entries with RSI",
+      expectedArtifact: "market analysis",
+      startedAt: new Date().toISOString()
+    };
+    trace.push(marketAnalysisEntry);
+
+    try {
+      const analysisResult = await this.matcherTransport("analyze_market_context", {
+        ownerAddress: input.ownerAddress as HexString,
+        marketId: baseStrategy.marketId,
+        ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
+        ...(resolveChartRange(input) ?? {})
+      });
+      marketAnalysisEntry.output = analysisResult as Record<string, unknown>;
+      marketAnalysisEntry.completedAt = new Date().toISOString();
+      Object.assign(marketAnalysisEntry, summarizeToolProgress(marketAnalysisEntry));
+      marketAnalysis = isStrategyMarketAnalysis(analysisResult.analysis)
+        ? analysisResult.analysis
+        : undefined;
+    } catch (error) {
+      marketAnalysisEntry.error = { message: error instanceof Error ? error.message : String(error) };
+      marketAnalysisEntry.completedAt = new Date().toISOString();
+      marketAnalysisEntry.failureClass = "tool_error";
+      marketAnalysisEntry.progressObserved = false;
+      marketAnalysisEntry.resultSummary = marketAnalysisEntry.error.message;
+      warnings.push(`Market analysis failed during modification fast path: ${marketAnalysisEntry.error.message}`);
+    }
+
+    const emaParams = extractEmaPeriodsFromStrategy(baseStrategy, marketAnalysis);
+    const timeframe = input.preferredTimeframe ?? baseStrategy.timeframe;
+    const requestedStopLossPct = extractRequestedStopLossPct(input.goal);
+    const enabledSides = applyRequestedSidePreference(baseStrategy, input.goal).enabledSides;
+    const riskRules = {
+      ...baseStrategy.riskRules,
+      ...(requestedStopLossPct !== undefined ? { stopLossPct: requestedStopLossPct } : {}),
+      ...(goalRequestsNoStopLoss(input.goal) ? { stopLossPct: undefined } : {})
+    };
+    const updatedName = /rsi/i.test(baseStrategy.name) ? baseStrategy.name : `${baseStrategy.name} + RSI Filter`;
+
+    const engineCandidate = buildEngineBackedCreation({
+      goal: input.goal,
+      name: updatedName,
+      preferredTimeframe: timeframe,
+      marketAnalysis,
+      strategyPatch: {
+        timeframe,
+        enabledSides,
+        riskRules
+      },
+      engineHint: {
+        kind: "rsi-ema-hybrid",
+        params: {
+          fast: emaParams.fast,
+          slow: emaParams.slow,
+          rsiPeriod: extractRsiPeriod(input.goal) ?? 14,
+          longRsiMin: enabledSides.includes("long") ? 55 : undefined,
+          shortRsiMax: enabledSides.includes("short") ? 45 : undefined,
+          longExitRsi: 45,
+          shortExitRsi: 55
+        }
+      }
+    });
+
+    const compileEntry: AgentToolTraceEntry = {
+      step: trace.length + 1,
+      tool: "compile_strategy_source",
+      input: {
+        ownerAddress: input.ownerAddress,
+        marketId: baseStrategy.marketId,
+        name: engineCandidate.name,
+        timeframe: engineCandidate.timeframe,
+        enabledSides: engineCandidate.enabledSides,
+        engine: engineCandidate.engine
+      },
+      reason: "Modification fast path: compile the EMA + RSI filter logic before updating the current draft",
+      expectedArtifact: "compiled strategy engine",
+      startedAt: new Date().toISOString()
+    };
+    trace.push(compileEntry);
+
+    const compiled = await this.matcherTransport("compile_strategy_source", {
+      ownerAddress: input.ownerAddress as HexString,
+      marketId: baseStrategy.marketId,
+      name: engineCandidate.name,
+      timeframe: engineCandidate.timeframe,
+      enabledSides: engineCandidate.enabledSides,
+      engine: engineCandidate.engine
+    });
+    compileEntry.output = compiled as Record<string, unknown>;
+    compileEntry.completedAt = new Date().toISOString();
+    Object.assign(compileEntry, summarizeToolProgress(compileEntry));
+
+    const compiledEngine =
+      compiled.engine && typeof compiled.engine === "object"
+        ? (compiled.engine as StrategyEngineDefinition)
+        : engineCandidate.engine;
+
+    const nextStrategy: StrategyDefinition = {
+      ...baseStrategy,
+      name: engineCandidate.name,
+      timeframe: engineCandidate.timeframe,
+      enabledSides: engineCandidate.enabledSides,
+      riskRules,
+      engine: compiledEngine
+    };
+
+    const updateEntry: AgentToolTraceEntry = {
+      step: trace.length + 1,
+      tool: "update_strategy_draft",
+      input: {
+        ownerAddress: input.ownerAddress,
+        strategy: nextStrategy
+      },
+      reason: "Modification fast path: update the existing draft instead of creating a new one",
+      expectedArtifact: "updated strategy draft",
+      startedAt: new Date().toISOString()
+    };
+    trace.push(updateEntry);
+
+    const updated = await this.matcherTransport("update_strategy_draft", {
+      ownerAddress: input.ownerAddress as HexString,
+      strategy: nextStrategy
+    });
+    updateEntry.output = updated as Record<string, unknown>;
+    updateEntry.completedAt = new Date().toISOString();
+    Object.assign(updateEntry, summarizeToolProgress(updateEntry));
+
+    const activeStrategy = (updated.strategy && typeof updated.strategy === "object"
+      ? updated.strategy
+      : nextStrategy) as StrategyDefinition;
+
+    const validateEntry: AgentToolTraceEntry = {
+      step: trace.length + 1,
+      tool: "validate_strategy_draft",
+      input: {
+        ownerAddress: input.ownerAddress,
+        strategyId: activeStrategy.id
+      },
+      reason: "Modification fast path: validate the updated draft before running it",
+      expectedArtifact: "validation result",
+      startedAt: new Date().toISOString()
+    };
+    trace.push(validateEntry);
+
+    const validation = await this.matcherTransport("validate_strategy_draft", {
+      ownerAddress: input.ownerAddress as HexString,
+      strategyId: activeStrategy.id
+    });
+    validateEntry.output = validation as Record<string, unknown>;
+    validateEntry.completedAt = new Date().toISOString();
+    Object.assign(validateEntry, summarizeToolProgress(validateEntry));
+
+    if ((validation.validation as { ok?: boolean } | undefined)?.ok !== true) {
+      return {
+        finalMessage: `Updated ${activeStrategy.name} in place, but validation still needs fixes before backtesting.`,
+        artifacts: collectArtifactsFromTrace(trace)
+      };
+    }
+
+    const backtestEntry: AgentToolTraceEntry = {
+      step: trace.length + 1,
+      tool: "run_strategy_backtest",
+      input: {
+        ownerAddress: input.ownerAddress,
+        strategyId: activeStrategy.id,
+        ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
+        ...(resolveChartRange(input) ?? {})
+      },
+      reason: "Modification fast path: verify the updated EMA + RSI filter on the current chart context",
+      expectedArtifact: "backtest summary",
+      startedAt: new Date().toISOString()
+    };
+    trace.push(backtestEntry);
+
+    const backtest = await this.matcherTransport("run_strategy_backtest", {
+      ownerAddress: input.ownerAddress as HexString,
+      strategyId: activeStrategy.id,
+      ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
+      ...(resolveChartRange(input) ?? {})
+    });
+    backtestEntry.output = backtest as Record<string, unknown>;
+    backtestEntry.completedAt = new Date().toISOString();
+    Object.assign(backtestEntry, summarizeToolProgress(backtestEntry));
+
+    const summary = backtest.summary as {
+      netPnl?: number;
+      winRate?: number;
+      tradeCount?: number;
+      maxDrawdownPct?: number;
+      profitFactor?: number;
+    } | undefined;
+
+    return {
+      finalMessage: summary
+        ? `Updated ${activeStrategy.name} in place with an RSI filter and ran the backtest. Net PnL: ${summary.netPnl ?? "n/a"}, win rate: ${summary.winRate ?? "n/a"}, trades: ${summary.tradeCount ?? "n/a"}, max drawdown: ${summary.maxDrawdownPct ?? "n/a"}, profit factor: ${summary.profitFactor ?? "n/a"}.`
+        : `Updated ${activeStrategy.name} in place with an RSI filter.`,
+      artifacts: collectArtifactsFromTrace(trace)
     };
   }
 
@@ -2628,14 +3007,14 @@ Return JSON like:
     const engineSource = typeof baseStrategy.engine === "object" && baseStrategy.engine
       ? (baseStrategy.engine as StrategyEngineDefinition)
       : undefined;
-    const engineOptimizable = engineSource?.sourceType === "pine_like_v0";
-    const inferredEngineKind = engineOptimizable && typeof engineSource.script === "string"
+    const engineOptimizable = engineSource?.sourceType === "pine_like_v0" || engineSource?.sourceType === "ast_v2";
+    const inferredEngineKind = engineSource?.sourceType === "pine_like_v0" && typeof engineSource.script === "string"
       ? inferEngineKindFromScript(engineSource.script)
       : undefined;
     const strategyKind = inferredEngineKind && inferredEngineKind !== "rsi-ema-hybrid"
       ? inferredEngineKind
       : classifyBasicStrategy(baseStrategy);
-    if (!strategyKind) {
+    if (!strategyKind && !(engineOptimizable && engineSource?.sourceType === "ast_v2")) {
       return null;
     }
 
@@ -2716,7 +3095,9 @@ Return JSON like:
     try {
       const optimizationPrompt = buildOptimizationPlanPrompt({
         goal: input.goal,
-        strategyKind: inferredEngineKind === "rsi-ema-hybrid" ? "ema" : strategyKind,
+        strategyKind: inferredEngineKind === "rsi-ema-hybrid"
+          ? "ema"
+          : (strategyKind ?? "ema"),
         strategy: baseStrategy as unknown as Record<string, unknown>,
         currentSummary,
         preferredTimeframe: input.preferredTimeframe,
@@ -2734,8 +3115,9 @@ Return JSON like:
       const emaSuggestion = marketAnalysis?.emaSuggestion;
       const sideBias = extractRequestedSideBias(input.goal) ?? "both";
       const riskRules = resolveRiskRulesForGoal(preferredTimeframe, input.goal);
+      const fallbackKind = strategyKind ?? "ema";
       candidateConfigs = (() => {
-        switch (strategyKind) {
+        switch (fallbackKind) {
           case "ema":
             return [
               {
@@ -2811,6 +3193,8 @@ Return JSON like:
                 }
               }
             ];
+          default:
+            return [];
         }
       })();
     }
@@ -2970,6 +3354,143 @@ Return JSON like:
         continue;
       }
 
+      if (engineOptimizable && engineSource?.sourceType === "ast_v2") {
+        const timeframe =
+          typeof params.timeframe === "string"
+            ? params.timeframe as StrategyDefinition["timeframe"]
+            : baseStrategy.timeframe;
+        const enabledSides = baseStrategy.enabledSides;
+        const riskRules = mergeRiskRules(baseStrategy.riskRules, params);
+        const engineCandidate = applyEngineOverrides(engineSource, {
+          timeframe,
+          enabledSides
+        });
+
+        const compileEntry: AgentToolTraceEntry = {
+          step: trace.length + 1,
+          tool: "compile_strategy_source",
+          input: {
+            ownerAddress: input.ownerAddress,
+            marketId: baseStrategy.marketId,
+            name: baseStrategy.name,
+            timeframe,
+            enabledSides,
+            engine: engineCandidate
+          },
+          reason: "Optimization fast path: normalize AST-backed engine before update",
+          expectedArtifact: "compiled strategy engine",
+          startedAt: new Date().toISOString()
+        };
+        trace.push(compileEntry);
+
+        const compiled = await this.matcherTransport("compile_strategy_source", {
+          ownerAddress: input.ownerAddress as HexString,
+          marketId: baseStrategy.marketId as HexString,
+          name: baseStrategy.name,
+          timeframe,
+          enabledSides,
+          engine: engineCandidate
+        });
+        compileEntry.output = compiled as Record<string, unknown>;
+        compileEntry.completedAt = new Date().toISOString();
+        Object.assign(compileEntry, summarizeToolProgress(compileEntry));
+
+        const compiledEngine =
+          compiled.engine && typeof compiled.engine === "object"
+            ? (compiled.engine as StrategyEngineDefinition)
+            : engineCandidate;
+
+        const nextCandidate: StrategyDefinition = {
+          ...baseStrategy,
+          timeframe,
+          enabledSides,
+          riskRules,
+          engine: compiledEngine
+        };
+
+        const updateEntry: AgentToolTraceEntry = {
+          step: trace.length + 1,
+          tool: "update_strategy_draft",
+          input: {
+            ownerAddress: input.ownerAddress,
+            strategy: nextCandidate
+          },
+          reason: "Optimization fast path: apply AST engine candidate",
+          expectedArtifact: "updated strategy draft",
+          startedAt: new Date().toISOString()
+        };
+        trace.push(updateEntry);
+
+        const updated = await this.matcherTransport("update_strategy_draft", {
+          ownerAddress: input.ownerAddress as HexString,
+          strategy: nextCandidate
+        });
+        updateEntry.output = updated as Record<string, unknown>;
+        updateEntry.completedAt = new Date().toISOString();
+        Object.assign(updateEntry, summarizeToolProgress(updateEntry));
+
+        const validateEntry: AgentToolTraceEntry = {
+          step: trace.length + 1,
+          tool: "validate_strategy_draft",
+          input: {
+            ownerAddress: input.ownerAddress,
+            strategyId: baseStrategy.id
+          },
+          reason: "Optimization fast path: validate AST engine candidate before backtest",
+          expectedArtifact: "validation result",
+          startedAt: new Date().toISOString()
+        };
+        trace.push(validateEntry);
+
+        const validation = await this.matcherTransport("validate_strategy_draft", {
+          ownerAddress: input.ownerAddress as HexString,
+          strategyId: baseStrategy.id
+        });
+        validateEntry.output = validation as Record<string, unknown>;
+        validateEntry.completedAt = new Date().toISOString();
+        Object.assign(validateEntry, summarizeToolProgress(validateEntry));
+
+        if ((validation.validation as { ok?: boolean } | undefined)?.ok !== true) {
+          continue;
+        }
+
+        const backtestEntry: AgentToolTraceEntry = {
+          step: trace.length + 1,
+          tool: "run_strategy_backtest",
+          input: {
+            ownerAddress: input.ownerAddress,
+            strategyId: baseStrategy.id,
+            ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
+            ...(resolveChartRange(input) ?? {})
+          },
+          reason: "Optimization fast path: score AST engine candidate by backtest result",
+          expectedArtifact: "backtest summary",
+          startedAt: new Date().toISOString()
+        };
+        trace.push(backtestEntry);
+
+        const backtest = await this.matcherTransport("run_strategy_backtest", {
+          ownerAddress: input.ownerAddress as HexString,
+          strategyId: baseStrategy.id,
+          ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
+          ...(resolveChartRange(input) ?? {})
+        });
+        backtestEntry.output = backtest as Record<string, unknown>;
+        backtestEntry.completedAt = new Date().toISOString();
+        Object.assign(backtestEntry, summarizeToolProgress(backtestEntry));
+
+        const pnl = typeof backtest.summary?.netPnl === "number" ? backtest.summary.netPnl : Number.NEGATIVE_INFINITY;
+        if (pnl > bestPnl) {
+          bestPnl = pnl;
+          bestStrategy = (updated.strategy && typeof updated.strategy === "object"
+            ? updated.strategy
+            : nextCandidate) as StrategyDefinition;
+          bestSummary = backtest.summary as Record<string, unknown>;
+        }
+
+        continue;
+      }
+
       const built = (() => {
         switch (strategyKind) {
         case "ema":
@@ -3008,6 +3529,8 @@ Return JSON like:
             stopLossPct: typeof params.stopLossPct === "number" ? params.stopLossPct : undefined,
             takeProfitPct: typeof params.takeProfitPct === "number" ? params.takeProfitPct : undefined
           });
+        default:
+          return baseStrategy;
         }
       })();
 

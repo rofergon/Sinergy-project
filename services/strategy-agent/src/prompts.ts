@@ -92,6 +92,7 @@ Operators: ">", ">=", "<", "<=", "crosses_above", "crosses_below"
 - For EMA crossover: use indicator_output with different periods. Example: left=ema period=9, right=ema period=21.
 - Always use the provided ownerAddress exactly as given.
 - When the session context includes an existing strategyId, REUSE it for validate/backtest.
+- When the user asks to add, remove, or tweak indicators/filters on an existing strategy, call \`get_strategy\` first and update that same draft with \`update_strategy_draft\`. Do not create a new draft unless the user explicitly asks for a new strategy.
 - If validation fails, call update_strategy_draft with the corrected strategy, then validate_strategy_draft again. Keep iterating until it passes.
 - Each enabled side (long/short) MUST have at least one entry rule. Empty entry rules are the most common validation failure.
 - For engine-backed strategies, the effective entry/exit logic may live in \`strategy.engine\`; keep top-level fields aligned, but do not invent legacy rules unless you are intentionally converting or repairing.
@@ -205,6 +206,7 @@ Constraints:
 - Never add root-level marketId or strategyId to tools that do not accept them.
 - If creating a strategy from scratch, capabilities should be consulted first.
 - If marketId is available and you are choosing or modifying a strategy, call analyze_market_context before selecting timeframe, EMA parameters, or template family.
+- If strategyId is already available and the goal is a modification request, prefer \`get_strategy -> update_strategy_draft -> validate_strategy_draft\` over \`create_strategy_draft\`.
 - Prefer compile_strategy_source for new custom strategies; use clone_strategy_template mainly when a built-in template already matches closely.
 - Strongly prefer the user-selected preferredTimeframe when provided, unless there is a clear reason to choose differently.
 - If validation errors exist, the system will attempt automatic rule-based repair. Prefer calling validate_strategy_draft again after seeing repair results.

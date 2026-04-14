@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { StrategyTimeframe } from "@sinergy/shared";
+import { fetchBacktestBundle } from "../lib/api";
 import type { ChartViewport, StrategyBacktestBundle, MarketSnapshot } from "../types";
 import { TradingViewChart } from "./TradingViewChart";
 import { StrategyPanel } from "./StrategyPanel";
@@ -36,11 +37,22 @@ export function StrategyStudio({
     [markets, selectedMarketId]
   );
 
-  function reviewStrategy(strategyId: string, bundle: StrategyBacktestBundle | null) {
+  async function reviewStrategy(
+    strategyId: string,
+    bundle: StrategyBacktestBundle | null,
+    runId?: string
+  ) {
     setFocusStrategyId(strategyId);
     setRefreshToken((current) => current + 1);
     if (bundle) {
       onBacktestResult(bundle);
+    } else if (address && runId) {
+      try {
+        const restoredBundle = await fetchBacktestBundle(address, runId);
+        onBacktestResult(restoredBundle);
+      } catch {
+        onBacktestResult(null);
+      }
     }
     setManualBuilderOpen(true);
   }

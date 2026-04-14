@@ -13,6 +13,7 @@ import {
 } from "./indicatorEngine.js";
 import {
   buildRuntimeIndicatorSeriesMap,
+  collectIndicatorReferencesFromRuntime,
   evaluateRuntimeCondition,
   runtimeEntryConditionForSide,
   runtimeExitConditionForSide
@@ -87,7 +88,12 @@ export function runStrategyBacktest(
     ? compileEngineToRuntime(strategy, strategy.engine)
     : compileStrategyToRuntime(strategy);
   const seriesMap = buildRuntimeIndicatorSeriesMap(candles, runtime);
-  const overlayIndicators = buildIndicatorOverlays(candles, strategy, seriesMap);
+  const overlayIndicators = buildIndicatorOverlays(
+    candles,
+    strategy,
+    seriesMap,
+    collectIndicatorReferencesFromRuntime(runtime)
+  );
   const markers: StrategyOverlayMarker[] = [];
   const trades: StrategyBacktestTrade[] = [];
 
