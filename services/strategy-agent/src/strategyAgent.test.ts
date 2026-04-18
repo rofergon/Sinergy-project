@@ -346,6 +346,183 @@ test("creation fast path auto-runs backtest for new strategies even when prompt 
   assert.notEqual(result.toolTrace.findIndex((entry) => entry.tool === "run_strategy_backtest"), -1);
 });
 
+test("creation fast path retries with optimization when the initial backtest is negative", async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), "strategy-agent-test-"));
+  const service = new StrategyAgentService({
+    matcherUrl: "http://localhost:3999",
+    sessionDbFile: join(tempDir, "sessions.sqlite"),
+    modelBaseUrl: "http://localhost:3998",
+    modelName: "test-model",
+    modelApiKey: "test-key",
+    modelTimeoutMs: 2_000,
+    maxSteps: 6,
+    toolcallRetries: 0,
+    forceFallbackJson: true
+  });
+
+  const strategyId = "56565656-5656-4656-8656-565656565656";
+  const initialRunId = "78787878-7878-4787-8787-787878787878";
+  const improvedRunId = "89898989-8989-4898-8898-898989898989";
+  let backtestCalls = 0;
+
+  (service as any).invokePlanningModel = async (prompt: string) => {
+    if (prompt.includes('"mode": "clone_template" | "create_engine"')) {
+      return {
+        content: JSON.stringify({
+          analysis: "Simple EMA strategy.",
+          mode: "create_engine",
+          name: "Retryable EMA",
+          engineHint: {
+            kind: "ema",
+            params: { fast: 9, slow: 21 }
+          },
+          strategyPatch: {
+            timeframe: "15m",
+            enabledSides: ["long"]
+          }
+        })
+      };
+    }
+
+    return {
+      content: JSON.stringify({
+        analysis: "Try a slightly faster EMA pair.",
+        candidates: [
+          {
+            label: "ema-retry",
+            params: { fast: 7, slow: 18, timeframe: "15m", longOnly: true, stopLossPct: 2, takeProfitPct: 4 }
+          }
+        ]
+      })
+    };
+  };
+
+  (service as any).matcherTransport = async (tool: string, input: Record<string, unknown>) => {
+    switch (tool) {
+      case "list_strategy_capabilities":
+        return { capabilities: {} };
+      case "analyze_market_context":
+        return {
+          analysis: {
+            recommendedTimeframe: "15m",
+            recommendedStrategyKinds: ["ema"],
+            emaSuggestion: { fastPeriod: 7, slowPeriod: 18 },
+            overallRegime: "trending"
+          }
+        };
+      case "list_strategy_templates":
+        return { templates: [] };
+      case "compile_strategy_source":
+        return {
+          engine: input.engine,
+          preview: {
+            sourceType: "pine_like_v0",
+            bindingCount: 2,
+            signalsPresent: ["longEntry", "longExit"],
+            enabledSides: input.enabledSides ?? ["long"],
+            timeframe: input.timeframe ?? "15m",
+            indicatorRefs: [],
+            warnings: []
+          }
+        };
+      case "create_strategy_draft":
+        return {
+          strategy: {
+            id: strategyId,
+            ownerAddress: input.ownerAddress,
+            marketId: input.marketId,
+            name: input.name,
+            timeframe: "15m",
+            enabledSides: ["long"],
+            entryRules: { long: [], short: [] },
+            exitRules: { long: [], short: [] },
+            sizing: { mode: "percent_of_equity", value: 25 },
+            riskRules: { stopLossPct: 2, takeProfitPct: 4, trailingStopPct: 1, maxBarsInTrade: 40 },
+            costModel: { feeBps: 10, slippageBps: 5, startingEquity: 10_000 },
+            status: "draft",
+            schemaVersion: "1.0.0",
+            createdAt: "2026-04-18T00:00:00.000Z",
+            updatedAt: "2026-04-18T00:00:00.000Z",
+            engine: input.engine
+          }
+        };
+      case "get_strategy":
+        return {
+          strategy: {
+            id: strategyId,
+            ownerAddress: input.ownerAddress,
+            marketId: "0x0000000000000000000000000000000000000000000000000000000000000111",
+            name: "Retryable EMA",
+            timeframe: "15m",
+            enabledSides: ["long"],
+            entryRules: { long: [], short: [] },
+            exitRules: { long: [], short: [] },
+            sizing: { mode: "percent_of_equity", value: 25 },
+            riskRules: { stopLossPct: 2, takeProfitPct: 4, trailingStopPct: 1, maxBarsInTrade: 40 },
+            costModel: { feeBps: 10, slippageBps: 5, startingEquity: 10_000 },
+            status: "draft",
+            schemaVersion: "1.0.0",
+            createdAt: "2026-04-18T00:00:00.000Z",
+            updatedAt: "2026-04-18T00:00:00.000Z",
+            engine: {
+              version: "2",
+              sourceType: "pine_like_v0",
+              script: "fast = ta.ema(close, 9)\nslow = ta.ema(close, 21)\nlongEntry = ta.crossover(fast, slow)\nlongExit = ta.crossunder(fast, slow)"
+            }
+          }
+        };
+      case "update_strategy_draft":
+        return { strategy: input.strategy };
+      case "validate_strategy_draft":
+        return { validation: { ok: true, issues: [] } };
+      case "run_strategy_backtest":
+        backtestCalls += 1;
+        if (backtestCalls < 3) {
+          return {
+            summary: {
+              runId: initialRunId,
+              netPnl: -83.7,
+              winRate: 26.3,
+              tradeCount: 19,
+              maxDrawdownPct: 1.7,
+              profitFactor: 0.71
+            },
+            trades: [],
+            overlay: { indicators: [], markers: [] }
+          };
+        }
+        return {
+          summary: {
+            runId: improvedRunId,
+            netPnl: 12.4,
+            winRate: 48,
+            tradeCount: 11,
+            maxDrawdownPct: 2.4,
+            profitFactor: 1.18
+          },
+          trades: [],
+          overlay: { indicators: [], markers: [] }
+        };
+      default:
+        throw new Error(`Unexpected tool: ${tool}`);
+    }
+  };
+
+  const result = await service.run({
+    ownerAddress: "0x00000000000000000000000000000000000000c3",
+    marketId: "0x0000000000000000000000000000000000000000000000000000000000000111",
+    goal: "Crea una estrategia EMA crossover y haz backtest",
+    preferredTimeframe: "15m",
+    mode: "run"
+  });
+
+  assert.match(result.warnings.join("\n"), /Initial creation backtest was not acceptable/);
+  assert.match(result.warnings.join("\n"), /automatic optimization retry loop/);
+  assert.equal(backtestCalls >= 3, true);
+  assert.match(result.finalMessage, /Optimized .* positive 15m result/);
+  assert.equal(result.artifacts.runId, improvedRunId);
+});
+
 test("optimization fast path recompiles engine-backed strategies", async () => {
   const tempDir = mkdtempSync(join(tmpdir(), "strategy-agent-test-"));
   const service = new StrategyAgentService({
@@ -706,4 +883,155 @@ test("modification fast path updates the active EMA strategy in place when addin
   assert.equal((lastUpdated?.id as string | undefined) ?? "", strategyId);
   assert.deepEqual(lastUpdated?.enabledSides, ["long"]);
   assert.match(String((lastUpdated?.engine as { script?: string } | undefined)?.script ?? ""), /ta\.rsi\(close,\s*14\)/);
+});
+
+test("enforcement runs bounded LLM correction loop when rule-based repair cannot fix validation", async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), "strategy-agent-test-"));
+  const strategyId = "77777777-7777-4777-8777-777777777777";
+  const ownerAddress = "0x00000000000000000000000000000000000000c3";
+  const marketId = "0x0000000000000000000000000000000000000000000000000000000000000111";
+  const invalidStrategy: Record<string, unknown> = {
+    id: strategyId,
+    ownerAddress,
+    marketId,
+    name: "Needs LLM repair",
+    timeframe: "15m",
+    enabledSides: ["long"],
+    entryRules: { long: [], short: [] },
+    exitRules: { long: [], short: [] },
+    sizing: { mode: "percent_of_equity", value: 25 },
+    riskRules: { stopLossPct: 2, takeProfitPct: 4, trailingStopPct: 1, maxBarsInTrade: 40 },
+    costModel: { feeBps: 10, slippageBps: 5, startingEquity: 10_000 },
+    status: "draft",
+    schemaVersion: "1.0.0",
+    createdAt: "2026-04-18T00:00:00.000Z",
+    updatedAt: "2026-04-18T00:00:00.000Z"
+  };
+
+  const correctedStrategy: Record<string, unknown> = {
+    ...invalidStrategy,
+    name: "LLM fixed strategy",
+    entryRules: {
+      long: [
+        {
+          id: "long-entry-1",
+          rules: [
+            {
+              id: "long-entry-rule-1",
+              left: { type: "indicator_output", indicator: "ema", output: "value", params: { period: 9 } },
+              operator: "crosses_above",
+              right: { type: "indicator_output", indicator: "ema", output: "value", params: { period: 21 } }
+            }
+          ]
+        }
+      ],
+      short: []
+    }
+  };
+
+  let liveStrategy: Record<string, unknown> = invalidStrategy;
+  const fakeModel = {
+    invoke: async () => ({
+      content: JSON.stringify({
+        correctedStrategy
+      })
+    })
+  } as any;
+
+  const service = new StrategyAgentService({
+    matcherUrl: "http://localhost:3999",
+    sessionDbFile: join(tempDir, "sessions.sqlite"),
+    modelBaseUrl: "http://localhost:3998",
+    modelName: "test-model",
+    modelApiKey: "test-key",
+    modelTimeoutMs: 2_000,
+    maxSteps: 4,
+    toolcallRetries: 0,
+    forceFallbackJson: false
+  }, {
+    model: fakeModel,
+    planningModel: fakeModel
+  });
+
+  const invokeUntyped = async (tool: string, input: Record<string, unknown>) => {
+    switch (tool) {
+      case "list_strategy_capabilities":
+        return { capabilities: {} };
+      case "update_strategy_draft":
+        liveStrategy = input.strategy as Record<string, unknown>;
+        return { strategy: liveStrategy };
+      case "validate_strategy_draft":
+        return {
+          validation: { ok: true, issues: [] },
+          strategy: liveStrategy
+        };
+      default:
+        throw new Error(`Unexpected tool: ${tool}`);
+    }
+  };
+
+  (service as any).toolRuntime = {
+    invokeUntyped,
+    invoke: invokeUntyped,
+    getCatalog: () => [],
+    createTrackedLangChainTools: () => []
+  };
+  (service as any).matcherTransport = invokeUntyped;
+  (service as any).runNativeToolAgent = async (_input: unknown, trace: any[]) => {
+    trace.push({
+      step: 1,
+      tool: "update_strategy_draft",
+      input: { ownerAddress, strategy: invalidStrategy },
+      output: { strategy: invalidStrategy },
+      reason: "Create initial invalid strategy draft",
+      expectedArtifact: "strategy draft",
+      startedAt: "2026-04-18T00:00:00.000Z",
+      completedAt: "2026-04-18T00:00:01.000Z",
+      progressObserved: true,
+      resultSummary: "strategy_materialized"
+    });
+    trace.push({
+      step: 2,
+      tool: "validate_strategy_draft",
+      input: { ownerAddress, strategyId },
+      output: {
+        validation: {
+          ok: false,
+          issues: [
+            {
+              path: "entryRules.long",
+              code: "unsupported_logic_shape",
+              message: "The current rule layout is invalid and requires a corrected full strategy payload."
+            }
+          ]
+        }
+      },
+      reason: "Initial validation fails",
+      expectedArtifact: "validation result",
+      startedAt: "2026-04-18T00:00:02.000Z",
+      completedAt: "2026-04-18T00:00:03.000Z",
+      progressObserved: true,
+      resultSummary: "validation_issues:1"
+    });
+
+    return {
+      finalMessage: "Finished.",
+      artifacts: { strategyId }
+    };
+  };
+
+  const result = await service.run({
+    ownerAddress,
+    marketId,
+    goal: "corrige la estrategia actual",
+    strategyId,
+    preferredTimeframe: "15m",
+    mode: "run"
+  });
+
+  assert.match(result.warnings.join("\n"), /Running bounded LLM correction loop/);
+  assert.match(result.warnings.join("\n"), /LLM correction succeeded on attempt 1\/2/);
+  assert.equal(result.toolTrace.some((entry) => entry.reason === "Apply LLM-proposed strategy corrections"), true);
+  assert.equal((result.artifacts.validation as { ok?: boolean } | undefined)?.ok, true);
+  assert.equal(liveStrategy.name, "LLM fixed strategy");
 });
