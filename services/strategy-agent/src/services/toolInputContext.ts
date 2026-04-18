@@ -4,6 +4,7 @@ type MergeContextOptions = {
   ownerAddress: string;
   marketId?: string;
   strategyId?: string;
+  runId?: string;
 };
 
 const MARKET_ROOT_TOOLS = new Set<StrategyToolName>([
@@ -18,6 +19,12 @@ const STRATEGY_ID_ROOT_TOOLS = new Set<StrategyToolName>([
   "run_strategy_backtest",
   "save_strategy",
   "get_strategy"
+]);
+
+const RUN_ID_ROOT_TOOLS = new Set<StrategyToolName>([
+  "get_backtest_summary",
+  "get_backtest_trades",
+  "get_backtest_chart_overlay"
 ]);
 
 export function mergeToolContext(
@@ -49,6 +56,10 @@ export function mergeToolContext(
     baseInput.strategy === undefined
   ) {
     mergedInput.strategyId = options.strategyId;
+  }
+
+  if (options.runId && baseInput.runId === undefined && RUN_ID_ROOT_TOOLS.has(tool)) {
+    mergedInput.runId = options.runId;
   }
 
   return mergedInput;
