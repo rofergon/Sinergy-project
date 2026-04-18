@@ -1,7 +1,6 @@
 import { createAgent, tool } from "langchain";
-import { ChatOpenAI } from "@langchain/openai";
+import type { ChatOpenAI } from "@langchain/openai";
 import {
-  createHttpStrategyToolTransport,
   strategyToolDefinitions,
   type HexString,
   type StrategyToolName,
@@ -19,11 +18,12 @@ import type {
   AgentStreamEvent,
   AgentToolTraceEntry
 } from "../types.js";
-import { createTrackedStrategyLangChainTools } from "./matcherTools.js";
+import { createStrategyAgentModels, streamPromptViaChatCompletions, type PromptStreamResult } from "./modelRuntime.js";
 import { probeModel } from "./modelProbe.js";
 import { runFallbackJsonLoop } from "./fallbackRuntime.js";
 import { createEmptyMetrics, finalizeMetrics, finalMessageMentionsRealArtifacts, summarizeToolProgress } from "./runtimePolicy.js";
 import { StrategyAgentSessionStore } from "./sessionStore.js";
+import { createStrategyToolRuntime, type StrategyToolRuntime } from "./strategyToolRuntime.js";
 import { attemptValidationRepair } from "./validationRepairLoop.js";
 
 type BasicFastPathConfig = {
@@ -1010,71 +1010,6 @@ function extractMessageText(output: unknown) {
   return "";
 }
 
-type PromptStreamResult = {
-  content: string;
-  reasoning: string;
-};
-
-function consumeTaggedContentChunk(
-  state: { mode: "content" | "thinking"; buffer: string },
-  chunk: string,
-  callbacks?: AgentRunStreamCallbacks
-) {
-  state.buffer += chunk;
-  let contentDelta = "";
-  let thinkingDelta = "";
-
-  while (state.buffer.length > 0) {
-    if (state.mode === "content") {
-      const thinkIndex = state.buffer.indexOf("<think>");
-      if (thinkIndex >= 0) {
-        const before = state.buffer.slice(0, thinkIndex);
-        if (before) {
-          callbacks?.emit({ type: "content_delta", text: before });
-          contentDelta += before;
-        }
-        state.buffer = state.buffer.slice(thinkIndex + "<think>".length);
-        state.mode = "thinking";
-        continue;
-      }
-
-      if (state.buffer.length > 16) {
-        const safe = state.buffer.slice(0, -16);
-        if (safe) {
-          callbacks?.emit({ type: "content_delta", text: safe });
-          contentDelta += safe;
-        }
-        state.buffer = state.buffer.slice(-16);
-      }
-      break;
-    }
-
-    const endThinkIndex = state.buffer.indexOf("</think>");
-    if (endThinkIndex >= 0) {
-      const thought = state.buffer.slice(0, endThinkIndex);
-      if (thought) {
-        callbacks?.emit({ type: "thinking_delta", text: thought });
-        thinkingDelta += thought;
-      }
-      state.buffer = state.buffer.slice(endThinkIndex + "</think>".length);
-      state.mode = "content";
-      continue;
-    }
-
-    if (state.buffer.length > 16) {
-      const safe = state.buffer.slice(0, -16);
-      if (safe) {
-        callbacks?.emit({ type: "thinking_delta", text: safe });
-        thinkingDelta += safe;
-      }
-      state.buffer = state.buffer.slice(-16);
-    }
-    break;
-  }
-
-  return { contentDelta, thinkingDelta };
-}
-
 function parseOptimizationCandidates(text: string): OptimizationCandidate[] {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
@@ -1583,7 +1518,8 @@ async function enforceCompletion(options: CompletionEnforcementOptions): Promise
 export class StrategyAgentService {
   private readonly model: ChatOpenAI;
   private readonly planningModel: ChatOpenAI;
-  private readonly matcherTransport: ReturnType<typeof createHttpStrategyToolTransport>;
+  private readonly toolRuntime: StrategyToolRuntime;
+  private readonly matcherTransport: StrategyToolRuntime["invoke"];
   private readonly sessions: StrategyAgentSessionStore;
 
   constructor(private readonly options: {
@@ -1597,33 +1533,30 @@ export class StrategyAgentService {
     maxSteps: number;
     toolcallRetries: number;
     forceFallbackJson: boolean;
-  }) {
-    this.model = new ChatOpenAI({
-      model: options.modelName,
-      apiKey: options.modelApiKey,
-      configuration: {
-        baseURL: options.modelBaseUrl
-      },
-      timeout: options.modelTimeoutMs,
-      temperature: 0,
-      maxRetries: 0,
-      ...(options.modelReasoningEffort ? { reasoning: { effort: options.modelReasoningEffort } } : {})
+  }, dependencies: {
+    model?: ChatOpenAI;
+    planningModel?: ChatOpenAI;
+    toolRuntime?: StrategyToolRuntime;
+    sessions?: StrategyAgentSessionStore;
+  } = {}) {
+    const models =
+      dependencies.model && dependencies.planningModel
+        ? null
+        : createStrategyAgentModels({
+            modelBaseUrl: options.modelBaseUrl,
+            modelName: options.modelName,
+            modelApiKey: options.modelApiKey,
+            modelReasoningEffort: options.modelReasoningEffort,
+            modelTimeoutMs: options.modelTimeoutMs
+          });
+
+    this.model = dependencies.model ?? models!.model;
+    this.planningModel = dependencies.planningModel ?? models!.planningModel;
+    this.toolRuntime = dependencies.toolRuntime ?? createStrategyToolRuntime({
+      matcherUrl: options.matcherUrl
     });
-    this.planningModel = new ChatOpenAI({
-      model: options.modelName,
-      apiKey: options.modelApiKey,
-      configuration: {
-        baseURL: options.modelBaseUrl
-      },
-      timeout: Math.min(options.modelTimeoutMs, 12_000),
-      temperature: 0,
-      maxRetries: 0,
-      ...(options.modelReasoningEffort ? { reasoning: { effort: options.modelReasoningEffort } } : {})
-    });
-    this.matcherTransport = createHttpStrategyToolTransport({
-      baseUrl: options.matcherUrl
-    });
-    this.sessions = new StrategyAgentSessionStore({
+    this.matcherTransport = this.toolRuntime.invoke;
+    this.sessions = dependencies.sessions ?? new StrategyAgentSessionStore({
       dbFile: options.sessionDbFile
     });
   }
@@ -1666,125 +1599,16 @@ export class StrategyAgentService {
       maxTokens?: number;
     }
   ): Promise<PromptStreamResult> {
-    const normalizedBase = this.options.modelBaseUrl.replace(/\/+$/, "");
-    const url = `${normalizedBase}/chat/completions`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.options.modelApiKey}`
-      },
-      body: JSON.stringify({
-        model: this.options.modelName,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0,
-        max_tokens: options.maxTokens ?? 2048,
-        stream: true
-      })
+    return await streamPromptViaChatCompletions(prompt, {
+      modelBaseUrl: this.options.modelBaseUrl,
+      modelName: this.options.modelName,
+      modelApiKey: this.options.modelApiKey,
+      modelReasoningEffort: this.options.modelReasoningEffort,
+      modelTimeoutMs: this.options.modelTimeoutMs,
+      stream: options.stream,
+      statusLabel: options.statusLabel,
+      maxTokens: options.maxTokens
     });
-
-    if (!response.ok || !response.body) {
-      throw new Error(`Model streaming request failed with HTTP ${response.status}`);
-    }
-
-    options.stream.emit({
-      type: "status",
-      message: options.statusLabel ?? "Waiting for model..."
-    });
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let sseBuffer = "";
-    let finalContent = "";
-    let finalReasoning = "";
-    const tagState: { mode: "content" | "thinking"; buffer: string } = {
-      mode: "content",
-      buffer: ""
-    };
-
-    const flushTaggedBuffer = () => {
-      if (!tagState.buffer) return;
-      if (tagState.mode === "thinking") {
-        options.stream.emit({ type: "thinking_delta", text: tagState.buffer });
-        finalReasoning += tagState.buffer;
-      } else {
-        options.stream.emit({ type: "content_delta", text: tagState.buffer });
-        finalContent += tagState.buffer;
-      }
-      tagState.buffer = "";
-    };
-
-    while (true) {
-      const { done, value } = await reader.read();
-      sseBuffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-
-      let boundaryIndex = sseBuffer.indexOf("\n\n");
-      while (boundaryIndex >= 0) {
-        const rawEvent = sseBuffer.slice(0, boundaryIndex);
-        sseBuffer = sseBuffer.slice(boundaryIndex + 2);
-
-        const data = rawEvent
-          .split("\n")
-          .filter((line) => line.startsWith("data:"))
-          .map((line) => line.slice(5).trim())
-          .join("");
-
-        if (!data || data === "[DONE]") {
-          boundaryIndex = sseBuffer.indexOf("\n\n");
-          continue;
-        }
-
-        try {
-          const payload = JSON.parse(data) as {
-            choices?: Array<{
-              delta?: {
-                content?: string | null;
-                reasoning_content?: string | null;
-              };
-              message?: {
-                content?: string | null;
-                reasoning_content?: string | null;
-              };
-            }>;
-          };
-          const choice = payload.choices?.[0];
-          const delta = choice?.delta ?? choice?.message;
-          const reasoningChunk = typeof delta?.reasoning_content === "string" ? delta.reasoning_content : "";
-          const contentChunk = typeof delta?.content === "string" ? delta.content : "";
-
-          if (reasoningChunk) {
-            finalReasoning += reasoningChunk;
-            options.stream.emit({ type: "thinking_delta", text: reasoningChunk });
-          }
-
-          if (contentChunk) {
-            if (reasoningChunk) {
-              finalContent += contentChunk;
-              options.stream.emit({ type: "content_delta", text: contentChunk });
-            } else {
-              const tagged = consumeTaggedContentChunk(tagState, contentChunk, options.stream);
-              finalContent += tagged.contentDelta;
-              finalReasoning += tagged.thinkingDelta;
-            }
-          }
-        } catch {
-          // Ignore malformed non-JSON keepalive chunks.
-        }
-
-        boundaryIndex = sseBuffer.indexOf("\n\n");
-      }
-
-      if (done) {
-        break;
-      }
-    }
-
-    flushTaggedBuffer();
-
-    return {
-      content: finalContent,
-      reasoning: finalReasoning
-    };
   }
 
   async getCapabilities() {
@@ -1804,21 +1628,59 @@ export class StrategyAgentService {
         toolcallRetries: this.options.toolcallRetries,
         forceFallbackJson: this.options.forceFallbackJson
       },
-      tools: toolCatalog?.result?.tools ?? strategyToolDefinitions.map((definition) => ({
-        name: definition.name,
-        description: definition.description
-      }))
+      tools: toolCatalog?.result?.tools ?? this.toolRuntime.getCatalog()
     };
   }
 
+  private async syncSessionStrategySnapshot(sessionId: string, ownerAddress: string) {
+    const current = this.sessions.getSession(sessionId, ownerAddress);
+    if (!current?.strategyId) {
+      return current;
+    }
+
+    try {
+      const live = await this.matcherTransport("get_strategy", {
+        ownerAddress: ownerAddress as HexString,
+        strategyId: current.strategyId
+      });
+
+      const strategy = (live.strategy ?? null) as StrategyDefinition | null;
+      if (!strategy) {
+        return current;
+      }
+
+      return this.sessions.refreshStrategy({
+        sessionId,
+        ownerAddress,
+        strategy: {
+          id: strategy.id,
+          name: strategy.name,
+          marketId: strategy.marketId,
+          timeframe: strategy.timeframe,
+          status: strategy.status,
+          updatedAt: strategy.updatedAt
+        }
+      });
+    } catch {
+      return current;
+    }
+  }
+
   async listSessions(input: { ownerAddress: string; marketId?: string; limit?: number }) {
+    const sessions = this.sessions.listSessions(input);
+    await Promise.all(
+      sessions
+        .filter((session) => Boolean(session.strategyId))
+        .map((session) => this.syncSessionStrategySnapshot(session.sessionId, input.ownerAddress))
+    );
+
     return {
       sessions: this.sessions.listSessions(input)
     };
   }
 
   async getSession(input: { ownerAddress: string; sessionId: string }) {
-    const session = this.sessions.getSession(input.sessionId, input.ownerAddress);
+    const session = await this.syncSessionStrategySnapshot(input.sessionId, input.ownerAddress);
     if (!session) {
       throw new Error("Session not found.");
     }
@@ -1846,6 +1708,13 @@ export class StrategyAgentService {
   async plan(input: AgentStrategyRequest): Promise<AgentPlanResponse> {
     const requestId = crypto.randomUUID();
     const session = this.sessions.getOrCreate(input);
+    const syncedSession = await this.syncSessionStrategySnapshot(session.sessionId, input.ownerAddress);
+    if (syncedSession) {
+      session.strategyId = syncedSession.strategyId;
+      session.strategy = syncedSession.strategy;
+      session.marketId = syncedSession.marketId;
+      session.updatedAt = syncedSession.updatedAt;
+    }
     this.sessions.addTurn(session, {
       role: "user",
       mode: "plan",
@@ -1923,6 +1792,13 @@ Return JSON like:
     let artifacts: AgentResponse["artifacts"] = {};
     let metrics = createEmptyMetrics();
     const session = this.sessions.getOrCreate(input);
+    const syncedSession = await this.syncSessionStrategySnapshot(session.sessionId, input.ownerAddress);
+    if (syncedSession) {
+      session.strategyId = syncedSession.strategyId;
+      session.strategy = syncedSession.strategy;
+      session.marketId = syncedSession.marketId;
+      session.updatedAt = syncedSession.updatedAt;
+    }
     stream?.emit({ type: "status", message: "Starting agent workflow..." });
     this.sessions.addTurn(session, {
       role: "user",
@@ -2050,9 +1926,7 @@ Return JSON like:
             artifacts,
             metrics,
             warnings,
-            matcherTransport: async (toolName, rawInput) => {
-              return this.matcherTransport(toolName, rawInput as never) as Promise<Record<string, unknown>>;
-            },
+            matcherTransport: this.toolRuntime.invokeUntyped,
             model: this.model,
             capabilities: capabilities.capabilities as Record<string, unknown>
           });
@@ -2124,9 +1998,7 @@ Return JSON like:
                 message: event.message
               })
           : undefined,
-        invokeTool: async (toolName, rawInput) => {
-          return this.matcherTransport(toolName, rawInput as never) as Promise<Record<string, unknown>>;
-        }
+        invokeTool: this.toolRuntime.invokeUntyped
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -2210,9 +2082,7 @@ Return JSON like:
       artifacts,
       metrics: fallbackResult.metrics,
       warnings,
-      matcherTransport: async (toolName, rawInput) => {
-        return this.matcherTransport(toolName, rawInput as never) as Promise<Record<string, unknown>>;
-      },
+      matcherTransport: this.toolRuntime.invokeUntyped,
       model: this.model,
       capabilities: capabilities.capabilities as Record<string, unknown>
     });
@@ -2250,8 +2120,7 @@ Return JSON like:
     trace: AgentToolTraceEntry[],
     session: AgentPlanResponse["session"]
   ): Promise<{ finalMessage: string; artifacts: AgentResponse["artifacts"] }> {
-    const tools = createTrackedStrategyLangChainTools({
-      matcherUrl: this.options.matcherUrl,
+    const tools = this.toolRuntime.createTrackedLangChainTools({
       ownerAddress: input.ownerAddress,
       marketId: input.marketId,
       strategyId: input.strategyId,
