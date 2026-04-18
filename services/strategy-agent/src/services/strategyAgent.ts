@@ -23,7 +23,12 @@ import { probeModel } from "./modelProbe.js";
 import { runFallbackJsonLoop } from "./fallbackRuntime.js";
 import { createEmptyMetrics, finalizeMetrics, finalMessageMentionsRealArtifacts, summarizeToolProgress } from "./runtimePolicy.js";
 import { StrategyAgentSessionStore } from "./sessionStore.js";
-import { createStrategyToolRuntime, strategyLangChainContextSchema, type StrategyToolRuntime } from "./strategyToolRuntime.js";
+import {
+  createStrategyToolRuntime,
+  strategyLangChainContextSchema,
+  strategyLangChainStateSchema,
+  type StrategyToolRuntime
+} from "./strategyToolRuntime.js";
 import { attemptValidationRepair } from "./validationRepairLoop.js";
 
 type BasicFastPathConfig = {
@@ -2142,7 +2147,8 @@ Return JSON like:
       model: this.model,
       tools: [dummyTool, ...tools],
       systemPrompt: STRATEGY_AGENT_SYSTEM_PROMPT,
-      contextSchema: strategyLangChainContextSchema
+      contextSchema: strategyLangChainContextSchema,
+      stateSchema: strategyLangChainStateSchema
     });
 
     const response = await agent.invoke({
@@ -2151,12 +2157,13 @@ Return JSON like:
           role: "user",
           content: buildUserPrompt({ ...input, session })
         }
-      ]
+      ],
+      ...(input.strategyId ?? session.strategyId ? { strategyId: input.strategyId ?? session.strategyId } : {}),
+      ...(session.runId ? { runId: session.runId } : {})
     }, {
       context: {
         ownerAddress: input.ownerAddress,
-        ...(input.marketId ? { marketId: input.marketId } : {}),
-        ...(input.strategyId ? { strategyId: input.strategyId } : {})
+        ...(input.marketId ? { marketId: input.marketId } : {})
       }
     });
 
