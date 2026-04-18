@@ -156,6 +156,12 @@ export type AgentStreamEvent =
       message?: string;
     }
   | {
+      type: "tool_progress";
+      tool: string;
+      step?: number;
+      message: string;
+    }
+  | {
       type: "done";
       result: AgentResponse;
     }
