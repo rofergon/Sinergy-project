@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { STRATEGY_AGENT_SYSTEM_PROMPT, buildFallbackPlannerPrompt } from "../prompts.js";
+import { STRATEGY_AGENT_SYSTEM_PROMPT, buildFallbackPlannerPrompt, buildNativeRuntimeStatePrompt } from "../prompts.js";
 
 test("system prompt documents strict tool schemas and invalid key examples", () => {
   assert.match(STRATEGY_AGENT_SYSTEM_PROMPT, /Every tool input uses a STRICT JSON schema/i);
@@ -39,4 +39,18 @@ test("fallback planner prompt repeats root key restrictions for tools", () => {
   assert.match(prompt, /goal_state/);
   assert.match(prompt, /expected_artifact/);
   assert.match(prompt, /If you are not making observable progress, return type=final/i);
+});
+
+test("native runtime state prompt exposes active artifacts and reuse guidance", () => {
+  const prompt = buildNativeRuntimeStatePrompt({
+    ownerAddress: "0x00000000000000000000000000000000000000c3",
+    marketId: "0x0000000000000000000000000000000000000000000000000000000000000111",
+    strategyId: "11111111-1111-4111-8111-111111111111",
+    runId: "22222222-2222-4222-8222-222222222222"
+  });
+
+  assert.match(prompt, /active strategyId from runtime state: 11111111-1111-4111-8111-111111111111/i);
+  assert.match(prompt, /active runId from runtime state: 22222222-2222-4222-8222-222222222222/i);
+  assert.match(prompt, /reuse the active strategyId/i);
+  assert.match(prompt, /do not ask the user to repeat IDs/i);
 });
