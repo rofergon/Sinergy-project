@@ -1,4 +1,4 @@
-import { createAgent, tool } from "langchain";
+import { createAgent, dynamicSystemPromptMiddleware, tool } from "langchain";
 import type { ChatOpenAI } from "@langchain/openai";
 import {
   strategyToolDefinitions,
@@ -9,7 +9,14 @@ import {
   type StrategyMarketAnalysis,
   type StrategySideBias
 } from "@sinergy/shared";
-import { STRATEGY_AGENT_SYSTEM_PROMPT, buildUserPrompt, buildValidationCorrectionPrompt, buildOptimizationPlanPrompt, buildCreationPlanPrompt } from "../prompts.js";
+import {
+  STRATEGY_AGENT_SYSTEM_PROMPT,
+  buildUserPrompt,
+  buildValidationCorrectionPrompt,
+  buildOptimizationPlanPrompt,
+  buildCreationPlanPrompt,
+  buildNativeRuntimeStatePrompt
+} from "../prompts.js";
 import type {
   AgentPlanResponse,
   AgentResponse,
@@ -2148,7 +2155,29 @@ Return JSON like:
       tools: [dummyTool, ...tools],
       systemPrompt: STRATEGY_AGENT_SYSTEM_PROMPT,
       contextSchema: strategyLangChainContextSchema,
-      stateSchema: strategyLangChainStateSchema
+      stateSchema: strategyLangChainStateSchema,
+      middleware: [
+        dynamicSystemPromptMiddleware((state, runtime) =>
+          buildNativeRuntimeStatePrompt({
+            ownerAddress:
+              runtime.context && typeof runtime.context === "object" && "ownerAddress" in runtime.context
+                ? String((runtime.context as { ownerAddress?: unknown }).ownerAddress ?? "")
+                : undefined,
+            marketId:
+              runtime.context && typeof runtime.context === "object" && "marketId" in runtime.context
+                ? String((runtime.context as { marketId?: unknown }).marketId ?? "")
+                : undefined,
+            strategyId:
+              state && typeof state === "object" && "strategyId" in state
+                ? String((state as { strategyId?: unknown }).strategyId ?? "")
+                : undefined,
+            runId:
+              state && typeof state === "object" && "runId" in state
+                ? String((state as { runId?: unknown }).runId ?? "")
+                : undefined
+          })
+        )
+      ]
     });
 
     const response = await agent.invoke({
