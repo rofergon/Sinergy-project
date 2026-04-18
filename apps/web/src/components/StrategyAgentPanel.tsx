@@ -42,6 +42,20 @@ type AgentMessage = {
   strategyId?: string;
   bundle?: StrategyBacktestBundle | null;
   liveThinking?: string;
+  liveWorkflowSteps?: WorkflowStepCard[];
+};
+
+type WorkflowStepStatus = "pending" | "running" | "completed" | "error";
+
+type WorkflowStepCard = {
+  key: string;
+  step?: number;
+  tool: string;
+  title: string;
+  status: WorkflowStepStatus;
+  summary: string;
+  reasoningSummary?: string;
+  detail?: string;
 };
 
 type AgentStreamEvent =
@@ -159,6 +173,157 @@ function summarizeThinking(text: string, maxLength = 140) {
   return `${compact.slice(0, maxLength).trimEnd()}...`;
 }
 
+function humanizeToolName(tool: string) {
+  return tool
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function summarizeToolOutput(tool: string, output?: Record<string, unknown>) {
+  if (!output) return undefined;
+
+  if (tool === "list_strategy_capabilities" && typeof output.capabilities === "object" && output.capabilities) {
+    return "Read available indicators, operators, limits, and supported timeframes.";
+  }
+
+  if (tool === "analyze_market_context" && typeof output.analysis === "object" && output.analysis) {
+    const analysis = output.analysis as {
+      recommendedTimeframe?: string;
+      overallRegime?: string;
+    };
+    const parts = [
+      analysis.recommendedTimeframe ? `Recommended TF ${analysis.recommendedTimeframe}` : undefined,
+      analysis.overallRegime ? `Regime ${String(analysis.overallRegime).replace(/_/g, " ")}` : undefined
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(" • ") : "Reviewed market regime and timing context.";
+  }
+
+  if ((tool === "create_strategy_draft" || tool === "clone_strategy_template" || tool === "update_strategy_draft" || tool === "get_strategy")
+    && typeof output.strategy === "object"
+    && output.strategy) {
+    const strategy = output.strategy as { name?: string; timeframe?: string };
+    const parts = [strategy.name, strategy.timeframe].filter(Boolean);
+    return parts.length > 0 ? `Prepared strategy ${parts.join(" • ")}.` : "Prepared the strategy payload.";
+  }
+
+  if (tool === "validate_strategy_draft" && typeof output.validation === "object" && output.validation) {
+    const validation = output.validation as { ok?: boolean; issues?: unknown[] };
+    if (validation.ok) {
+      return "Validation passed with no blocking issues.";
+    }
+    return `Validation found ${validation.issues?.length ?? 0} issue(s).`;
+  }
+
+  if (tool === "run_strategy_backtest" && typeof output.summary === "object" && output.summary) {
+    const summary = output.summary as {
+      netPnl?: number;
+      winRate?: number;
+      totalTrades?: number;
+      tradeCount?: number;
+      maxDrawdownPct?: number;
+      profitFactor?: number;
+    };
+    const trades = summary.tradeCount ?? summary.totalTrades;
+    const parts = [
+      typeof summary.netPnl === "number" ? `PnL ${summary.netPnl.toFixed(2)}` : undefined,
+      typeof summary.winRate === "number" ? `Win rate ${summary.winRate}` : undefined,
+      typeof trades === "number" ? `Trades ${trades}` : undefined,
+      typeof summary.profitFactor === "number" ? `PF ${summary.profitFactor}` : undefined,
+      typeof summary.maxDrawdownPct === "number" ? `DD ${summary.maxDrawdownPct}` : undefined
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(" • ") : "Backtest finished.";
+  }
+
+  return undefined;
+}
+
+function summarizeToolReasoning(step: Pick<StrategyAgentToolTraceEntry, "tool" | "reason" | "expectedArtifact" | "resultSummary" | "output" | "error">) {
+  if (step.error?.message) {
+    return step.error.message;
+  }
+  if (step.reason) {
+    return step.reason;
+  }
+  if (step.resultSummary) {
+    return step.resultSummary.replace(/_/g, " ");
+  }
+  if (step.expectedArtifact) {
+    return `Expected artifact: ${step.expectedArtifact}.`;
+  }
+  return summarizeToolOutput(step.tool, step.output) ?? "Step completed.";
+}
+
+function toWorkflowStepCard(step: StrategyAgentToolTraceEntry): WorkflowStepCard {
+  return {
+    key: `${step.step}-${step.tool}`,
+    step: step.step,
+    tool: step.tool,
+    title: `${step.step}. ${humanizeToolName(step.tool)}`,
+    status: step.error ? "error" : "completed",
+    summary: summarizeToolOutput(step.tool, step.output) ?? (step.error?.message ?? "Completed."),
+    reasoningSummary: summarizeToolReasoning(step),
+    detail: step.error?.message ?? step.expectedArtifact
+  };
+}
+
+function summarizeLiveToolEvent(tool: string, message?: string, fallback?: string) {
+  const trimmed = message?.replace(/\s+/g, " ").trim();
+  if (trimmed) {
+    return trimmed;
+  }
+  if (fallback) {
+    return fallback;
+  }
+  return `Working on ${humanizeToolName(tool).toLowerCase()}.`;
+}
+
+function upsertWorkflowStep(
+  current: WorkflowStepCard[],
+  event: {
+    tool: string;
+    step?: number;
+    status?: WorkflowStepStatus;
+    summary?: string;
+    reasoningSummary?: string;
+    detail?: string;
+  }
+) {
+  const key = event.step ? `${event.step}-${event.tool}` : `${current.length + 1}-${event.tool}`;
+  const existingIndex = current.findIndex((step) =>
+    event.step ? step.key === key : step.status === "running" && step.tool === event.tool
+  );
+
+  if (existingIndex === -1) {
+    return [
+      ...current,
+      {
+        key,
+        step: event.step,
+        tool: event.tool,
+        title: event.step ? `${event.step}. ${humanizeToolName(event.tool)}` : humanizeToolName(event.tool),
+        status: event.status ?? "running",
+        summary: event.summary ?? `Starting ${humanizeToolName(event.tool).toLowerCase()}.`,
+        reasoningSummary: event.reasoningSummary,
+        detail: event.detail
+      }
+    ];
+  }
+
+  return current.map((step, index) =>
+    index === existingIndex
+      ? {
+          ...step,
+          status: event.status ?? step.status,
+          summary: event.summary ?? step.summary,
+          reasoningSummary: event.reasoningSummary ?? step.reasoningSummary,
+          detail: event.detail ?? step.detail
+        }
+      : step
+  );
+}
+
 function buildEmptyConversationSuggestion() {
   return 'Try something like: "Create an EMA crossover strategy for this market, validate it, and run a backtest." Sessions and linked strategies stay available in the right rail.';
 }
@@ -206,11 +371,12 @@ export function StrategyAgentPanel({
   });
   const [liveThinking, setLiveThinking] = useState("");
   const [liveFinalText, setLiveFinalText] = useState("");
-  const [liveTools, setLiveTools] = useState<Array<{ label: string; detail?: string }>>([]);
+  const [liveWorkflowSteps, setLiveWorkflowSteps] = useState<WorkflowStepCard[]>([]);
   const [collapsedThinkingIds, setCollapsedThinkingIds] = useState<Record<string, boolean>>({});
   const [liveThinkingCollapsed, setLiveThinkingCollapsed] = useState(false);
   const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const threadRef = useRef<HTMLDivElement | null>(null);
+  const activeRunMessageIdRef = useRef<string | null>(null);
   const emptyConversationSuggestion = buildEmptyConversationSuggestion();
 
   const storageKey = useMemo(() => {
@@ -246,7 +412,7 @@ export function StrategyAgentPanel({
     setMessages(toMessagesFromSession(payload.result.session));
     setLiveThinking("");
     setLiveFinalText("");
-    setLiveTools([]);
+    setLiveWorkflowSteps([]);
     setLiveThinkingCollapsed(false);
 
     if (payload.result.session.runId) {
@@ -358,7 +524,43 @@ export function StrategyAgentPanel({
       top: thread.scrollHeight,
       behavior: "smooth"
     });
-  }, [messages.length, liveThinking, liveFinalText, liveTools.length, status]);
+  }, [messages, status]);
+
+  useEffect(() => {
+    const thread = threadRef.current;
+    if (!thread || busy !== "run") return;
+
+    let frameId = 0;
+    const scrollToBottom = () => {
+      cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(() => {
+        thread.scrollTop = thread.scrollHeight;
+      });
+    };
+
+    const observer = new MutationObserver(() => {
+      scrollToBottom();
+    });
+
+    observer.observe(thread, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    });
+
+    scrollToBottom();
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      observer.disconnect();
+    };
+  }, [busy]);
+
+  function updateMessage(messageId: string, updater: (message: AgentMessage) => AgentMessage) {
+    setMessages((current) =>
+      current.map((message) => (message.id === messageId ? updater(message) : message))
+    );
+  }
 
   useEffect(() => {
     if (!clarificationRequired && clarifierOpen) {
@@ -443,10 +645,18 @@ export function StrategyAgentPanel({
         return;
       }
 
-      setLiveThinking("");
-      setLiveFinalText("");
-      setLiveTools([]);
-      setLiveThinkingCollapsed(false);
+      const liveAssistantMessageId = buildMessageId();
+      activeRunMessageIdRef.current = liveAssistantMessageId;
+      setMessages((current) => [
+        ...current,
+        {
+          id: liveAssistantMessageId,
+          role: "assistant",
+          text: "",
+          mode,
+          liveWorkflowSteps: []
+        }
+      ]);
       let streamedThinking = "";
       let streamedFinalText = "";
 
@@ -476,32 +686,72 @@ export function StrategyAgentPanel({
             }
             if (event === "thinking_delta" && payload.type === "thinking_delta") {
               streamedThinking += payload.text;
-              setLiveThinking((current) => current + payload.text);
+              if (activeRunMessageIdRef.current) {
+                updateMessage(activeRunMessageIdRef.current, (message) => ({
+                  ...message,
+                  liveThinking: (message.liveThinking ?? "") + payload.text
+                }));
+              }
               return;
             }
             if (event === "content_delta" && payload.type === "content_delta") {
               streamedFinalText += payload.text;
-              setLiveFinalText((current) => current + payload.text);
+              if (activeRunMessageIdRef.current) {
+                updateMessage(activeRunMessageIdRef.current, (message) => ({
+                  ...message,
+                  text: message.text + payload.text
+                }));
+              }
               return;
             }
             if (event === "tool" && payload.type === "tool") {
-              setLiveTools((current) => [
-                ...current,
-                {
-                  label: `${payload.phase === "start" ? "Running" : payload.phase === "done" ? "Done" : "Error"} ${payload.tool}`,
-                  detail: payload.message
-                }
-              ]);
+              if (activeRunMessageIdRef.current) {
+                updateMessage(activeRunMessageIdRef.current, (message) => ({
+                  ...message,
+                  liveWorkflowSteps: upsertWorkflowStep(message.liveWorkflowSteps ?? [], {
+                    tool: payload.tool,
+                    step: payload.step,
+                    status:
+                      payload.phase === "start"
+                        ? "running"
+                        : payload.phase === "done"
+                          ? "completed"
+                          : "error",
+                    summary: summarizeLiveToolEvent(
+                      payload.tool,
+                      payload.message,
+                      payload.phase === "start"
+                        ? `Starting ${humanizeToolName(payload.tool).toLowerCase()}.`
+                        : payload.phase === "done"
+                          ? `${humanizeToolName(payload.tool)} completed.`
+                          : `${humanizeToolName(payload.tool)} failed.`
+                    ),
+                    reasoningSummary: payload.message,
+                    detail:
+                      payload.phase === "start"
+                        ? "Step started."
+                        : payload.phase === "done"
+                          ? "Step finished."
+                          : payload.message
+                  })
+                }));
+              }
               return;
             }
             if (event === "tool_progress" && payload.type === "tool_progress") {
-              setLiveTools((current) => [
-                ...current,
-                {
-                  label: `Progress ${payload.tool}`,
-                  detail: payload.message
-                }
-              ]);
+              if (activeRunMessageIdRef.current) {
+                updateMessage(activeRunMessageIdRef.current, (message) => ({
+                  ...message,
+                  liveWorkflowSteps: upsertWorkflowStep(message.liveWorkflowSteps ?? [], {
+                    tool: payload.tool,
+                    step: payload.step,
+                    status: "running",
+                    summary: summarizeLiveToolEvent(payload.tool, payload.message),
+                    reasoningSummary: payload.message,
+                    detail: "Streaming tool update."
+                  })
+                }));
+              }
               return;
             }
             if (event === "done" && payload.type === "done") {
@@ -514,29 +764,25 @@ export function StrategyAgentPanel({
               }
 
               setSession(payload.result.session);
-              setMessages((current) => [
-                ...current,
-                {
-                  id: buildMessageId(),
-                  role: "assistant",
-                  text: payload.result.finalMessage,
-                  mode,
+              if (activeRunMessageIdRef.current) {
+                updateMessage(activeRunMessageIdRef.current, (message) => ({
+                  ...message,
+                  text: payload.result.finalMessage || message.text || streamedFinalText,
                   usedTools: payload.result.usedTools,
                   trace: payload.result.toolTrace,
                   warnings: payload.result.warnings,
                   strategyId: payload.result.artifacts.strategyId ?? payload.result.session.strategyId,
                   bundle,
-                  liveThinking: streamedThinking || undefined
-                }
-              ]);
+                  liveThinking: streamedThinking || undefined,
+                  liveWorkflowSteps: undefined
+                }));
+                activeRunMessageIdRef.current = null;
+              }
               setStatus(
                 payload.result.session.strategyId
                   ? "Agent workflow finished. Session and strategy are ready to reopen."
                   : "Agent workflow finished."
               );
-              setLiveThinking("");
-              setLiveFinalText("");
-              setLiveTools([]);
               setLiveThinkingCollapsed(false);
               void refreshHistory(payload.result.session.sessionId, false);
               return;
@@ -548,15 +794,24 @@ export function StrategyAgentPanel({
         }
       );
     } catch (error) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: buildMessageId(),
-          role: "assistant",
+      if (activeRunMessageIdRef.current) {
+        updateMessage(activeRunMessageIdRef.current, (message) => ({
+          ...message,
           text: error instanceof Error ? error.message : String(error),
-          mode
-        }
-      ]);
+          liveWorkflowSteps: undefined
+        }));
+        activeRunMessageIdRef.current = null;
+      } else {
+        setMessages((current) => [
+          ...current,
+          {
+            id: buildMessageId(),
+            role: "assistant",
+            text: error instanceof Error ? error.message : String(error),
+            mode
+          }
+        ]);
+      }
       setStatus("Agent request failed.");
     } finally {
       setBusy(null);
@@ -571,7 +826,7 @@ export function StrategyAgentPanel({
     setClarifierMode(null);
     setLiveThinking("");
     setLiveFinalText("");
-    setLiveTools([]);
+    setLiveWorkflowSteps([]);
     setLiveThinkingCollapsed(false);
     setStatus("Started a fresh strategy session.");
     onBacktestResult(null);
@@ -682,6 +937,23 @@ export function StrategyAgentPanel({
                   )}
                   <p>{message.text}</p>
 
+                  {message.liveWorkflowSteps && message.liveWorkflowSteps.length > 0 && (
+                    <div className="strategy-agent-trace">
+                      {message.liveWorkflowSteps.map((step) => (
+                        <div key={step.key} className={`strategy-agent-step-card status-${step.status}`}>
+                          <div className="strategy-agent-step-head">
+                            <strong>{step.title}</strong>
+                            <span>{step.status}</span>
+                          </div>
+                          <small>{step.summary}</small>
+                          {step.reasoningSummary && (
+                            <p className="strategy-agent-step-reasoning">{summarizeThinking(step.reasoningSummary, 220)}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {message.plannedTools && message.plannedTools.length > 0 && (
                     <div className="strategy-agent-list">
                       {message.plannedTools.map((item) => (
@@ -703,14 +975,24 @@ export function StrategyAgentPanel({
 
                   {message.trace && message.trace.length > 0 && (
                     <div className="strategy-agent-trace">
-                      {message.trace.map((entry) => (
-                        <div key={`${message.id}-${entry.step}`}>
-                          <strong>
-                            {entry.step}. {entry.tool}
-                          </strong>
-                          <small>{entry.error?.message ?? "completed"}</small>
-                        </div>
-                      ))}
+                      {message.trace.map((entry) => {
+                        const card = toWorkflowStepCard(entry);
+                        return (
+                          <div
+                            key={`${message.id}-${entry.step}`}
+                            className={`strategy-agent-step-card status-${card.status}`}
+                          >
+                            <div className="strategy-agent-step-head">
+                              <strong>{card.title}</strong>
+                              <span>{card.status}</span>
+                            </div>
+                            <small>{card.summary}</small>
+                            {card.reasoningSummary && (
+                              <p className="strategy-agent-step-reasoning">{card.reasoningSummary}</p>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
 
@@ -741,43 +1023,6 @@ export function StrategyAgentPanel({
               ))
             )}
 
-            {(busy === "run" && (liveThinking || liveFinalText || liveTools.length > 0)) && (
-              <div className="strategy-agent-message assistant">
-                <div className="strategy-agent-message-head">
-                  <strong>Agent</strong>
-                  <span>Live</span>
-                </div>
-
-                {liveThinking && (
-                  <div className="strategy-agent-trace">
-                    <button
-                      type="button"
-                      className={`strategy-agent-thinking-card ${liveThinkingCollapsed ? "collapsed" : ""}`}
-                      onClick={() => setLiveThinkingCollapsed((current) => !current)}
-                      aria-expanded={!liveThinkingCollapsed}
-                    >
-                      <span className="strategy-agent-thinking-title">Thinking</span>
-                      <small className="strategy-agent-thinking-body">
-                        {liveThinkingCollapsed ? summarizeThinking(liveThinking) : liveThinking}
-                      </small>
-                    </button>
-                  </div>
-                )}
-
-                {liveTools.length > 0 && (
-                  <div className="strategy-agent-trace">
-                    {liveTools.slice(-6).map((item, index) => (
-                      <div key={`live-tool-${index}`}>
-                        <strong>{item.label}</strong>
-                        <small>{item.detail ?? "in progress"}</small>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {liveFinalText && <p>{liveFinalText}</p>}
-              </div>
-            )}
           </div>
 
           <div className="strategy-agent-compose">
