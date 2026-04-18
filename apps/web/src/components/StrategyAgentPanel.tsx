@@ -49,6 +49,7 @@ type AgentStreamEvent =
   | { type: "thinking_delta"; text: string }
   | { type: "content_delta"; text: string }
   | { type: "tool"; phase: "start" | "done" | "error"; tool: string; step?: number; message?: string }
+  | { type: "tool_progress"; tool: string; step?: number; message: string }
   | { type: "done"; result: StrategyAgentRunResponse }
   | { type: "error"; message: string };
 
@@ -491,6 +492,16 @@ export function StrategyAgentPanel({
                 ...current,
                 {
                   label: `${payload.phase === "start" ? "Running" : payload.phase === "done" ? "Done" : "Error"} ${payload.tool}`,
+                  detail: payload.message
+                }
+              ]);
+              return;
+            }
+            if (event === "tool_progress" && payload.type === "tool_progress") {
+              setLiveTools((current) => [
+                ...current,
+                {
+                  label: `Progress ${payload.tool}`,
                   detail: payload.message
                 }
               ]);
