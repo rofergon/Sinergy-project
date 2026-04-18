@@ -1065,6 +1065,18 @@ function parseCreationPlan(text: string): CreationPlan | null {
   return parsed;
 }
 
+function shouldRetryAfterBacktest(summary?: {
+  netPnl?: number;
+  tradeCount?: number;
+  profitFactor?: number;
+}) {
+  if (!summary) return true;
+  if (typeof summary.tradeCount === "number" && summary.tradeCount <= 0) return true;
+  if (typeof summary.netPnl === "number" && summary.netPnl <= 0) return true;
+  if (typeof summary.profitFactor === "number" && summary.profitFactor < 1) return true;
+  return false;
+}
+
 function isStrategyMarketAnalysis(value: unknown): value is StrategyMarketAnalysis {
   return Boolean(
     value &&
@@ -1181,7 +1193,12 @@ async function llmCorrectionLoop(options: {
   goal: string;
   marketId?: string;
   capabilities?: Record<string, unknown>;
-}): Promise<{ validationOk: boolean; patchedStrategy: StrategyDefinition | null }> {
+}): Promise<{
+  validationOk: boolean;
+  patchedStrategy: StrategyDefinition | null;
+  validation?: Record<string, unknown>;
+  remainingIssues: Array<{ path: string; code: string; message: string; suggestion?: string }>;
+}> {
   const { model, ownerAddress, strategyId, matcherTransport, trace, warnings, goal, marketId, capabilities } = options;
   let currentStrategy = options.strategy;
   let currentIssues = options.issues;
@@ -1281,7 +1298,12 @@ async function llmCorrectionLoop(options: {
             correctionEntry.error = undefined;
             correctionEntry.output = revalidateOutput.validation as Record<string, unknown>;
             correctionEntry.completedAt = new Date().toISOString();
-            return { validationOk: true, patchedStrategy: currentStrategy };
+            return {
+              validationOk: true,
+              patchedStrategy: currentStrategy,
+              validation: revalidateOutput.validation as Record<string, unknown>,
+              remainingIssues: []
+            };
           }
 
           currentIssues = revalidateValidation?.issues ?? [];
@@ -1317,7 +1339,85 @@ async function llmCorrectionLoop(options: {
   }
 
   warnings.push(`LLM correction exhausted after ${options.maxAttempts} attempts. Strategy may not be valid.`);
-  return { validationOk: false, patchedStrategy: currentStrategy };
+  return {
+    validationOk: false,
+    patchedStrategy: currentStrategy,
+    remainingIssues: currentIssues
+  };
+}
+
+async function maybeRunLlmCorrectionLoop(options: {
+  model?: ChatOpenAI;
+  ownerAddress: string;
+  strategyId?: string;
+  strategy: StrategyDefinition;
+  issues: Array<{ path: string; code: string; message: string; suggestion?: string }>;
+  matcherTransport: (tool: StrategyToolName, input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  trace: AgentToolTraceEntry[];
+  warnings: string[];
+  metrics: AgentResponse["metrics"];
+  goal: string;
+  marketId?: string;
+  capabilities?: Record<string, unknown>;
+  triggerReason: string;
+}) {
+  if (options.issues.length === 0) {
+    return {
+      attempted: false,
+      validationOk: false,
+      patchedStrategy: options.strategy,
+      remainingIssues: []
+    };
+  }
+
+  if (!options.model) {
+    options.warnings.push(`${options.triggerReason} Skipping LLM correction loop because no model is available.`);
+    return {
+      attempted: false,
+      validationOk: false,
+      patchedStrategy: options.strategy,
+      remainingIssues: options.issues
+    };
+  }
+
+  if (!options.strategyId) {
+    options.warnings.push(`${options.triggerReason} Skipping LLM correction loop because no strategyId is available.`);
+    return {
+      attempted: false,
+      validationOk: false,
+      patchedStrategy: options.strategy,
+      remainingIssues: options.issues
+    };
+  }
+
+  options.warnings.push(`${options.triggerReason} Running bounded LLM correction loop.`);
+  options.metrics.enforcementTriggered = true;
+  options.metrics.repairsAttempted += 1;
+  options.metrics.finalizationGuardrailsApplied.push("llm_validation_correction_loop");
+
+  const result = await llmCorrectionLoop({
+    model: options.model,
+    ownerAddress: options.ownerAddress,
+    strategyId: options.strategyId,
+    strategy: options.strategy,
+    issues: options.issues,
+    maxAttempts: 2,
+    matcherTransport: options.matcherTransport,
+    trace: options.trace,
+    warnings: options.warnings,
+    goal: options.goal,
+    marketId: options.marketId,
+    capabilities: options.capabilities
+  });
+
+  if (result.validationOk) {
+    options.metrics.repairsSucceeded += 1;
+  }
+
+  return {
+    attempted: true,
+    ...result
+  };
 }
 
 async function enforceCompletion(options: CompletionEnforcementOptions): Promise<{
@@ -1389,7 +1489,7 @@ async function enforceCompletion(options: CompletionEnforcementOptions): Promise
     if (failedValidationEntry?.output) {
       const validation = failedValidationEntry.output.validation as { ok: boolean; issues: Array<{ path: string; code: string; message: string; suggestion?: string }> };
       const strategyEntry = [...trace].reverse().find(entry =>
-        entry.tool === "update_strategy_draft" && entry.output && typeof entry.output.strategy === "object" && entry.output.strategy
+        entry.output && typeof entry.output.strategy === "object" && entry.output.strategy
       );
       const strategyData = strategyEntry?.output?.strategy as StrategyDefinition | undefined;
 
@@ -1451,8 +1551,33 @@ async function enforceCompletion(options: CompletionEnforcementOptions): Promise
                 artifacts.validation = revalidateOutput.validation as Record<string, unknown>;
                 validationOk = true;
               } else if (revalidateValidation) {
-                const remaining = revalidateValidation.issues?.length ?? 0;
-                warnings.push(`Auto-repair partial: ${fixableAttempts.length} fixed, ${remaining} remain. Skipping extra LLM repair loop to keep the workflow fast.`);
+                const remainingIssues = (revalidateValidation.issues ?? []) as Array<{ path: string; code: string; message: string; suggestion?: string }>;
+                const llmRepair = await maybeRunLlmCorrectionLoop({
+                  model,
+                  ownerAddress,
+                  strategyId: currentStrategyId,
+                  strategy: typeof updateOutput.strategy === "object" && updateOutput.strategy
+                    ? (updateOutput.strategy as StrategyDefinition)
+                    : repairResult.patchedStrategy,
+                  issues: remainingIssues,
+                  matcherTransport,
+                  trace,
+                  warnings,
+                  metrics,
+                  goal,
+                  marketId,
+                  capabilities,
+                  triggerReason: `Auto-repair partial: ${fixableAttempts.length} fixed, ${remainingIssues.length} remain.`
+                });
+
+                if (llmRepair.validationOk) {
+                  validationOk = true;
+                  artifacts.validation = llmRepair.validation;
+                  if (llmRepair.patchedStrategy?.id) {
+                    currentStrategyId = llmRepair.patchedStrategy.id;
+                    artifacts.strategyId = currentStrategyId;
+                  }
+                }
               }
             } catch (error) {
               revalidateEntry.error = { message: error instanceof Error ? error.message : String(error) };
@@ -1471,9 +1596,33 @@ async function enforceCompletion(options: CompletionEnforcementOptions): Promise
             warnings.push(`Auto-repair update_strategy_draft failed: ${updateEntry.error.message}`);
           }
         } else {
-          warnings.push(`Auto-repair could not fix any of ${validation.issues.length} issues. Skipping LLM repair loop to avoid long retries.`);
-          metrics.enforcementTriggered = true;
-          metrics.finalizationGuardrailsApplied.push("fast_fail_on_invalid_strategy");
+          const llmRepair = await maybeRunLlmCorrectionLoop({
+            model,
+            ownerAddress,
+            strategyId: currentStrategyId,
+            strategy: strategyData,
+            issues: validation.issues,
+            matcherTransport,
+            trace,
+            warnings,
+            metrics,
+            goal,
+            marketId,
+            capabilities,
+            triggerReason: `Auto-repair could not fix any of ${validation.issues.length} issues.`
+          });
+
+          if (llmRepair.validationOk) {
+            validationOk = true;
+            artifacts.validation = llmRepair.validation;
+            if (llmRepair.patchedStrategy?.id) {
+              currentStrategyId = llmRepair.patchedStrategy.id;
+              artifacts.strategyId = currentStrategyId;
+            }
+          } else {
+            metrics.enforcementTriggered = true;
+            metrics.finalizationGuardrailsApplied.push("fast_fail_on_invalid_strategy");
+          }
         }
       }
     }
@@ -2742,6 +2891,25 @@ Return JSON like:
 
       const summary = backtest.summary as { netPnl?: number; winRate?: number; tradeCount?: number; maxDrawdownPct?: number; profitFactor?: number } | undefined;
 
+      if (shouldRetryAfterBacktest(summary)) {
+        warnings.push("Initial creation backtest was not acceptable. Running a quick optimization retry loop.");
+        const optimizationRetry = await this.tryRunOptimizationFastPath(
+          {
+            ...input,
+            strategyId: finalStrategy.id
+          },
+          trace,
+          warnings,
+          metrics,
+          stream,
+          true
+        );
+
+        if (optimizationRetry) {
+          return optimizationRetry;
+        }
+      }
+
       return {
         finalMessage: summary
           ? `Created and validated ${finalStrategy.name}, then ran the backtest. Net PnL: ${summary.netPnl ?? "n/a"}, win rate: ${summary.winRate ?? "n/a"}, trades: ${summary.tradeCount ?? "n/a"}, max drawdown: ${summary.maxDrawdownPct ?? "n/a"}, profit factor: ${summary.profitFactor ?? "n/a"}.`
@@ -3021,9 +3189,10 @@ Return JSON like:
     trace: AgentToolTraceEntry[],
     warnings: string[],
     metrics: AgentResponse["metrics"],
-    stream?: AgentRunStreamCallbacks
+    stream?: AgentRunStreamCallbacks,
+    force = false
   ): Promise<{ finalMessage: string; artifacts: AgentResponse["artifacts"] } | null> {
-    if (!input.strategyId || !goalLooksLikeOptimization(input.goal)) {
+    if (!input.strategyId || (!force && !goalLooksLikeOptimization(input.goal))) {
       return null;
     }
 
@@ -3067,7 +3236,11 @@ Return JSON like:
       return null;
     }
 
-    warnings.push(`Used model-guided optimization fast path for existing ${baseStrategy.name}.`);
+    warnings.push(
+      force
+        ? `Used automatic optimization retry loop for ${baseStrategy.name} after a weak initial backtest.`
+        : `Used model-guided optimization fast path for existing ${baseStrategy.name}.`
+    );
     metrics.enforcementTriggered = true;
     metrics.finalizationGuardrailsApplied.push(`model_optimize_fast_path_${strategyKind}`);
 
