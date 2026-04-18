@@ -65,6 +65,17 @@ function cloneStrategy(strategy: StrategyDefinition) {
   return JSON.parse(JSON.stringify(strategy)) as StrategyDefinition;
 }
 
+function toManualStrategy(strategy: StrategyDefinition): StrategyDefinition {
+  if (!strategy.engine) {
+    return strategy;
+  }
+
+  const next = cloneStrategy(strategy);
+  delete next.engine;
+  next.updatedAt = new Date().toISOString();
+  return next;
+}
+
 type ActiveIndicatorEntry = {
   key: string;
   kind: StrategyIndicatorKind;
@@ -735,6 +746,7 @@ export function StrategyPanel({
   const handleGlobalSync = (prevKey: string, nextOp: StrategyOperand) => {
     setDraft((current) => {
       if (!current) return current;
+      const base = toManualStrategy(current);
       const syncGroup = (group: StrategyRuleGroup) => ({
         ...group,
         rules: group.rules.map(rule => ({
@@ -744,14 +756,14 @@ export function StrategyPanel({
         }))
       });
       return {
-        ...current,
+        ...base,
         entryRules: {
-          long: current.entryRules.long.map(syncGroup),
-          short: current.entryRules.short.map(syncGroup),
+          long: base.entryRules.long.map(syncGroup),
+          short: base.entryRules.short.map(syncGroup),
         },
         exitRules: {
-          long: current.exitRules.long.map(syncGroup),
-          short: current.exitRules.short.map(syncGroup),
+          long: base.exitRules.long.map(syncGroup),
+          short: base.exitRules.short.map(syncGroup),
         },
         updatedAt: new Date().toISOString()
       };
@@ -1322,14 +1334,18 @@ export function StrategyPanel({
                                 title="Entry Rules"
                                 groups={draft.entryRules[side]}
                                 capabilities={capabilities}
-                                onChange={(next) => setDraft(setRuleGroups(cloneStrategy(draft), "entryRules", side, next))}
+                                onChange={(next) =>
+                                  setDraft(setRuleGroups(toManualStrategy(draft), "entryRules", side, next))
+                                }
                                 onGlobalSync={handleGlobalSync}
                               />
                               <RuleBuilder
                                 title="Exit Rules"
                                 groups={draft.exitRules[side]}
                                 capabilities={capabilities}
-                                onChange={(next) => setDraft(setRuleGroups(cloneStrategy(draft), "exitRules", side, next))}
+                                onChange={(next) =>
+                                  setDraft(setRuleGroups(toManualStrategy(draft), "exitRules", side, next))
+                                }
                                 onGlobalSync={handleGlobalSync}
                               />
                             </>
