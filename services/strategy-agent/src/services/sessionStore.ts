@@ -264,6 +264,36 @@ export class StrategyAgentSessionStore {
     return this.snapshot(session);
   }
 
+  refreshStrategy(
+    input: {
+      sessionId: string;
+      ownerAddress: string;
+      strategy?: AgentStrategySummary;
+    }
+  ) {
+    const session = this.readSession(input.sessionId);
+    if (!session) return null;
+    if (session.ownerAddress.toLowerCase() !== input.ownerAddress.toLowerCase()) {
+      throw new Error("Session owner mismatch.");
+    }
+
+    session.strategyId = input.strategy?.id ?? session.strategyId;
+    session.strategy = input.strategy
+      ? {
+          id: input.strategy.id,
+          name: input.strategy.name,
+          marketId: input.strategy.marketId,
+          status: input.strategy.status,
+          timeframe: input.strategy.timeframe,
+          updatedAt: input.strategy.updatedAt
+        }
+      : session.strategy;
+    session.marketId = input.strategy?.marketId ?? session.marketId;
+    session.updatedAt = new Date().toISOString();
+    this.writeSession(session);
+    return this.snapshot(session);
+  }
+
   listSessions(input: { ownerAddress: string; marketId?: string; limit?: number }): AgentSessionListItem[] {
     this.prune();
 
