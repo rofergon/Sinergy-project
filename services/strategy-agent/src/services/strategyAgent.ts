@@ -1917,9 +1917,9 @@ Return JSON like:
       };
     }
 
-    if (!stream && !this.options.forceFallbackJson) {
+    if (!this.options.forceFallbackJson) {
       try {
-        const nativeResult = await this.runNativeToolAgent(activeInput, trace, sessionSnapshot);
+        const nativeResult = await this.runNativeToolAgent(activeInput, trace, sessionSnapshot, stream);
         if (trace.length > 0) {
           artifacts = collectArtifactsFromTrace(trace, nativeResult.artifacts);
 
@@ -2130,7 +2130,8 @@ Return JSON like:
   private async runNativeToolAgent(
     input: AgentStrategyRequest,
     trace: AgentToolTraceEntry[],
-    session: AgentPlanResponse["session"]
+    session: AgentPlanResponse["session"],
+    stream?: AgentRunStreamCallbacks
   ): Promise<{ finalMessage: string; artifacts: AgentResponse["artifacts"] }> {
     const tools = this.toolRuntime.createTrackedLangChainTools({
       ownerAddress: input.ownerAddress,
@@ -2180,7 +2181,7 @@ Return JSON like:
       ]
     });
 
-    const response = await agent.invoke({
+    const invocationInput = {
       messages: [
         {
           role: "user",
@@ -2189,15 +2190,88 @@ Return JSON like:
       ],
       ...(input.strategyId ?? session.strategyId ? { strategyId: input.strategyId ?? session.strategyId } : {}),
       ...(session.runId ? { runId: session.runId } : {})
-    }, {
+    };
+    const invocationConfig = {
       context: {
         ownerAddress: input.ownerAddress,
         ...(input.marketId ? { marketId: input.marketId } : {})
       }
+    };
+
+    if (!stream) {
+      const response = await agent.invoke(invocationInput, invocationConfig);
+      const finalMessage =
+        extractMessageText(response) ||
+        "Native tool agent completed without a textual summary.";
+
+      return {
+        finalMessage,
+        artifacts: collectArtifactsFromTrace(trace)
+      };
+    }
+
+    stream.emit({ type: "status", message: "Running native tool workflow..." });
+    let latestState: Record<string, unknown> | undefined;
+    const nativeStream = await agent.stream(invocationInput, {
+      ...invocationConfig,
+      streamMode: ["values", "tools", "custom"]
     });
 
+    for await (const chunk of nativeStream as AsyncIterable<unknown>) {
+      if (!Array.isArray(chunk) || chunk.length < 2) {
+        continue;
+      }
+
+      const [mode, payload] = chunk as [string, unknown];
+      if (mode === "values" && payload && typeof payload === "object") {
+        latestState = payload as Record<string, unknown>;
+        continue;
+      }
+
+      if (mode === "tools" && payload && typeof payload === "object") {
+        const event = payload as {
+          event?: string;
+          name?: string;
+          error?: unknown;
+        };
+        const toolName = event.name ?? "unknown_tool";
+
+        if (event.event === "on_tool_start") {
+          stream.emit({ type: "tool", phase: "start", tool: toolName });
+        } else if (event.event === "on_tool_end") {
+          stream.emit({ type: "tool", phase: "done", tool: toolName });
+        } else if (event.event === "on_tool_error") {
+          stream.emit({
+            type: "tool",
+            phase: "error",
+            tool: toolName,
+            message: event.error instanceof Error ? event.error.message : String(event.error ?? "Tool failed")
+          });
+        }
+        continue;
+      }
+
+      if (mode === "custom" && payload && typeof payload === "object") {
+        const custom = payload as {
+          type?: string;
+          tool?: string;
+          step?: number;
+          message?: string;
+        };
+
+        if (custom.type === "tool_progress" && custom.tool && custom.message) {
+          stream.emit({
+            type: "tool_progress",
+            tool: custom.tool,
+            step: custom.step,
+            message: custom.message
+          });
+        }
+      }
+    }
+
     const finalMessage =
-      extractMessageText(response) ||
+      extractMessageText(latestState) ||
       "Native tool agent completed without a textual summary.";
 
     return {
