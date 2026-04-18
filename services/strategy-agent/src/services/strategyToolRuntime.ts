@@ -1,5 +1,6 @@
-import { tool } from "langchain";
+import { ToolMessage, tool } from "langchain";
 import { z } from "zod";
+import { Command, StateSchema } from "@langchain/langgraph";
 import {
   createHttpStrategyToolTransport,
   strategyDraftPayloadSchema,
@@ -17,6 +18,7 @@ type StrategyToolExecutionContext = {
   ownerAddress: string;
   marketId?: string;
   strategyId?: string;
+  runId?: string;
 };
 
 type TrackedLangChainToolOptions = StrategyToolExecutionContext & {
@@ -25,8 +27,12 @@ type TrackedLangChainToolOptions = StrategyToolExecutionContext & {
 
 export const strategyLangChainContextSchema = z.object({
   ownerAddress: z.string(),
-  marketId: z.string().optional(),
-  strategyId: z.string().uuid().optional()
+  marketId: z.string().optional()
+});
+
+export const strategyLangChainStateSchema = new StateSchema({
+  strategyId: z.string().uuid().optional(),
+  runId: z.string().uuid().optional()
 });
 
 const langChainVisibleToolSchemas = {
@@ -51,31 +57,19 @@ const langChainVisibleToolSchemas = {
     strategy: strategyDraftPayloadSchema
   }),
   validate_strategy_draft: z.object({
-    strategyId: z.string().uuid().optional(),
     strategy: strategyDraftPayloadSchema.optional()
   }),
   run_strategy_backtest: z.object({
-    strategyId: z.string().uuid(),
     bars: z.number().int().positive().optional(),
     fromTs: z.number().int().positive().optional(),
     toTs: z.number().int().positive().optional()
   }),
-  get_backtest_summary: z.object({
-    runId: z.string().uuid()
-  }),
-  get_backtest_trades: z.object({
-    runId: z.string().uuid()
-  }),
-  get_backtest_chart_overlay: z.object({
-    runId: z.string().uuid()
-  }),
-  save_strategy: z.object({
-    strategyId: z.string().uuid()
-  }),
+  get_backtest_summary: z.object({}),
+  get_backtest_trades: z.object({}),
+  get_backtest_chart_overlay: z.object({}),
+  save_strategy: z.object({}),
   list_user_strategies: z.object({}),
-  get_strategy: z.object({
-    strategyId: z.string().uuid()
-  }),
+  get_strategy: z.object({}),
   clone_strategy_template: z.object({
     templateId: z.string().min(1)
   })
@@ -96,6 +90,18 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function readStateField(runtime: unknown, field: "strategyId" | "runId") {
+  if (!runtime || typeof runtime !== "object" || !("state" in runtime)) {
+    return undefined;
+  }
+  const state = (runtime as { state?: unknown }).state;
+  if (!isObject(state)) {
+    return undefined;
+  }
+  const value = state[field];
+  return typeof value === "string" ? value : undefined;
+}
+
 function resolveExecutionContext(
   runtime: unknown,
   fallback: StrategyToolExecutionContext
@@ -112,8 +118,30 @@ function resolveExecutionContext(
   return {
     ownerAddress: typeof context.ownerAddress === "string" ? context.ownerAddress : fallback.ownerAddress,
     marketId: typeof context.marketId === "string" ? context.marketId : fallback.marketId,
-    strategyId: typeof context.strategyId === "string" ? context.strategyId : fallback.strategyId
+    strategyId: readStateField(runtime, "strategyId") ?? fallback.strategyId,
+    runId: readStateField(runtime, "runId") ?? fallback.runId
   };
+}
+
+function serializeToolOutput(output: unknown) {
+  if (typeof output === "string") {
+    return output;
+  }
+  return JSON.stringify(output);
+}
+
+function buildStatePatch(output: Record<string, unknown>) {
+  const patch: Record<string, unknown> = {};
+
+  if (isObject(output.strategy) && typeof output.strategy.id === "string") {
+    patch.strategyId = output.strategy.id;
+  }
+
+  if (isObject(output.summary) && typeof output.summary.runId === "string") {
+    patch.runId = output.summary.runId;
+  }
+
+  return patch;
 }
 
 export function createStrategyToolRuntime(options: {
@@ -154,7 +182,8 @@ export function createStrategyToolRuntime(options: {
           const mergedInput = mergeToolContext(definition.name, baseInput, {
             ownerAddress: executionContext.ownerAddress,
             marketId: executionContext.marketId,
-            strategyId: executionContext.strategyId
+            strategyId: executionContext.strategyId,
+            runId: executionContext.runId
           });
 
           const entry: AgentToolTraceEntry = {
@@ -172,7 +201,28 @@ export function createStrategyToolRuntime(options: {
             const progress = summarizeToolProgress(entry);
             entry.progressObserved = progress.progressObserved;
             entry.resultSummary = progress.resultSummary;
-            return output;
+
+            const statePatch = entry.output ? buildStatePatch(entry.output) : {};
+            if (Object.keys(statePatch).length === 0) {
+              return output;
+            }
+
+            const toolCallId =
+              runtime && typeof runtime === "object" && "toolCallId" in runtime
+                ? (runtime as { toolCallId?: string }).toolCallId
+                : undefined;
+
+            return new Command({
+              update: {
+                ...statePatch,
+                messages: [
+                  new ToolMessage({
+                    content: serializeToolOutput(output),
+                    tool_call_id: toolCallId ?? ""
+                  })
+                ]
+              }
+            });
           } catch (error) {
             entry.error = {
               message: error instanceof Error ? error.message : String(error)
