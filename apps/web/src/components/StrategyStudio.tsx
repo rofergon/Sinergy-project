@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { StrategyTimeframe } from "@sinergy/shared";
 import { fetchBacktestBundle } from "../lib/api";
 import type { ChartViewport, StrategyBacktestBundle, MarketSnapshot } from "../types";
+import { BacktestSummaryGrid } from "./BacktestResults";
 import { TradingViewChart } from "./TradingViewChart";
 import { StrategyPanel } from "./StrategyPanel";
 import { StrategyAgentPanel } from "./StrategyAgentPanel";
@@ -90,6 +91,22 @@ export function StrategyStudio({
               overlay={strategyBacktest?.overlay ?? null}
               onVisibleBarsChange={setViewport}
             />
+            {strategyBacktest?.summary && (
+              <section className="strategy-studio-backtest-summary" aria-label="Backtest statistics">
+                <div className="strategy-studio-backtest-summary-head">
+                  <div>
+                    <span className="strategy-studio-backtest-summary-kicker">Backtest stats</span>
+                    <h3>Estadisticas del backtesting</h3>
+                  </div>
+                  <div className="strategy-studio-backtest-summary-meta">
+                    <span>{strategyBacktest.summary.timeframe}</span>
+                    <span>{strategyBacktest.summary.candleCount} candles</span>
+                    <span>{strategyBacktest.summary.tradeCount} trades</span>
+                  </div>
+                </div>
+                <BacktestSummaryGrid summary={strategyBacktest.summary} />
+              </section>
+            )}
           </div>
 
           <div className="strategy-studio-workspace-col">
