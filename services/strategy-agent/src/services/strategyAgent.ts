@@ -23,7 +23,7 @@ import { probeModel } from "./modelProbe.js";
 import { runFallbackJsonLoop } from "./fallbackRuntime.js";
 import { createEmptyMetrics, finalizeMetrics, finalMessageMentionsRealArtifacts, summarizeToolProgress } from "./runtimePolicy.js";
 import { StrategyAgentSessionStore } from "./sessionStore.js";
-import { createStrategyToolRuntime, type StrategyToolRuntime } from "./strategyToolRuntime.js";
+import { createStrategyToolRuntime, strategyLangChainContextSchema, type StrategyToolRuntime } from "./strategyToolRuntime.js";
 import { attemptValidationRepair } from "./validationRepairLoop.js";
 
 type BasicFastPathConfig = {
@@ -2141,7 +2141,8 @@ Return JSON like:
     const agent = createAgent({
       model: this.model,
       tools: [dummyTool, ...tools],
-      systemPrompt: STRATEGY_AGENT_SYSTEM_PROMPT
+      systemPrompt: STRATEGY_AGENT_SYSTEM_PROMPT,
+      contextSchema: strategyLangChainContextSchema
     });
 
     const response = await agent.invoke({
@@ -2151,6 +2152,12 @@ Return JSON like:
           content: buildUserPrompt({ ...input, session })
         }
       ]
+    }, {
+      context: {
+        ownerAddress: input.ownerAddress,
+        ...(input.marketId ? { marketId: input.marketId } : {}),
+        ...(input.strategyId ? { strategyId: input.strategyId } : {})
+      }
     });
 
     const finalMessage =
