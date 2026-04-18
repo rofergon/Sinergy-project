@@ -87,6 +87,19 @@ What these commands do:
 - `public-nginx.sh start`: Serves the public app, bridge, API, RPC, and related endpoints.
 - `cloudflare-tunnel.sh quick`: Exposes the stack to the internet without opening router ports.
 
+
+# Restart all services (stop + start)
+./scripts/restart-testnet-stack.sh
+
+# Stop all services
+./scripts/restart-testnet-stack.sh stop
+
+# Start all services
+./scripts/restart-testnet-stack.sh start
+
+# Check status
+./scripts/restart-testnet-stack.sh status
+
 ### Manual Setup & Source Build
 
 Install dependencies:

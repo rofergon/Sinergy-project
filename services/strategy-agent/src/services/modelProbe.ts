@@ -6,8 +6,22 @@ type ModelInfo = {
   toolCallingObserved: boolean;
 };
 
-export async function probeModel(baseUrl: string, model: string): Promise<ModelInfo> {
+type ProbeModelOptions = {
+  apiKey?: string;
+  active?: boolean;
+};
+
+function buildProbeHeaders(apiKey?: string) {
+  return apiKey
+    ? {
+        Authorization: `Bearer ${apiKey}`
+      }
+    : undefined;
+}
+
+export async function probeModel(baseUrl: string, model: string, options?: ProbeModelOptions): Promise<ModelInfo> {
   const normalized = baseUrl.replace(/\/$/, "");
+  const headers = buildProbeHeaders(options?.apiKey);
   const result: ModelInfo = {
     reachable: false,
     healthOk: false,
@@ -21,23 +35,31 @@ export async function probeModel(baseUrl: string, model: string): Promise<ModelI
     result.healthOk = true;
   }
 
-  const modelsResponse = await fetch(`${normalized}/models`).catch(() => null);
+  const modelsResponse = await fetch(`${normalized}/models`, {
+    headers
+  }).catch(() => null);
   if (modelsResponse?.ok) {
     const payload = (await modelsResponse.json()) as {
       data?: Array<{ id?: string }>;
       models?: Array<{ model?: string; name?: string }>;
     };
     result.reachable = true;
+    result.healthOk = true;
     result.models = [
       ...(payload.data?.map((item) => item.id).filter(Boolean) ?? []),
       ...(payload.models?.map((item) => item.model ?? item.name).filter(Boolean) ?? [])
     ] as string[];
   }
 
+  if (!options?.active) {
+    return result;
+  }
+
   const chatResponse = await fetch(`${normalized}/chat/completions`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      ...(headers ?? {})
     },
     body: JSON.stringify({
       model,
@@ -54,7 +76,8 @@ export async function probeModel(baseUrl: string, model: string): Promise<ModelI
   const toolsResponse = await fetch(`${normalized}/chat/completions`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      ...(headers ?? {})
     },
     body: JSON.stringify({
       model,

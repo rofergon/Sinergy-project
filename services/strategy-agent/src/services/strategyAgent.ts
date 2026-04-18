@@ -575,6 +575,21 @@ function goalLooksLikeAnalysisDrivenCreation(goal: string) {
   return /analy|analiza|analysis|support|resistance|soporte|resistencia|timeframe|periodicidad|periodicity/i.test(goal);
 }
 
+function goalLooksLikeCapabilityQuestion(goal: string) {
+  const normalized = goal.trim().toLowerCase();
+  if (!normalized) return false;
+
+  return /^(que puedes hacer|qué puedes hacer|what can you do|how can you help|ayuda|help)\??$/i.test(normalized);
+}
+
+function shouldUseCreationFastPath(goal: string) {
+  return (
+    goalLooksLikeFreshCreation(goal) ||
+    goalLooksLikeAnalysisDrivenCreation(goal) ||
+    detectBasicFastPath(goal) !== null
+  );
+}
+
 function goalLooksLikeRsiFilterRequest(goal: string) {
   return /rsi/i.test(goal) && goalLooksLikeModification(goal);
 }
@@ -1575,7 +1590,9 @@ export class StrategyAgentService {
 
   async getHealth() {
     const [modelProbe, matcherHealth] = await Promise.all([
-      probeModel(this.options.modelBaseUrl, this.options.modelName),
+      probeModel(this.options.modelBaseUrl, this.options.modelName, {
+        apiKey: this.options.modelApiKey
+      }),
       fetch(`${this.options.matcherUrl}/health`)
         .then((response) => response.json())
         .catch((error) => ({
@@ -1624,9 +1641,23 @@ export class StrategyAgentService {
   }
 
   async getCapabilities() {
+    const fallbackTools = this.toolRuntime.getCatalog();
     const [modelProbe, toolCatalog] = await Promise.all([
-      probeModel(this.options.modelBaseUrl, this.options.modelName),
-      fetch(`${this.options.matcherUrl}/strategy-tools/catalog`).then((response) => response.json())
+      probeModel(this.options.modelBaseUrl, this.options.modelName, {
+        apiKey: this.options.modelApiKey
+      }),
+      fetch(`${this.options.matcherUrl}/strategy-tools/catalog`)
+        .then(async (response) => {
+          if (!response.ok) {
+            throw new Error(`Matcher catalog probe failed with HTTP ${response.status}`);
+          }
+          return await response.json();
+        })
+        .catch(() => ({
+          result: {
+            tools: fallbackTools
+          }
+        }))
     ]);
 
     return {
@@ -1818,6 +1849,34 @@ Return JSON like:
       text: input.goal
     });
     const sessionSnapshot = this.sessions.snapshot(session);
+
+    if (goalLooksLikeCapabilityQuestion(input.goal)) {
+      const finalMessage = [
+        "Puedo ayudarte a crear, modificar, validar y backtestear estrategias para el mercado seleccionado.",
+        "Tambien puedo revisar estrategias existentes, proponer timeframes, ajustar riesgo y explicar los resultados del backtest.",
+        "Prueba algo como: \"crea una estrategia EMA para este mercado\", \"mejora mi estrategia actual\" o \"analiza este mercado y sugiere una estrategia\"."
+      ].join(" ");
+
+      this.sessions.applyRunDiagnostics(session, { mode: "fallback-json", metrics });
+      this.sessions.addTurn(session, {
+        role: "assistant",
+        mode: "run",
+        text: finalMessage
+      });
+
+      return {
+        requestId,
+        finalMessage,
+        usedTools: [],
+        toolTrace: trace,
+        artifacts,
+        session: this.sessions.snapshot(session),
+        modelModeUsed: "fallback-json",
+        warnings,
+        metrics
+      };
+    }
+
     const preferFreshCreation = goalLooksLikeFreshCreation(input.goal) && !goalLooksLikeOptimization(input.goal);
     const preferAnalysisDrivenCreation =
       !goalLooksLikeOptimization(input.goal) &&
@@ -2287,7 +2346,11 @@ Return JSON like:
     metrics: AgentResponse["metrics"],
     stream?: AgentRunStreamCallbacks
   ): Promise<{ finalMessage: string; artifacts: AgentResponse["artifacts"] } | null> {
-    if (!input.marketId || (input.strategyId && !goalLooksLikeFreshCreation(input.goal))) {
+    if (
+      !input.marketId ||
+      !shouldUseCreationFastPath(input.goal) ||
+      (input.strategyId && !goalLooksLikeFreshCreation(input.goal))
+    ) {
       return null;
     }
 

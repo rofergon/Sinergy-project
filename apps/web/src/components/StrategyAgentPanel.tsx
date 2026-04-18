@@ -218,32 +218,21 @@ export function StrategyAgentPanel({
     return `sinergy.strategy-agent.${address}.${selectedMarket.id}`;
   }, [address, selectedMarket?.id]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadRuntime() {
-      try {
-        const result = await agentApi<AgentCapabilitiesResponse>("/capabilities");
-        if (!cancelled) {
-          setRuntime(result);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setStatus(error instanceof Error ? error.message : String(error));
-        }
+  async function loadRuntime(options?: { silent?: boolean }) {
+    try {
+      const result = await agentApi<AgentCapabilitiesResponse>("/capabilities");
+      setRuntime(result);
+    } catch (error) {
+      if (!options?.silent) {
+        setStatus(error instanceof Error ? error.message : String(error));
       }
     }
-
-    void loadRuntime();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  }
 
   const runtimeBadge = useMemo(() => {
-    if (!runtime) return "Connecting";
-    if (!runtime.model.reachable || !runtime.model.healthOk) return "Offline";
-    return runtime.model.toolCallingObserved ? "Native tools" : "Fallback JSON";
+    if (!runtime) return "Ready";
+    if (!runtime.model.reachable) return "Offline";
+    return runtime.model.toolCallingObserved ? "Native tools" : "Ready";
   }, [runtime]);
   const clarificationRequired = useMemo(() => shouldAskStrategyClarification(prompt), [prompt]);
 
@@ -326,9 +315,8 @@ export function StrategyAgentPanel({
         setPrompt(persisted?.prompt ?? "");
         setMessages([]);
         setSession(null);
+        setHistory([]);
       }
-
-      await refreshHistory(persisted?.activeSessionId, Boolean(persisted?.activeSessionId));
     }
 
     void loadWorkspace();
@@ -336,6 +324,14 @@ export function StrategyAgentPanel({
       cancelled = true;
     };
   }, [address, selectedMarket?.id, storageKey]);
+
+  useEffect(() => {
+    if (!historyRailOpen || !address || !selectedMarket?.id) {
+      return;
+    }
+
+    void refreshHistory();
+  }, [address, historyRailOpen, selectedMarket?.id]);
 
   useEffect(() => {
     if (!storageKey || typeof window === "undefined") return;
@@ -375,6 +371,7 @@ export function StrategyAgentPanel({
   async function submit(mode: "plan" | "run") {
     const goal = prompt.trim();
     if (!address || !goal || !selectedMarket) return;
+    void loadRuntime({ silent: true });
 
     if (clarificationRequired && (!clarifierOpen || clarifierGoal !== goal || clarifierMode !== mode)) {
       setClarifierOpen(true);
@@ -604,7 +601,7 @@ export function StrategyAgentPanel({
           <span className={`strategy-agent-badge ${runtimeBadge === "Offline" ? "offline" : ""}`}>
             {runtimeBadge}
           </span>
-          <small>{runtime?.model.modelName ?? "Loading model..."}</small>
+          <small>{runtime?.model.modelName ?? "Loads on first message"}</small>
         </div>
       </div>
 

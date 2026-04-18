@@ -570,6 +570,40 @@ test("optimization fast path normalizes ast_v2 engines", async () => {
   assert.equal(updatedEngine?.ast?.timeframe, "1h");
 });
 
+test("capability questions return help text instead of creating a strategy", async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), "strategy-agent-test-"));
+  const service = new StrategyAgentService({
+    matcherUrl: "http://localhost:3999",
+    sessionDbFile: join(tempDir, "sessions.sqlite"),
+    modelBaseUrl: "http://localhost:3998",
+    modelName: "test-model",
+    modelApiKey: "test-key",
+    modelTimeoutMs: 2_000,
+    maxSteps: 6,
+    toolcallRetries: 0,
+    forceFallbackJson: true
+  });
+
+  let toolCalls = 0;
+  (service as any).matcherTransport = async () => {
+    toolCalls += 1;
+    return {};
+  };
+
+  const result = await service.run({
+    ownerAddress: "0x00000000000000000000000000000000000000c3",
+    marketId: "0x0000000000000000000000000000000000000000000000000000000000000111",
+    goal: "que puedes hacer",
+    preferredTimeframe: "15m",
+    mode: "run"
+  });
+
+  assert.equal(result.usedTools.length, 0);
+  assert.equal(result.toolTrace.length, 0);
+  assert.equal(toolCalls, 0);
+  assert.match(result.finalMessage, /crear, modificar, validar/i);
+});
+
 test("modification fast path updates the active EMA strategy in place when adding an RSI filter", async () => {
   const tempDir = mkdtempSync(join(tmpdir(), "strategy-agent-test-"));
   const service = new StrategyAgentService({

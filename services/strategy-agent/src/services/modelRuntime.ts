@@ -29,11 +29,11 @@ function buildChatModel(
   return new ChatOpenAI({
     model: options.modelName,
     apiKey: options.modelApiKey,
+    useResponsesApi: true,
     configuration: {
       baseURL: options.modelBaseUrl
     },
     timeout: overrides?.timeout ?? options.modelTimeoutMs,
-    temperature: 0,
     maxRetries: 0,
     ...(options.modelReasoningEffort ? { reasoning: { effort: options.modelReasoningEffort } } : {})
   });
@@ -127,8 +127,7 @@ export async function streamPromptViaChatCompletions(
     body: JSON.stringify({
       model: options.modelName,
       messages: [{ role: "user", content: prompt }],
-      temperature: 0,
-      max_tokens: options.maxTokens ?? 2048,
+      max_completion_tokens: options.maxTokens ?? 2048,
       stream: true
     })
   });
