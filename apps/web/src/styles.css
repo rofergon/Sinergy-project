@@ -1537,6 +1537,57 @@ a { color: inherit; text-decoration: none; }
   flex-direction: column;
 }
 
+.strategy-studio-backtest-summary {
+  flex-shrink: 0;
+  padding: 14px;
+  border-top: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--bg-secondary), var(--bg-tertiary));
+}
+
+.strategy-studio-backtest-summary-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.strategy-studio-backtest-summary-kicker {
+  display: inline-block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.strategy-studio-backtest-summary h3 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--text-primary);
+}
+
+.strategy-studio-backtest-summary-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.strategy-studio-backtest-summary-meta span {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.strategy-studio-backtest-summary .backtest-metric-grid {
+  margin-bottom: 0;
+}
+
 .strategy-studio-workspace-col {
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -3687,6 +3738,12 @@ a { color: inherit; text-decoration: none; }
   .strategy-studio-topbar {
     flex-direction: column;
     align-items: stretch;
+  }
+  .strategy-studio-backtest-summary-head {
+    flex-direction: column;
+  }
+  .strategy-studio-backtest-summary-meta {
+    justify-content: flex-start;
   }
   .strategy-studio-toolbar-actions {
     flex-direction: column;
