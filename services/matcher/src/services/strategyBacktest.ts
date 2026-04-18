@@ -27,21 +27,9 @@ type Position = {
   entryPrice: number;
   quantity: number;
   entryIndex: number;
-  entryFee: number;
-  entrySlippage: number;
   highestClose: number;
   lowestClose: number;
 };
-
-function entryFillPrice(close: number, side: "long" | "short", slippageBps: number) {
-  const factor = slippageBps / 10_000;
-  return side === "long" ? close * (1 + factor) : close * (1 - factor);
-}
-
-function exitFillPrice(close: number, side: "long" | "short", slippageBps: number) {
-  const factor = slippageBps / 10_000;
-  return side === "long" ? close * (1 - factor) : close * (1 + factor);
-}
 
 function calcDrawdownPct(equityCurve: StrategyBacktestSummary["equityCurve"]) {
   let peak = equityCurve[0]?.equity ?? 0;
@@ -99,8 +87,6 @@ export function runStrategyBacktest(
 
   let realizedEquity = strategy.costModel.startingEquity;
   let grossPnlTotal = 0;
-  let feeTotal = 0;
-  let slippageTotal = 0;
   let position: Position | null = null;
   let barsWithExposure = 0;
 
@@ -112,20 +98,15 @@ export function runStrategyBacktest(
   const closePosition = (index: number, reason: StrategyExitReason) => {
     if (!position) return;
     const candle = candles[index];
-    const fillPrice = exitFillPrice(candle.close, position.side, strategy.costModel.slippageBps);
-    const notional = fillPrice * position.quantity;
-    const exitFee = (notional * strategy.costModel.feeBps) / 10_000;
-    const exitSlippage = Math.abs(candle.close - fillPrice) * position.quantity;
+    const fillPrice = candle.close;
     const grossPnl =
       position.side === "long"
         ? (fillPrice - position.entryPrice) * position.quantity
         : (position.entryPrice - fillPrice) * position.quantity;
-    const netPnl = grossPnl - position.entryFee - exitFee;
+    const netPnl = grossPnl;
 
-    realizedEquity += grossPnl - exitFee;
+    realizedEquity += grossPnl;
     grossPnlTotal += grossPnl;
-    feeTotal += position.entryFee + exitFee;
-    slippageTotal += position.entrySlippage + exitSlippage;
 
     trades.push({
       id: randomUUID(),
@@ -139,8 +120,8 @@ export function runStrategyBacktest(
       quantity: Number(position.quantity.toFixed(8)),
       grossPnl: Number(grossPnl.toFixed(8)),
       netPnl: Number(netPnl.toFixed(8)),
-      feesPaid: Number((position.entryFee + exitFee).toFixed(8)),
-      slippagePaid: Number((position.entrySlippage + exitSlippage).toFixed(8)),
+      feesPaid: 0,
+      slippagePaid: 0,
       exitReason: reason,
       barsHeld: index - position.entryIndex
     });
@@ -158,22 +139,14 @@ export function runStrategyBacktest(
     const notional = Math.min(Math.max(desiredNotional, 0), currentEquity);
     if (notional <= 0) return;
 
-    const fillPrice = entryFillPrice(candle.close, side, strategy.costModel.slippageBps);
+    const fillPrice = candle.close;
     const quantity = notional / fillPrice;
-    const entryFee = (notional * strategy.costModel.feeBps) / 10_000;
-    const entrySlippage = Math.abs(fillPrice - candle.close) * quantity;
-
-    realizedEquity -= entryFee;
-    feeTotal += entryFee;
-    slippageTotal += entrySlippage;
     position = {
       side,
       entryTime: candle.ts,
       entryPrice: fillPrice,
       quantity,
       entryIndex: index,
-      entryFee,
-      entrySlippage,
       highestClose: candle.close,
       lowestClose: candle.close
     };
@@ -316,8 +289,8 @@ export function runStrategyBacktest(
       ((((endingEquity - strategy.costModel.startingEquity) / strategy.costModel.startingEquity) * 100) || 0).toFixed(4)
     ),
     grossPnl: Number(grossPnlTotal.toFixed(8)),
-    feesPaid: Number(feeTotal.toFixed(8)),
-    slippagePaid: Number(slippageTotal.toFixed(8)),
+    feesPaid: 0,
+    slippagePaid: 0,
     winRate: Number(((profitableTrades.length / Math.max(trades.length, 1)) * 100).toFixed(4)),
     maxDrawdownPct: Number(calcDrawdownPct(equityCurve).toFixed(4)),
     profitFactor: Number(profitFactor.toFixed(4)),

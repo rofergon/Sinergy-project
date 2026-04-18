@@ -176,6 +176,61 @@ test("backtest summaries include expectancy-style metrics and equality operators
   assert.equal(run.summary.exposurePct > 0, true);
 });
 
+test("backtest ignores configured fees and slippage in pnl calculations", () => {
+  const strategy = makeStrategy("ignores-cost-model");
+  strategy.enabledSides = ["long"];
+  strategy.entryRules.long = [
+    {
+      id: "entry-1",
+      rules: [
+        {
+          id: "entry-rule-1",
+          left: { type: "price_field", field: "close" },
+          operator: ">",
+          right: { type: "constant", value: 10.5 }
+        }
+      ]
+    }
+  ];
+  strategy.entryRules.short = [];
+  strategy.exitRules.long = [
+    {
+      id: "exit-1",
+      rules: [
+        {
+          id: "exit-rule-1",
+          left: { type: "price_field", field: "close" },
+          operator: "<",
+          right: { type: "constant", value: 11.5 }
+        }
+      ]
+    }
+  ];
+  strategy.exitRules.short = [];
+  strategy.riskRules = {};
+  strategy.costModel.feeBps = 250;
+  strategy.costModel.slippageBps = 300;
+  strategy.costModel.startingEquity = 1_000;
+
+  const run = runStrategyBacktest(strategy, [
+    { ts: 1, open: 10, high: 10.1, low: 9.9, close: 10, volume: 10 },
+    { ts: 2, open: 10, high: 11.1, low: 9.9, close: 11, volume: 12 },
+    { ts: 3, open: 11, high: 12.2, low: 10.8, close: 12, volume: 13 },
+    { ts: 4, open: 12, high: 12.1, low: 10.9, close: 11, volume: 14 }
+  ]);
+
+  assert.equal(run.trades.length, 1);
+  assert.equal(run.trades[0]?.entryPrice, 11);
+  assert.equal(run.trades[0]?.exitPrice, 11);
+  assert.equal(run.trades[0]?.feesPaid, 0);
+  assert.equal(run.trades[0]?.slippagePaid, 0);
+  assert.equal(run.trades[0]?.netPnl, 0);
+  assert.equal(run.summary.feesPaid, 0);
+  assert.equal(run.summary.slippagePaid, 0);
+  assert.equal(run.summary.netPnl, 0);
+  assert.equal(run.summary.endingEquity, 1_000);
+});
+
 test("runtime compiler adapts legacy rule groups into reusable condition expressions", () => {
   const strategy = makeStrategy("runtime-adapter");
   strategy.enabledSides = ["long"];

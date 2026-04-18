@@ -169,14 +169,28 @@ app.post("/agent/strategy/run/stream", async (request, reply) => {
   }
 
   reply.raw.setHeader("Content-Type", "text/event-stream");
-  reply.raw.setHeader("Cache-Control", "no-cache, no-transform");
+  reply.raw.setHeader("Cache-Control", "no-cache, no-transform, no-store, must-revalidate");
   reply.raw.setHeader("Connection", "keep-alive");
+  reply.raw.setHeader("X-Accel-Buffering", "no");
+  reply.raw.setHeader("Content-Encoding", "identity");
+  reply.raw.setHeader("Transfer-Encoding", "chunked");
+  reply.raw.socket?.setNoDelay(true);
   reply.raw.flushHeaders?.();
+  reply.hijack();
+
+  // Send an initial prelude so browsers/proxies start yielding the stream immediately.
+  reply.raw.write(`: stream-open ${" ".repeat(2048)}\n\n`);
 
   const send = (event: string, data: unknown) => {
     reply.raw.write(`event: ${event}\n`);
     reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
+    (reply.raw as typeof reply.raw & { flush?: () => void }).flush?.();
   };
+
+  const heartbeat = setInterval(() => {
+    reply.raw.write(`: keep-alive\n\n`);
+    (reply.raw as typeof reply.raw & { flush?: () => void }).flush?.();
+  }, 10_000);
 
   try {
     const result = await agentService.run(
@@ -201,6 +215,7 @@ app.post("/agent/strategy/run/stream", async (request, reply) => {
       message: error instanceof Error ? error.message : String(error)
     });
   } finally {
+    clearInterval(heartbeat);
     reply.raw.end();
   }
 });

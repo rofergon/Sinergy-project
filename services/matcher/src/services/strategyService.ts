@@ -45,6 +45,22 @@ function isoNow() {
   return new Date().toISOString();
 }
 
+function normalizeBacktestSummary(summary: StrategyBacktestSummary): StrategyBacktestSummary {
+  return {
+    ...summary,
+    feesPaid: 0,
+    slippagePaid: 0
+  };
+}
+
+function normalizeBacktestTrade(trade: StrategyBacktestTrade): StrategyBacktestTrade {
+  return {
+    ...trade,
+    feesPaid: 0,
+    slippagePaid: 0
+  };
+}
+
 function defaultBacktestBarsForTimeframe(timeframe: StrategyTimeframe) {
   switch (timeframe) {
     case "1m":
@@ -457,8 +473,8 @@ export class StrategyService {
     }
 
     return {
-      summary: result.summary,
-      trades: result.trades,
+      summary: normalizeBacktestSummary(result.summary),
+      trades: result.trades.map(normalizeBacktestTrade),
       overlay: result.overlay
     };
   }
@@ -479,7 +495,7 @@ export class StrategyService {
         runId: input.runId
       });
     }
-    return JSON.parse(row.summary_json) as StrategyBacktestSummary;
+    return normalizeBacktestSummary(JSON.parse(row.summary_json) as StrategyBacktestSummary);
   }
 
   getBacktestTrades(input: { ownerAddress: HexString; runId: string }) {
@@ -494,7 +510,7 @@ export class StrategyService {
         `
       )
       .all(input.runId, keyOf(input.ownerAddress)) as Array<{ trade_json: string }>;
-    return rows.map((row) => JSON.parse(row.trade_json) as StrategyBacktestTrade);
+    return rows.map((row) => normalizeBacktestTrade(JSON.parse(row.trade_json) as StrategyBacktestTrade));
   }
 
   getBacktestChartOverlay(input: { ownerAddress: HexString; runId: string }) {

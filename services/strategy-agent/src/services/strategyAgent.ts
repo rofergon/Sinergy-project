@@ -1789,6 +1789,53 @@ export class StrategyAgentService {
     });
   }
 
+  private emitFastPathToolStart(entry: AgentToolTraceEntry, stream?: AgentRunStreamCallbacks) {
+    stream?.emit({
+      type: "tool",
+      phase: "start",
+      tool: entry.tool,
+      step: entry.step,
+      message: entry.reason
+    });
+  }
+
+  private emitFastPathToolFinish(entry: AgentToolTraceEntry, stream?: AgentRunStreamCallbacks) {
+    stream?.emit({
+      type: "tool",
+      phase: entry.error ? "error" : "done",
+      tool: entry.tool,
+      step: entry.step,
+      message: entry.error?.message ?? entry.resultSummary ?? entry.expectedArtifact
+    });
+  }
+
+  private async executeFastPathTool<TTool extends StrategyToolName>(
+    entry: AgentToolTraceEntry,
+    input: Parameters<StrategyToolRuntime["invoke"]>[1],
+    stream?: AgentRunStreamCallbacks
+  ) {
+    this.emitFastPathToolStart(entry, stream);
+
+    try {
+      const output = await this.matcherTransport(entry.tool as TTool, input as never);
+      entry.output = output as Record<string, unknown>;
+      entry.completedAt = new Date().toISOString();
+      Object.assign(entry, summarizeToolProgress(entry));
+      this.emitFastPathToolFinish(entry, stream);
+      return output as Record<string, unknown>;
+    } catch (error) {
+      entry.error = {
+        message: error instanceof Error ? error.message : String(error)
+      };
+      entry.completedAt = new Date().toISOString();
+      entry.failureClass = "tool_error";
+      entry.progressObserved = false;
+      entry.resultSummary = entry.error.message;
+      this.emitFastPathToolFinish(entry, stream);
+      throw error;
+    }
+  }
+
   async getCapabilities() {
     const fallbackTools = this.toolRuntime.getCatalog();
     const [modelProbe, toolCatalog] = await Promise.all([
@@ -2067,7 +2114,7 @@ Return JSON like:
       };
     }
 
-    const modificationFastPathResult = await this.tryRunModificationFastPath(activeInput, trace, warnings, metrics);
+    const modificationFastPathResult = await this.tryRunModificationFastPath(activeInput, trace, warnings, metrics, stream);
     if (modificationFastPathResult) {
       artifacts = collectArtifactsFromTrace(trace, modificationFastPathResult.artifacts);
       metrics = finalizeMetrics(metrics, trace);
@@ -2517,12 +2564,9 @@ Return JSON like:
     };
     trace.push(capabilitiesEntry);
 
-    const capabilitiesResult = await this.matcherTransport("list_strategy_capabilities", {
+    const capabilitiesResult = await this.executeFastPathTool(capabilitiesEntry, {
       ownerAddress: input.ownerAddress as HexString
-    });
-    capabilitiesEntry.output = capabilitiesResult as Record<string, unknown>;
-    capabilitiesEntry.completedAt = new Date().toISOString();
-    Object.assign(capabilitiesEntry, summarizeToolProgress(capabilitiesEntry));
+    }, stream);
 
     let marketAnalysis: StrategyMarketAnalysis | undefined;
     const marketAnalysisEntry: AgentToolTraceEntry = {
@@ -2541,15 +2585,12 @@ Return JSON like:
     trace.push(marketAnalysisEntry);
 
     try {
-      const marketAnalysisResult = await this.matcherTransport("analyze_market_context", {
+      const marketAnalysisResult = await this.executeFastPathTool(marketAnalysisEntry, {
         ownerAddress: input.ownerAddress as HexString,
         marketId: input.marketId as HexString,
         ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
         ...(resolveChartRange(input) ?? {})
-      });
-      marketAnalysisEntry.output = marketAnalysisResult as Record<string, unknown>;
-      marketAnalysisEntry.completedAt = new Date().toISOString();
-      Object.assign(marketAnalysisEntry, summarizeToolProgress(marketAnalysisEntry));
+      }, stream);
       marketAnalysis = isStrategyMarketAnalysis(marketAnalysisResult.analysis)
         ? marketAnalysisResult.analysis
         : undefined;
@@ -2572,13 +2613,10 @@ Return JSON like:
     };
     trace.push(templatesEntry);
 
-    const templatesResult = await this.matcherTransport("list_strategy_templates", {
+    const templatesResult = await this.executeFastPathTool(templatesEntry, {
       ownerAddress: input.ownerAddress as HexString,
       marketId: input.marketId as HexString
-    });
-    templatesEntry.output = templatesResult as Record<string, unknown>;
-    templatesEntry.completedAt = new Date().toISOString();
-    Object.assign(templatesEntry, summarizeToolProgress(templatesEntry));
+    }, stream);
 
     let creationPlan: CreationPlan | null = null;
     try {
@@ -2630,14 +2668,11 @@ Return JSON like:
       };
       trace.push(cloneEntry);
 
-      const cloned = await this.matcherTransport("clone_strategy_template", {
+      const cloned = await this.executeFastPathTool(cloneEntry, {
         ownerAddress: input.ownerAddress as HexString,
         marketId: input.marketId as HexString,
         templateId: creationPlan.templateId
-      });
-      cloneEntry.output = cloned as Record<string, unknown>;
-      cloneEntry.completedAt = new Date().toISOString();
-      Object.assign(cloneEntry, summarizeToolProgress(cloneEntry));
+      }, stream);
 
       if (!cloned.strategy || typeof cloned.strategy !== "object") {
         return null;
@@ -2670,17 +2705,14 @@ Return JSON like:
       };
       trace.push(compileEntry);
 
-      const compiled = await this.matcherTransport("compile_strategy_source", {
+      const compiled = await this.executeFastPathTool(compileEntry, {
         ownerAddress: input.ownerAddress as HexString,
         marketId: input.marketId as HexString,
         name: engineBackedCreation.name,
         timeframe: engineBackedCreation.timeframe,
         enabledSides: engineBackedCreation.enabledSides,
         engine: engineBackedCreation.engine
-      });
-      compileEntry.output = compiled as Record<string, unknown>;
-      compileEntry.completedAt = new Date().toISOString();
-      Object.assign(compileEntry, summarizeToolProgress(compileEntry));
+      }, stream);
 
       const compiledEngine =
         compiled.engine && typeof compiled.engine === "object"
@@ -2706,15 +2738,12 @@ Return JSON like:
       };
       trace.push(createEntry);
 
-      const created = await this.matcherTransport("create_strategy_draft", {
+      const created = await this.executeFastPathTool(createEntry, {
         ownerAddress: input.ownerAddress as HexString,
         marketId: input.marketId as HexString,
         name: engineBackedCreation.name,
         engine: compiledEngine
-      });
-      createEntry.output = created as Record<string, unknown>;
-      createEntry.completedAt = new Date().toISOString();
-      Object.assign(createEntry, summarizeToolProgress(createEntry));
+      }, stream);
 
       if (!created.strategy || typeof created.strategy !== "object") {
         return null;
@@ -2756,13 +2785,10 @@ Return JSON like:
     };
     trace.push(updateEntry);
 
-    const updated = await this.matcherTransport("update_strategy_draft", {
+    const updated = await this.executeFastPathTool(updateEntry, {
       ownerAddress: input.ownerAddress as HexString,
       strategy: nextStrategy
-    });
-    updateEntry.output = updated as Record<string, unknown>;
-    updateEntry.completedAt = new Date().toISOString();
-    Object.assign(updateEntry, summarizeToolProgress(updateEntry));
+    }, stream);
 
     activeStrategy = (updated.strategy && typeof updated.strategy === "object"
       ? updated.strategy
@@ -2783,13 +2809,10 @@ Return JSON like:
     };
     trace.push(validateEntry);
 
-    const validationResult = await this.matcherTransport("validate_strategy_draft", {
+    const validationResult = await this.executeFastPathTool(validateEntry, {
       ownerAddress: input.ownerAddress as HexString,
       strategyId
-    });
-    validateEntry.output = validationResult as Record<string, unknown>;
-    validateEntry.completedAt = new Date().toISOString();
-    Object.assign(validateEntry, summarizeToolProgress(validateEntry));
+    }, stream);
 
     let validationOk = (validationResult.validation as { ok?: boolean } | undefined)?.ok === true;
     let finalStrategy = activeStrategy;
@@ -2819,13 +2842,10 @@ Return JSON like:
         };
         trace.push(repairEntry);
 
-        const repaired = await this.matcherTransport("update_strategy_draft", {
+        const repaired = await this.executeFastPathTool(repairEntry, {
           ownerAddress: input.ownerAddress as HexString,
           strategy: repair.patchedStrategy
-        });
-        repairEntry.output = repaired as Record<string, unknown>;
-        repairEntry.completedAt = new Date().toISOString();
-        Object.assign(repairEntry, summarizeToolProgress(repairEntry));
+        }, stream);
 
         finalStrategy = (repaired.strategy && typeof repaired.strategy === "object"
           ? repaired.strategy
@@ -2844,13 +2864,10 @@ Return JSON like:
         };
         trace.push(revalidateEntry);
 
-        const revalidated = await this.matcherTransport("validate_strategy_draft", {
+        const revalidated = await this.executeFastPathTool(revalidateEntry, {
           ownerAddress: input.ownerAddress as HexString,
           strategyId: finalStrategy.id
-        });
-        revalidateEntry.output = revalidated as Record<string, unknown>;
-        revalidateEntry.completedAt = new Date().toISOString();
-        Object.assign(revalidateEntry, summarizeToolProgress(revalidateEntry));
+        }, stream);
 
         validationOk = (revalidated.validation as { ok?: boolean } | undefined)?.ok === true;
         if (validationOk) {
@@ -2879,15 +2896,12 @@ Return JSON like:
       };
       trace.push(backtestEntry);
 
-      const backtest = await this.matcherTransport("run_strategy_backtest", {
+      const backtest = await this.executeFastPathTool(backtestEntry, {
         ownerAddress: input.ownerAddress as HexString,
         strategyId: finalStrategy.id,
         ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
         ...(resolveChartRange(input) ?? {})
-      });
-      backtestEntry.output = backtest as Record<string, unknown>;
-      backtestEntry.completedAt = new Date().toISOString();
-      Object.assign(backtestEntry, summarizeToolProgress(backtestEntry));
+      }, stream);
 
       const summary = backtest.summary as { netPnl?: number; winRate?: number; tradeCount?: number; maxDrawdownPct?: number; profitFactor?: number } | undefined;
 
@@ -2930,7 +2944,8 @@ Return JSON like:
     input: AgentStrategyRequest,
     trace: AgentToolTraceEntry[],
     warnings: string[],
-    metrics: AgentResponse["metrics"]
+    metrics: AgentResponse["metrics"],
+    stream?: AgentRunStreamCallbacks
   ): Promise<{ finalMessage: string; artifacts: AgentResponse["artifacts"] } | null> {
     if (!input.strategyId || !goalLooksLikeRsiFilterRequest(input.goal)) {
       return null;
@@ -2949,13 +2964,10 @@ Return JSON like:
     };
     trace.push(getEntry);
 
-    const existing = await this.matcherTransport("get_strategy", {
+    const existing = await this.executeFastPathTool(getEntry, {
       ownerAddress: input.ownerAddress as HexString,
       strategyId: input.strategyId
-    });
-    getEntry.output = existing as Record<string, unknown>;
-    getEntry.completedAt = new Date().toISOString();
-    Object.assign(getEntry, summarizeToolProgress(getEntry));
+    }, stream);
 
     if (!existing.strategy || typeof existing.strategy !== "object") {
       return null;
@@ -2991,15 +3003,12 @@ Return JSON like:
     trace.push(marketAnalysisEntry);
 
     try {
-      const analysisResult = await this.matcherTransport("analyze_market_context", {
+      const analysisResult = await this.executeFastPathTool(marketAnalysisEntry, {
         ownerAddress: input.ownerAddress as HexString,
         marketId: baseStrategy.marketId,
         ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
         ...(resolveChartRange(input) ?? {})
-      });
-      marketAnalysisEntry.output = analysisResult as Record<string, unknown>;
-      marketAnalysisEntry.completedAt = new Date().toISOString();
-      Object.assign(marketAnalysisEntry, summarizeToolProgress(marketAnalysisEntry));
+      }, stream);
       marketAnalysis = isStrategyMarketAnalysis(analysisResult.analysis)
         ? analysisResult.analysis
         : undefined;
@@ -3064,17 +3073,14 @@ Return JSON like:
     };
     trace.push(compileEntry);
 
-    const compiled = await this.matcherTransport("compile_strategy_source", {
+    const compiled = await this.executeFastPathTool(compileEntry, {
       ownerAddress: input.ownerAddress as HexString,
       marketId: baseStrategy.marketId,
       name: engineCandidate.name,
       timeframe: engineCandidate.timeframe,
       enabledSides: engineCandidate.enabledSides,
       engine: engineCandidate.engine
-    });
-    compileEntry.output = compiled as Record<string, unknown>;
-    compileEntry.completedAt = new Date().toISOString();
-    Object.assign(compileEntry, summarizeToolProgress(compileEntry));
+    }, stream);
 
     const compiledEngine =
       compiled.engine && typeof compiled.engine === "object"
@@ -3103,13 +3109,10 @@ Return JSON like:
     };
     trace.push(updateEntry);
 
-    const updated = await this.matcherTransport("update_strategy_draft", {
+    const updated = await this.executeFastPathTool(updateEntry, {
       ownerAddress: input.ownerAddress as HexString,
       strategy: nextStrategy
-    });
-    updateEntry.output = updated as Record<string, unknown>;
-    updateEntry.completedAt = new Date().toISOString();
-    Object.assign(updateEntry, summarizeToolProgress(updateEntry));
+    }, stream);
 
     const activeStrategy = (updated.strategy && typeof updated.strategy === "object"
       ? updated.strategy
@@ -3128,13 +3131,10 @@ Return JSON like:
     };
     trace.push(validateEntry);
 
-    const validation = await this.matcherTransport("validate_strategy_draft", {
+    const validation = await this.executeFastPathTool(validateEntry, {
       ownerAddress: input.ownerAddress as HexString,
       strategyId: activeStrategy.id
-    });
-    validateEntry.output = validation as Record<string, unknown>;
-    validateEntry.completedAt = new Date().toISOString();
-    Object.assign(validateEntry, summarizeToolProgress(validateEntry));
+    }, stream);
 
     if ((validation.validation as { ok?: boolean } | undefined)?.ok !== true) {
       return {
@@ -3158,15 +3158,12 @@ Return JSON like:
     };
     trace.push(backtestEntry);
 
-    const backtest = await this.matcherTransport("run_strategy_backtest", {
+    const backtest = await this.executeFastPathTool(backtestEntry, {
       ownerAddress: input.ownerAddress as HexString,
       strategyId: activeStrategy.id,
       ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
       ...(resolveChartRange(input) ?? {})
-    });
-    backtestEntry.output = backtest as Record<string, unknown>;
-    backtestEntry.completedAt = new Date().toISOString();
-    Object.assign(backtestEntry, summarizeToolProgress(backtestEntry));
+    }, stream);
 
     const summary = backtest.summary as {
       netPnl?: number;
@@ -3209,13 +3206,10 @@ Return JSON like:
     };
     trace.push(getEntry);
 
-    const existing = await this.matcherTransport("get_strategy", {
+    const existing = await this.executeFastPathTool(getEntry, {
       ownerAddress: input.ownerAddress as HexString,
       strategyId: input.strategyId
-    });
-    getEntry.output = existing as Record<string, unknown>;
-    getEntry.completedAt = new Date().toISOString();
-    Object.assign(getEntry, summarizeToolProgress(getEntry));
+    }, stream);
 
     if (!existing.strategy || typeof existing.strategy !== "object") {
       return null;
@@ -3261,15 +3255,12 @@ Return JSON like:
     trace.push(marketAnalysisEntry);
 
     try {
-      const analysisResult = await this.matcherTransport("analyze_market_context", {
+      const analysisResult = await this.executeFastPathTool(marketAnalysisEntry, {
         ownerAddress: input.ownerAddress as HexString,
         marketId: baseStrategy.marketId,
         ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
         ...(resolveChartRange(input) ?? {})
-      });
-      marketAnalysisEntry.output = analysisResult as Record<string, unknown>;
-      marketAnalysisEntry.completedAt = new Date().toISOString();
-      Object.assign(marketAnalysisEntry, summarizeToolProgress(marketAnalysisEntry));
+      }, stream);
       marketAnalysis = isStrategyMarketAnalysis(analysisResult.analysis)
         ? analysisResult.analysis
         : undefined;
@@ -3299,15 +3290,12 @@ Return JSON like:
       };
       trace.push(baselineEntry);
 
-      const baseline = await this.matcherTransport("run_strategy_backtest", {
+      const baseline = await this.executeFastPathTool(baselineEntry, {
         ownerAddress: input.ownerAddress as HexString,
         strategyId: baseStrategy.id,
         ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
         ...(resolveChartRange(input) ?? {})
-      });
-      baselineEntry.output = baseline as Record<string, unknown>;
-      baselineEntry.completedAt = new Date().toISOString();
-      Object.assign(baselineEntry, summarizeToolProgress(baselineEntry));
+      }, stream);
       currentSummary = baseline.summary as Record<string, unknown> | undefined;
     } catch (error) {
       warnings.push(`Baseline backtest for optimization failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -3467,17 +3455,14 @@ Return JSON like:
         };
         trace.push(compileEntry);
 
-        const compiled = await this.matcherTransport("compile_strategy_source", {
+        const compiled = await this.executeFastPathTool(compileEntry, {
           ownerAddress: input.ownerAddress as HexString,
           marketId: baseStrategy.marketId as HexString,
           name: engineCandidate.name,
           timeframe: engineCandidate.timeframe,
           enabledSides: engineCandidate.enabledSides,
           engine: engineCandidate.engine
-        });
-        compileEntry.output = compiled as Record<string, unknown>;
-        compileEntry.completedAt = new Date().toISOString();
-        Object.assign(compileEntry, summarizeToolProgress(compileEntry));
+        }, stream);
 
         const compiledEngine =
           compiled.engine && typeof compiled.engine === "object"
@@ -3506,13 +3491,10 @@ Return JSON like:
         };
         trace.push(updateEntry);
 
-        const updated = await this.matcherTransport("update_strategy_draft", {
+        const updated = await this.executeFastPathTool(updateEntry, {
           ownerAddress: input.ownerAddress as HexString,
           strategy: nextCandidate
-        });
-        updateEntry.output = updated as Record<string, unknown>;
-        updateEntry.completedAt = new Date().toISOString();
-        Object.assign(updateEntry, summarizeToolProgress(updateEntry));
+        }, stream);
 
         const validateEntry: AgentToolTraceEntry = {
           step: trace.length + 1,
@@ -3527,13 +3509,10 @@ Return JSON like:
         };
         trace.push(validateEntry);
 
-        const validation = await this.matcherTransport("validate_strategy_draft", {
+        const validation = await this.executeFastPathTool(validateEntry, {
           ownerAddress: input.ownerAddress as HexString,
           strategyId: baseStrategy.id
-        });
-        validateEntry.output = validation as Record<string, unknown>;
-        validateEntry.completedAt = new Date().toISOString();
-        Object.assign(validateEntry, summarizeToolProgress(validateEntry));
+        }, stream);
 
         if ((validation.validation as { ok?: boolean } | undefined)?.ok !== true) {
           continue;
@@ -3554,23 +3533,21 @@ Return JSON like:
         };
         trace.push(backtestEntry);
 
-        const backtest = await this.matcherTransport("run_strategy_backtest", {
+        const backtest = await this.executeFastPathTool(backtestEntry, {
           ownerAddress: input.ownerAddress as HexString,
           strategyId: baseStrategy.id,
           ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
           ...(resolveChartRange(input) ?? {})
-        });
-        backtestEntry.output = backtest as Record<string, unknown>;
-        backtestEntry.completedAt = new Date().toISOString();
-        Object.assign(backtestEntry, summarizeToolProgress(backtestEntry));
+        }, stream);
 
-        const pnl = typeof backtest.summary?.netPnl === "number" ? backtest.summary.netPnl : Number.NEGATIVE_INFINITY;
+        const backtestSummary = backtest.summary as { netPnl?: number } | undefined;
+        const pnl = typeof backtestSummary?.netPnl === "number" ? backtestSummary.netPnl : Number.NEGATIVE_INFINITY;
         if (pnl > bestPnl) {
           bestPnl = pnl;
           bestStrategy = (updated.strategy && typeof updated.strategy === "object"
             ? updated.strategy
             : nextCandidate) as StrategyDefinition;
-          bestSummary = backtest.summary as Record<string, unknown>;
+          bestSummary = backtestSummary as Record<string, unknown>;
         }
 
         continue;
@@ -3605,17 +3582,14 @@ Return JSON like:
         };
         trace.push(compileEntry);
 
-        const compiled = await this.matcherTransport("compile_strategy_source", {
+        const compiled = await this.executeFastPathTool(compileEntry, {
           ownerAddress: input.ownerAddress as HexString,
           marketId: baseStrategy.marketId as HexString,
           name: baseStrategy.name,
           timeframe,
           enabledSides,
           engine: engineCandidate
-        });
-        compileEntry.output = compiled as Record<string, unknown>;
-        compileEntry.completedAt = new Date().toISOString();
-        Object.assign(compileEntry, summarizeToolProgress(compileEntry));
+        }, stream);
 
         const compiledEngine =
           compiled.engine && typeof compiled.engine === "object"
@@ -3643,13 +3617,10 @@ Return JSON like:
         };
         trace.push(updateEntry);
 
-        const updated = await this.matcherTransport("update_strategy_draft", {
+        const updated = await this.executeFastPathTool(updateEntry, {
           ownerAddress: input.ownerAddress as HexString,
           strategy: nextCandidate
-        });
-        updateEntry.output = updated as Record<string, unknown>;
-        updateEntry.completedAt = new Date().toISOString();
-        Object.assign(updateEntry, summarizeToolProgress(updateEntry));
+        }, stream);
 
         const validateEntry: AgentToolTraceEntry = {
           step: trace.length + 1,
@@ -3664,13 +3635,10 @@ Return JSON like:
         };
         trace.push(validateEntry);
 
-        const validation = await this.matcherTransport("validate_strategy_draft", {
+        const validation = await this.executeFastPathTool(validateEntry, {
           ownerAddress: input.ownerAddress as HexString,
           strategyId: baseStrategy.id
-        });
-        validateEntry.output = validation as Record<string, unknown>;
-        validateEntry.completedAt = new Date().toISOString();
-        Object.assign(validateEntry, summarizeToolProgress(validateEntry));
+        }, stream);
 
         if ((validation.validation as { ok?: boolean } | undefined)?.ok !== true) {
           continue;
@@ -3691,23 +3659,21 @@ Return JSON like:
         };
         trace.push(backtestEntry);
 
-        const backtest = await this.matcherTransport("run_strategy_backtest", {
+        const backtest = await this.executeFastPathTool(backtestEntry, {
           ownerAddress: input.ownerAddress as HexString,
           strategyId: baseStrategy.id,
           ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
           ...(resolveChartRange(input) ?? {})
-        });
-        backtestEntry.output = backtest as Record<string, unknown>;
-        backtestEntry.completedAt = new Date().toISOString();
-        Object.assign(backtestEntry, summarizeToolProgress(backtestEntry));
+        }, stream);
 
-        const pnl = typeof backtest.summary?.netPnl === "number" ? backtest.summary.netPnl : Number.NEGATIVE_INFINITY;
+        const backtestSummary = backtest.summary as { netPnl?: number } | undefined;
+        const pnl = typeof backtestSummary?.netPnl === "number" ? backtestSummary.netPnl : Number.NEGATIVE_INFINITY;
         if (pnl > bestPnl) {
           bestPnl = pnl;
           bestStrategy = (updated.strategy && typeof updated.strategy === "object"
             ? updated.strategy
             : nextCandidate) as StrategyDefinition;
-          bestSummary = backtest.summary as Record<string, unknown>;
+          bestSummary = backtestSummary as Record<string, unknown>;
         }
 
         continue;
@@ -3770,13 +3736,10 @@ Return JSON like:
       };
       trace.push(updateEntry);
 
-      const updated = await this.matcherTransport("update_strategy_draft", {
+      const updated = await this.executeFastPathTool(updateEntry, {
         ownerAddress: input.ownerAddress as HexString,
         strategy: candidate
-      });
-      updateEntry.output = updated as Record<string, unknown>;
-      updateEntry.completedAt = new Date().toISOString();
-      Object.assign(updateEntry, summarizeToolProgress(updateEntry));
+      }, stream);
 
       const validateEntry: AgentToolTraceEntry = {
         step: trace.length + 1,
@@ -3791,13 +3754,10 @@ Return JSON like:
       };
       trace.push(validateEntry);
 
-      const validation = await this.matcherTransport("validate_strategy_draft", {
+      const validation = await this.executeFastPathTool(validateEntry, {
         ownerAddress: input.ownerAddress as HexString,
         strategyId: candidate.id
-      });
-      validateEntry.output = validation as Record<string, unknown>;
-      validateEntry.completedAt = new Date().toISOString();
-      Object.assign(validateEntry, summarizeToolProgress(validateEntry));
+      }, stream);
 
       if ((validation.validation as { ok?: boolean } | undefined)?.ok !== true) {
         continue;
@@ -3818,21 +3778,19 @@ Return JSON like:
       };
       trace.push(backtestEntry);
 
-      const backtest = await this.matcherTransport("run_strategy_backtest", {
+      const backtest = await this.executeFastPathTool(backtestEntry, {
         ownerAddress: input.ownerAddress as HexString,
         strategyId: candidate.id,
         ...(resolveBacktestBars(input) ? { bars: resolveBacktestBars(input) } : {}),
         ...(resolveChartRange(input) ?? {})
-      });
-      backtestEntry.output = backtest as Record<string, unknown>;
-      backtestEntry.completedAt = new Date().toISOString();
-      Object.assign(backtestEntry, summarizeToolProgress(backtestEntry));
+      }, stream);
 
-      const pnl = typeof backtest.summary?.netPnl === "number" ? backtest.summary.netPnl : Number.NEGATIVE_INFINITY;
+      const backtestSummary = backtest.summary as { netPnl?: number } | undefined;
+      const pnl = typeof backtestSummary?.netPnl === "number" ? backtestSummary.netPnl : Number.NEGATIVE_INFINITY;
       if (pnl > bestPnl) {
         bestPnl = pnl;
         bestStrategy = (updated.strategy && typeof updated.strategy === "object" ? updated.strategy : candidate) as StrategyDefinition;
-        bestSummary = backtest.summary as Record<string, unknown>;
+        bestSummary = backtestSummary as Record<string, unknown>;
       }
       if (pnl > 0) {
         break;
