@@ -135,6 +135,24 @@ export function buildUserPrompt(input: {
   return `Work on this request:\n${context}\n\nSession context:\n${sessionContext}`;
 }
 
+export function buildNativeRuntimeStatePrompt(input: {
+  ownerAddress?: string;
+  marketId?: string;
+  strategyId?: string;
+  runId?: string;
+}) {
+  return [
+    "Native runtime context for this turn:",
+    `- ownerAddress: ${input.ownerAddress ?? "not provided"}`,
+    `- marketId: ${input.marketId ?? "not provided"}`,
+    `- active strategyId from runtime state: ${input.strategyId ?? "not available"}`,
+    `- active runId from runtime state: ${input.runId ?? "not available"}`,
+    "- Reuse the active strategyId from runtime state for get_strategy, validate_strategy_draft, run_strategy_backtest, or save_strategy when the tool schema needs it and the user is working on the current draft.",
+    "- Reuse the active runId from runtime state for get_backtest_summary, get_backtest_trades, and get_backtest_chart_overlay when inspecting the latest completed backtest.",
+    "- Do not ask the user to repeat IDs that are already available in runtime context or runtime state."
+  ].join("\n");
+}
+
 export function buildFallbackPlannerPrompt(input: {
   goal: string;
   ownerAddress: string;
