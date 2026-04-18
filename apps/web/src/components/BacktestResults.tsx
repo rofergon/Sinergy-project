@@ -9,6 +9,53 @@ function formatMetric(value: number, digits = 2) {
   return Number.isFinite(value) ? value.toFixed(digits) : "--";
 }
 
+export function BacktestSummaryGrid({ summary }: { summary: StrategyBacktestSummary }) {
+  return (
+    <div className="backtest-metric-grid">
+      <div className="backtest-metric-card">
+        <span>Net PnL</span>
+        <strong className={summary.netPnl >= 0 ? "up" : "down"}>
+          {formatMetric(summary.netPnl)} ({formatMetric(summary.netPnlPct)}%)
+        </strong>
+      </div>
+      <div className="backtest-metric-card">
+        <span>Win Rate</span>
+        <strong>{formatMetric(summary.winRate)}%</strong>
+      </div>
+      <div className="backtest-metric-card">
+        <span>Max Drawdown</span>
+        <strong>{formatMetric(summary.maxDrawdownPct)}%</strong>
+      </div>
+      <div className="backtest-metric-card">
+        <span>Profit Factor</span>
+        <strong>{formatMetric(summary.profitFactor, 3)}</strong>
+      </div>
+      <div className="backtest-metric-card">
+        <span>Trades</span>
+        <strong>{summary.tradeCount}</strong>
+      </div>
+      <div className="backtest-metric-card">
+        <span>Avg Trade / Expectancy</span>
+        <strong>
+          {formatMetric(summary.avgTradeNetPnl)} / {formatMetric(summary.expectancy)}
+        </strong>
+      </div>
+      <div className="backtest-metric-card">
+        <span>Exposure / Avg Bars</span>
+        <strong>
+          {formatMetric(summary.exposurePct)}% / {formatMetric(summary.avgBarsHeld)}
+        </strong>
+      </div>
+      <div className="backtest-metric-card">
+        <span>Fees / Slippage</span>
+        <strong>
+          {formatMetric(summary.feesPaid)} / {formatMetric(summary.slippagePaid)}
+        </strong>
+      </div>
+    </div>
+  );
+}
+
 export function BacktestResults({ summary, trades }: Props) {
   if (!summary) {
     return <div className="no-orders-msg">Run a strategy backtest to see metrics and trades.</div>;
@@ -16,48 +63,7 @@ export function BacktestResults({ summary, trades }: Props) {
 
   return (
     <div className="backtest-results">
-      <div className="backtest-metric-grid">
-        <div className="backtest-metric-card">
-          <span>Net PnL</span>
-          <strong className={summary.netPnl >= 0 ? "up" : "down"}>
-            {formatMetric(summary.netPnl)} ({formatMetric(summary.netPnlPct)}%)
-          </strong>
-        </div>
-        <div className="backtest-metric-card">
-          <span>Win Rate</span>
-          <strong>{formatMetric(summary.winRate)}%</strong>
-        </div>
-        <div className="backtest-metric-card">
-          <span>Max Drawdown</span>
-          <strong>{formatMetric(summary.maxDrawdownPct)}%</strong>
-        </div>
-        <div className="backtest-metric-card">
-          <span>Profit Factor</span>
-          <strong>{formatMetric(summary.profitFactor, 3)}</strong>
-        </div>
-        <div className="backtest-metric-card">
-          <span>Trades</span>
-          <strong>{summary.tradeCount}</strong>
-        </div>
-        <div className="backtest-metric-card">
-          <span>Avg Trade / Expectancy</span>
-          <strong>
-            {formatMetric(summary.avgTradeNetPnl)} / {formatMetric(summary.expectancy)}
-          </strong>
-        </div>
-        <div className="backtest-metric-card">
-          <span>Exposure / Avg Bars</span>
-          <strong>
-            {formatMetric(summary.exposurePct)}% / {formatMetric(summary.avgBarsHeld)}
-          </strong>
-        </div>
-        <div className="backtest-metric-card">
-          <span>Fees / Slippage</span>
-          <strong>
-            {formatMetric(summary.feesPaid)} / {formatMetric(summary.slippagePaid)}
-          </strong>
-        </div>
-      </div>
+      <BacktestSummaryGrid summary={summary} />
 
       <div className="orders-table-header">
         <span>Side</span>
