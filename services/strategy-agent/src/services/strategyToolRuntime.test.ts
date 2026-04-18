@@ -113,3 +113,38 @@ test("tracked LangChain tools read strategyId and runId from runtime state", asy
   assert.equal((result as { update?: { runId?: string } }).update?.runId, "22222222-2222-4222-8222-222222222222");
   assert.equal(trace[0]?.input?.strategyId, "11111111-1111-4111-8111-111111111111");
 });
+
+test("tracked LangChain tools emit custom progress events through runtime writer", async () => {
+  const progressEvents: Array<{ type?: string; tool?: string; message?: string }> = [];
+  const runtime = createStrategyToolRuntime({
+    transport: (async () => ({
+      capabilities: {}
+    })) as any
+  });
+
+  const trace: any[] = [];
+  const tools = runtime.createTrackedLangChainTools({
+    ownerAddress: "0x00000000000000000000000000000000000000c3",
+    trace
+  });
+
+  const capabilitiesTool = tools.find((entry) => entry.name === "list_strategy_capabilities");
+  assert.ok(capabilitiesTool);
+
+  await (capabilitiesTool as any).invoke(
+    {},
+    {
+      context: {
+        ownerAddress: "0x00000000000000000000000000000000000000c3"
+      },
+      writer(chunk: unknown) {
+        progressEvents.push(chunk as { type?: string; tool?: string; message?: string });
+      }
+    }
+  );
+
+  assert.ok(progressEvents.length >= 2);
+  assert.equal(progressEvents[0]?.type, "tool_progress");
+  assert.equal(progressEvents[0]?.tool, "list_strategy_capabilities");
+  assert.match(String(progressEvents.map((event) => event.message).join("\n")), /Calling strategy tool service|completed successfully|capabilities/i);
+});
