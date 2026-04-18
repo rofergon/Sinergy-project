@@ -36,9 +36,15 @@ test("tracked LangChain tools inject context, append trace entries, and persist 
   const createDraftTool = tools.find((entry) => entry.name === "create_strategy_draft");
   assert.ok(createDraftTool);
 
-  const result = await (createDraftTool as any).func(
+  const result = await (createDraftTool as any).invoke(
     { name: "EMA runtime test" },
-    { toolCallId: "tool-call-1" }
+    {
+      toolCallId: "tool-call-1",
+      context: {
+        ownerAddress: "0x00000000000000000000000000000000000000c3",
+        marketId: "0x0000000000000000000000000000000000000000000000000000000000000111"
+      }
+    }
   );
 
   assert.equal(calls.length, 1);
@@ -82,7 +88,7 @@ test("tracked LangChain tools read strategyId and runId from runtime state", asy
   const backtestTool = tools.find((entry) => entry.name === "run_strategy_backtest");
   assert.ok(backtestTool);
 
-  const result = await (backtestTool as any).func(
+  const result = await (backtestTool as any).invoke(
     { bars: 500 },
     {
       toolCallId: "tool-call-2",
