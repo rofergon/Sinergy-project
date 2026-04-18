@@ -144,6 +144,29 @@ function buildStatePatch(output: Record<string, unknown>) {
   return patch;
 }
 
+function writeToolProgress(
+  runtime: unknown,
+  payload: {
+    tool: string;
+    step?: number;
+    message: string;
+  }
+) {
+  if (!runtime || typeof runtime !== "object" || !("writer" in runtime)) {
+    return;
+  }
+  const writer = (runtime as { writer?: unknown }).writer;
+  if (typeof writer !== "function") {
+    return;
+  }
+  writer({
+    type: "tool_progress",
+    tool: payload.tool,
+    step: payload.step,
+    message: payload.message
+  });
+}
+
 export function createStrategyToolRuntime(options: {
   matcherUrl?: string;
   transport?: StrategyToolTransport;
@@ -193,6 +216,11 @@ export function createStrategyToolRuntime(options: {
             startedAt
           };
           toolOptions.trace.push(entry);
+          writeToolProgress(runtime, {
+            tool: definition.name,
+            step,
+            message: "Calling strategy tool service."
+          });
 
           try {
             const output = await invokeUntyped(definition.name, mergedInput);
@@ -201,11 +229,21 @@ export function createStrategyToolRuntime(options: {
             const progress = summarizeToolProgress(entry);
             entry.progressObserved = progress.progressObserved;
             entry.resultSummary = progress.resultSummary;
+            writeToolProgress(runtime, {
+              tool: definition.name,
+              step,
+              message: progress.resultSummary ?? "Tool completed successfully."
+            });
 
             const statePatch = entry.output ? buildStatePatch(entry.output) : {};
             if (Object.keys(statePatch).length === 0) {
               return output;
             }
+            writeToolProgress(runtime, {
+              tool: definition.name,
+              step,
+              message: `Updated runtime state with ${Object.keys(statePatch).join(", ")}.`
+            });
 
             const toolCallId =
               runtime && typeof runtime === "object" && "toolCallId" in runtime
@@ -231,6 +269,11 @@ export function createStrategyToolRuntime(options: {
             entry.failureClass = "tool_error";
             entry.progressObserved = false;
             entry.resultSummary = entry.error.message;
+            writeToolProgress(runtime, {
+              tool: definition.name,
+              step,
+              message: entry.error.message
+            });
             throw error;
           }
         },
