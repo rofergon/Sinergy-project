@@ -46,12 +46,6 @@ export function BacktestSummaryGrid({ summary }: { summary: StrategyBacktestSumm
           {formatMetric(summary.exposurePct)}% / {formatMetric(summary.avgBarsHeld)}
         </strong>
       </div>
-      <div className="backtest-metric-card">
-        <span>Fees / Slippage</span>
-        <strong>
-          {formatMetric(summary.feesPaid)} / {formatMetric(summary.slippagePaid)}
-        </strong>
-      </div>
     </div>
   );
 }

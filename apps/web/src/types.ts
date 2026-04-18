@@ -62,6 +62,11 @@ export type StrategyAgentToolTraceEntry = {
   step: number;
   tool: StrategyToolName;
   input: Record<string, unknown>;
+  reason?: string;
+  expectedArtifact?: string;
+  resultSummary?: string;
+  progressObserved?: boolean;
+  failureClass?: "invalid_input" | "tool_error" | "parse_error" | "stalled" | "policy_block" | "unknown";
   output?: Record<string, unknown>;
   error?: {
     code?: string;
