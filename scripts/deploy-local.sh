@@ -149,6 +149,7 @@ CSOL_ADDRESS="$(deploy_contract RwaShareToken '(string,string,address,uint256)' 
 CINIT_ADDRESS="$(deploy_contract RwaShareToken '(string,string,address,uint256)' "Connected Initia" "cINIT" "$GAS_STATION_HEX" "1000000000000000000000000")"
 VAULT_ADDRESS="$(deploy_contract DarkPoolVault '(address,address)' "$GAS_STATION_HEX" "$MATCHER_ADDRESS")"
 MARKET_ADDRESS="$(deploy_contract DarkPoolMarket '(address,address)' "$GAS_STATION_HEX" "$MATCHER_ADDRESS")"
+STRATEGY_EXECUTOR_ADDRESS="$(deploy_contract StrategyExecutor '(address,address)' "$GAS_STATION_HEX" "$MATCHER_ADDRESS")"
 
 echo "Configuring vault and listing markets..."
 call_as_gas_station "$VAULT_ADDRESS" "setSupportedToken(address,bool)" "$USDC_ADDRESS" true
@@ -177,6 +178,7 @@ jq -n \
   --arg matcherAddress "$MATCHER_ADDRESS" \
   --arg vault "$VAULT_ADDRESS" \
   --arg market "$MARKET_ADDRESS" \
+  --arg strategyExecutor "$STRATEGY_EXECUTOR_ADDRESS" \
   --arg quote "$USDC_ADDRESS" \
   --arg networkName "$NETWORK_NAME" \
   --arg rollupChainId "$ROLLUP_CHAIN_ID" \
@@ -231,6 +233,7 @@ jq -n \
     contracts: {
       vault: $vault,
       market: $market,
+      strategyExecutor: $strategyExecutor,
       quoteToken: $quote
     },
     tokens: [
