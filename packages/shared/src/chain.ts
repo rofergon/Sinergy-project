@@ -45,6 +45,7 @@ export type SinergyDeployment = {
     zkVault?: `0x${string}`;
     stateAnchor?: `0x${string}`;
     withdrawalVerifier?: `0x${string}`;
+    strategyExecutor?: `0x${string}`;
   };
   tokens: DeploymentToken[];
 };
