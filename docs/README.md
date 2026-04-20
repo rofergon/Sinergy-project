@@ -14,6 +14,7 @@ If you want to understand what Sinergy is and how its microservices and on-chain
 *   **[Main Sinergy README](../README.md)**: Start here for the high-level hackathon pitch, user flow, and feature list.
 *   **[onboarding-hackathon.md](onboarding-hackathon.md)**: A detailed product onboarding guide analyzing the problem space and our specific value proposition.
 *   **[architecture.md](architecture.md)**: The core system overview detailing how the AI Strategy Agent, Private Matcher, and the `Sinergy-2` MiniEVM integrate.
+*   **[automatic-strategy-execution.md](automatic-strategy-execution.md)**: End-to-end reference for signed strategy authorization, onchain approval consumption, automatic execution routing, and the user-facing history page.
 *   **[strategy-runtime-and-backtesting.md](strategy-runtime-and-backtesting.md)**: Internal architecture of the new engine-first strategy runtime, indicator layer, and backtesting flow that now underpins the builder and future agent/DSL work.
 *   **[agent-tooling-and-darkvault-trading-roadmap.md](agent-tooling-and-darkvault-trading-roadmap.md)**: Current agent behavior/tooling (as implemented) + a roadmap to safely enable agent-executed trades inside DarkVault/matcher.
 
