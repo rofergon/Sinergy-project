@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HexString } from "@sinergy/shared";
+import { privateKeyToAccount } from "viem/accounts";
 import type { ResolvedMarket, ResolvedToken } from "./types.js";
 import { StrategyService } from "./services/strategyService.js";
 import { StrategyToolApi } from "./services/strategyToolApi.js";
@@ -34,6 +35,8 @@ function makeHarness() {
   const strategyService = new StrategyService({
     dbFile: join(root, "strategies.sqlite"),
     markets: [market],
+    chainId: 1716124615666775,
+    strategyExecutorAddress: "0x0000000000000000000000000000000000000e11",
     priceService: {
       getCandles: (_symbol: string, _timeframe?: string, limit = 200) => {
         if (limit <= 5) {
@@ -174,6 +177,130 @@ test("strategy tool API can create, validate, save and backtest a draft", async 
       runId: run.summary.runId
     }) as { overlay: import("@sinergy/shared").StrategyChartOverlay };
     assert.equal(overlay.overlay.runId, run.summary.runId);
+  } finally {
+    harness.cleanup();
+  }
+});
+
+test("strategy execution approvals can be created, signed, stored, and invalidated after strategy edits", async () => {
+  const harness = makeHarness();
+  const ownerPk = "0x00000000000000000000000000000000000000000000000000000000000000c3";
+  const ownerAccount = privateKeyToAccount(ownerPk);
+  const ownerAddress = ownerAccount.address as HexString;
+
+  try {
+    const created = await harness.api.execute("create_strategy_draft", {
+      ownerAddress,
+      marketId: harness.market.id,
+      name: "Execution Ready Strategy"
+    }) as { strategy: import("@sinergy/shared").StrategyDefinition };
+
+    const preparedStrategy = {
+      ...created.strategy,
+      enabledSides: ["long"] as const,
+      entryRules: {
+        long: [
+          {
+            id: "entry-1",
+            rules: [
+              {
+                id: "entry-rule-1",
+                left: { type: "price_field", field: "close" as const },
+                operator: ">" as const,
+                right: { type: "constant", value: 10 }
+              }
+            ]
+          }
+        ],
+        short: []
+      },
+      exitRules: {
+        long: [
+          {
+            id: "exit-1",
+            rules: [
+              {
+                id: "exit-rule-1",
+                left: { type: "price_field", field: "close" as const },
+                operator: ">=" as const,
+                right: { type: "constant", value: 12 }
+              }
+            ]
+          }
+        ],
+        short: []
+      },
+      costModel: {
+        ...created.strategy.costModel,
+        startingEquity: 1000,
+        feeBps: 0,
+        slippageBps: 0
+      },
+      riskRules: {}
+    };
+
+    await harness.api.execute("update_strategy_draft", {
+      ownerAddress,
+      strategy: preparedStrategy
+    });
+
+    const saved = await harness.api.execute("save_strategy", {
+      ownerAddress,
+      strategyId: created.strategy.id
+    }) as {
+      strategy: import("@sinergy/shared").StrategyDefinition;
+      validation: import("@sinergy/shared").StrategyValidationResult;
+    };
+    assert.equal(saved.validation.ok, true);
+
+    const intent = harness.service.createExecutionIntent({
+      ownerAddress,
+      strategyId: created.strategy.id
+    });
+
+    const signature = await ownerAccount.signTypedData({
+      domain: intent.domain,
+      types: intent.types,
+      primaryType: intent.primaryType,
+      message: {
+        owner: intent.message.owner,
+        strategyIdHash: intent.message.strategyIdHash,
+        strategyHash: intent.message.strategyHash,
+        marketId: intent.message.marketId,
+        maxSlippageBps: BigInt(intent.message.maxSlippageBps),
+        nonce: BigInt(intent.message.nonce),
+        deadline: BigInt(intent.message.deadline)
+      }
+    });
+
+    const approval = await harness.service.saveExecutionApproval({
+      ownerAddress,
+      strategyId: created.strategy.id,
+      message: intent.message,
+      signature
+    });
+
+    assert.equal(approval.strategyId, created.strategy.id);
+    assert.equal(approval.status, "active");
+
+    const fetched = harness.service.getExecutionApproval(created.strategy.id, ownerAddress);
+    assert.equal(fetched.signature, signature);
+
+    const updated = await harness.api.execute("update_strategy_draft", {
+      ownerAddress,
+      strategy: {
+        ...saved.strategy,
+        name: "Execution Ready Strategy v2"
+      }
+    }) as { strategy: import("@sinergy/shared").StrategyDefinition };
+    assert.equal(updated.strategy.name, "Execution Ready Strategy v2");
+
+    assert.throws(
+      () => harness.service.getExecutionApproval(created.strategy.id, ownerAddress),
+      (error: unknown) =>
+        error instanceof StrategyToolError &&
+        (error.code === "strategy_approval_not_found" || error.code === "stale_strategy_approval")
+    );
   } finally {
     harness.cleanup();
   }
