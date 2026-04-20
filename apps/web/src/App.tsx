@@ -8,6 +8,7 @@ import { TickerStrip } from "./components/TickerStrip";
 import { PortfolioView } from "./components/PortfolioView";
 import { BridgeLanding } from "./components/BridgeLanding";
 import { LandingPage } from "./components/LandingPage";
+import { StrategyExecutionHistoryPage } from "./components/StrategyExecutionHistoryPage";
 import { StrategyStudio } from "./components/StrategyStudio";
 import { TransactionPopup, useTransactionPopup } from "./components/TransactionPopup";
 import { buildBridgeDefaults } from "./initia";
@@ -57,7 +58,7 @@ function Dashboard() {
   const [orders, setOrders] = useState<any[]>([]);
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus | null>(null);
   const [error, setError] = useState("");
-  const [activeView, setActiveView] = useState<"agent" | "portfolio" | "bridge">("agent");
+  const [activeView, setActiveView] = useState<"agent" | "portfolio" | "history" | "bridge">("agent");
   const [chartTimeframe, setChartTimeframe] = useState<StrategyTimeframe>("15m");
   const [strategyBacktest, setStrategyBacktest] = useState<StrategyBacktestBundle | null>(null);
   const { popup, showTx, closeTx } = useTransactionPopup();
@@ -158,7 +159,7 @@ function Dashboard() {
     );
   }, [userAddress]);
 
-  function navigateTo(view: "agent" | "portfolio" | "bridge") {
+  function navigateTo(view: "agent" | "portfolio" | "history" | "bridge") {
     setActiveView(view);
   }
 
@@ -211,10 +212,10 @@ function Dashboard() {
         bridgeReady={bridgeStatus?.ready ?? false}
       />
 
-      {activeView !== "portfolio" && <TickerStrip market={selectedMarket} />}
+      {activeView === "agent" && <TickerStrip market={selectedMarket} />}
 
       {error && <div className="error-bar">{error}</div>}
-      {activeView !== "portfolio" && bridgeStatus && !bridgeStatus.ready && (
+      {activeView === "agent" && bridgeStatus && !bridgeStatus.ready && (
         <div className="bridge-banner">
           <strong>Bridge degraded.</strong> Router-enabled markets will fall back to async routing or stay unavailable until relayer and OPinit recover.
         </div>
@@ -245,6 +246,11 @@ function Dashboard() {
           onAfterMutation={refreshUser}
           onCancelOrder={cancelOrder}
           showTx={showTx}
+        />
+      ) : activeView === "history" ? (
+        <StrategyExecutionHistoryPage
+          address={userAddress}
+          markets={marketSnapshots}
         />
       ) : (
         <StrategyStudio
