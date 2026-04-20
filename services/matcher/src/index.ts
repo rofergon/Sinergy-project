@@ -1,8 +1,9 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
-import { parseUnits } from "viem";
+import { isAddress, parseUnits } from "viem";
 import type { Address, Hex } from "viem";
 import { env } from "./config/env.js";
 import { loadDeployment, resolveMarkets, resolveTokens } from "./services/deployment.js";
@@ -21,6 +22,7 @@ import { StrategyService } from "./services/strategyService.js";
 import { StrategyExecutionService } from "./services/strategyExecution.js";
 import { StrategyToolApi } from "./services/strategyToolApi.js";
 import { makeStrategyToolMeta, toStrategyToolErrorPayload } from "./services/strategyToolSecurity.js";
+import { MatcherAuthService } from "./services/auth.js";
 import type {
   CanonicalAssetConfig,
   RoutePreference,
@@ -170,9 +172,175 @@ const strategyExecutionService = new StrategyExecutionService({
   vaultService,
   markets
 });
+const authService = new MatcherAuthService({
+  secret:
+    env.AUTH_TOKEN_SECRET ??
+    createHash("sha256")
+      .update(`${env.MATCHER_PRIVATE_KEY}:sinergy-matcher-auth-v1`)
+      .digest("hex"),
+  nonceTtlMs: env.AUTH_NONCE_TTL_MS,
+  tokenTtlMs: env.AUTH_TOKEN_TTL_MS
+});
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
+
+function normalizeAddressCandidate(value: unknown): Address | undefined {
+  if (typeof value !== "string" || !isAddress(value)) {
+    return undefined;
+  }
+
+  return value.toLowerCase() as Address;
+}
+
+function resolveProtectedAddress(request: {
+  method: string;
+  routeOptions: { url?: string };
+  params: unknown;
+  query: unknown;
+  body: unknown;
+}): Address | undefined {
+  const params = (request.params ?? {}) as Record<string, unknown>;
+  const query = (request.query ?? {}) as Record<string, unknown>;
+  const body = (request.body ?? {}) as Record<string, unknown>;
+  const route = request.routeOptions.url;
+  const method = request.method.toUpperCase();
+
+  if (!route) {
+    return undefined;
+  }
+
+  switch (`${method} ${route}`) {
+    case "GET /balances/:address":
+    case "GET /orders/:address":
+    case "GET /strategy/execution/history/:ownerAddress":
+      return normalizeAddressCandidate(params.address ?? params.ownerAddress);
+    case "POST /orders":
+    case "POST /orders/:id/cancel":
+    case "POST /swap/quote":
+    case "POST /swap/execute":
+    case "POST /vault/sync-deposit":
+    case "POST /vault/withdrawal-quote":
+    case "POST /vault/zk-withdrawal-package":
+    case "POST /vault/sync-withdrawal":
+    case "POST /vault/cancel-withdrawal":
+    case "POST /vault/cancel-zk-withdrawal":
+      return normalizeAddressCandidate(body.userAddress);
+    case "POST /bridge/claim-cinit":
+    case "POST /bridge/claim":
+    case "POST /bridge/redeem-cinit":
+    case "POST /bridge/redeem":
+      return normalizeAddressCandidate(body.evmAddress);
+    case "POST /strategy/execution/intent":
+    case "POST /strategy/execution/approve":
+    case "POST /strategy/execution/execute":
+      return normalizeAddressCandidate(body.ownerAddress);
+    case "GET /strategy/execution/:strategyId":
+      return normalizeAddressCandidate(query.ownerAddress);
+    case "POST /strategy-tools/:tool":
+      return normalizeAddressCandidate(body.ownerAddress);
+    default:
+      return undefined;
+  }
+}
+
+app.addHook("preHandler", async (request, reply) => {
+  const protectedAddress = resolveProtectedAddress(request);
+  if (!protectedAddress) {
+    return;
+  }
+
+  const authHeader = request.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    reply.code(401);
+    void reply.send({
+      ok: false,
+      error: {
+        message: "Authentication required."
+      }
+    });
+    return reply;
+  }
+
+  try {
+    const session = authService.verifyToken(authHeader.slice("Bearer ".length).trim());
+    if (session.address !== protectedAddress.toLowerCase()) {
+      reply.code(403);
+      void reply.send({
+        ok: false,
+        error: {
+          message: "Authenticated wallet does not match this request."
+        }
+      });
+      return reply;
+    }
+  } catch (error) {
+    reply.code(401);
+    void reply.send({
+      ok: false,
+      error: {
+        message: error instanceof Error ? error.message : "Authentication failed."
+      }
+    });
+    return reply;
+  }
+});
+
+app.post("/auth/nonce", async (request, reply) => {
+  const { address } = (request.body ?? {}) as { address?: string };
+  const normalizedAddress = normalizeAddressCandidate(address);
+  if (!normalizedAddress) {
+    reply.code(422);
+    return {
+      ok: false,
+      error: {
+        message: "A valid wallet address is required."
+      }
+    };
+  }
+
+  return {
+    ok: true,
+    result: authService.createChallenge(normalizedAddress)
+  };
+});
+
+app.post("/auth/verify", async (request, reply) => {
+  const { address, nonce, signature } = (request.body ?? {}) as {
+    address?: string;
+    nonce?: string;
+    signature?: `0x${string}`;
+  };
+  const normalizedAddress = normalizeAddressCandidate(address);
+  if (!normalizedAddress || typeof nonce !== "string" || typeof signature !== "string") {
+    reply.code(422);
+    return {
+      ok: false,
+      error: {
+        message: "address, nonce, and signature are required."
+      }
+    };
+  }
+
+  try {
+    return {
+      ok: true,
+      result: await authService.verifyChallenge({
+        address: normalizedAddress,
+        nonce,
+        signature
+      })
+    };
+  } catch (error) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: {
+        message: error instanceof Error ? error.message : "Authentication failed."
+      }
+    };
+  }
+});
 
 app.get("/health", async () => ({
   ok: true,
