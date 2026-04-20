@@ -154,6 +154,31 @@ Available reasoning levels:
 
 The agent supports any OpenAI-compatible API endpoint and model.
 
+#### Matcher Authentication
+
+Sensitive matcher actions now use a lightweight wallet-based authentication flow. Instead of trusting a plain `userAddress` or `evmAddress` in the request body, the frontend asks the matcher for a one-time nonce, the connected EVM wallet signs the returned message, and the matcher exchanges that signed challenge for a short-lived bearer token.
+
+This token is then attached automatically by the web and bridge frontends for user-scoped routes such as:
+
+- `balances` and `orders`
+- `swap/quote` and `swap/execute`
+- `vault` deposit/withdrawal sync and quote/package actions
+- `bridge/claim` and `bridge/redeem`
+- strategy execution and strategy-tool routes that act on a specific `ownerAddress`
+
+The matcher verifies that the authenticated wallet matches the address referenced by the request before allowing the action. Read-only public endpoints such as market discovery and public price data remain accessible without login.
+
+Optional matcher auth environment variables:
+
+- `AUTH_TOKEN_SECRET`
+  override the default token-signing secret derived from the matcher key
+- `AUTH_NONCE_TTL_MS`
+  lifetime of the one-time login challenge
+- `AUTH_TOKEN_TTL_MS`
+  lifetime of the issued bearer token
+
+This is intentionally a low-friction first layer. It substantially improves protection for wallet-scoped EVM actions, but it does not by itself prove ownership of every non-EVM identifier used elsewhere in the system.
+
 #### ZK Architecture Support
 
 If you want to exercise the ZK withdrawal path locally, compile and prepare the circuit artifacts first:
