@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useInterwovenKit } from "@initia/interwovenkit-react";
 import type { StrategyTimeframe } from "@sinergy/shared";
 import type { Address, Hex } from "viem";
+import { useSignMessage } from "wagmi";
 import { api } from "./lib/api";
+import { setAuthSigner } from "./lib/auth";
 import { Navbar } from "./components/Navbar";
 import { TickerStrip } from "./components/TickerStrip";
 import { PortfolioView } from "./components/PortfolioView";
@@ -47,6 +49,7 @@ function Dashboard() {
     openWallet,
     disconnect,
   } = useInterwovenKit();
+  const { signMessageAsync } = useSignMessage();
 
   const [deployment, setDeployment] = useState<any | null>(null);
   const [markets, setMarkets] = useState<Market[]>([]);
@@ -68,6 +71,21 @@ function Dashboard() {
   const vaultAddress = (deployment?.contracts?.vault ??
     "0x0000000000000000000000000000000000000000") as Address;
   const zkVaultAddress = deployment?.contracts?.zkVault as Address | undefined;
+
+  useEffect(() => {
+    setAuthSigner(
+      signMessageAsync
+        ? async ({ message }) =>
+            signMessageAsync({
+              message
+            })
+        : undefined
+    );
+
+    return () => {
+      setAuthSigner(undefined);
+    };
+  }, [signMessageAsync]);
 
   const marketSnapshots = useMemo<MarketSnapshot[]>(() => {
     return markets.map((market) => {
@@ -115,9 +133,14 @@ function Dashboard() {
 
     const [balResult, orderResult] = await Promise.all([
       api<{ available: Record<string, string>; locked: Record<string, string> }>(
-        `/balances/${userAddress}`
+        `/balances/${userAddress}`,
+        {
+          authAddress: userAddress
+        }
       ),
-      api<{ orders: any[] }>(`/orders/${userAddress}`),
+      api<{ orders: any[] }>(`/orders/${userAddress}`, {
+        authAddress: userAddress
+      }),
     ]);
     setBalances(balResult);
     setOrders(orderResult.orders);
@@ -170,6 +193,7 @@ function Dashboard() {
 
     await api(`/orders/${orderId}/cancel`, {
       method: "POST",
+      authAddress: userAddress,
       body: JSON.stringify({ userAddress }),
     });
     await refreshUser();
