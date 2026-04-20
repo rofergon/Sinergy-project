@@ -18,6 +18,7 @@ import {
   darkVaultV2Abi,
   erc20Abi
 } from "@sinergy/shared";
+import { hashStrategyId, strategyExecutorAbi, type StrategyApprovalRecord } from "@sinergy/shared";
 import type { PendingWithdrawal, ResolvedMarket, ResolvedToken } from "../types.js";
 import { StateStore } from "./state.js";
 import { darkPoolVaultAbi } from "./deployment.js";
@@ -149,6 +150,37 @@ export class VaultService {
     });
     await this.publicClient.waitForTransactionReceipt({ hash: txHash });
     return txHash;
+  }
+
+  async consumeStrategyApproval(input: {
+    approval: StrategyApprovalRecord;
+    ownerAddress: Address;
+    marketId: Hex;
+  }) {
+    const strategyExecutor = this.deployment.contracts.strategyExecutor;
+    if (!strategyExecutor || strategyExecutor === "0x0000000000000000000000000000000000000000") {
+      throw new Error("Strategy executor contract is not configured");
+    }
+
+    return this.sendMatcherTransaction(
+      strategyExecutor,
+      encodeFunctionData({
+        abi: strategyExecutorAbi,
+        functionName: "consumeStrategyApproval",
+        args: [
+          {
+            owner: input.ownerAddress,
+            strategyIdHash: hashStrategyId(input.approval.strategyId),
+            strategyHash: input.approval.strategyHash,
+            marketId: input.marketId,
+            maxSlippageBps: BigInt(input.approval.maxSlippageBps),
+            nonce: BigInt(input.approval.nonce),
+            deadline: BigInt(input.approval.deadline)
+          },
+          input.approval.signature
+        ]
+      })
+    );
   }
 
   async settleInstantLocalSwap(input: {
