@@ -171,6 +171,20 @@ Then deploy or configure the ZK stack so `deployments/local.json` contains:
 
 The matcher expects the compiled circuit files at `.tmp/zk/withdrawal/withdrawal_js/withdrawal.wasm` and `.tmp/zk/withdrawal/withdrawal_final.zkey` unless overridden with `ZK_WITHDRAWAL_WASM_FILE` and `ZK_WITHDRAWAL_ZKEY_FILE`.
 
+#### Local Strategy Execution Contract
+
+The local `StrategyExecutor` contract used for onchain strategy approval consumption is currently deployed at:
+
+- `0x3Db7923385663Fd3410db197AE794ce861Cb7D75`
+
+This address is also recorded in [deployments/local.json](deployments/local.json) under `contracts.strategyExecutor`.
+
+To redeploy just this contract without resetting the rest of the local stack:
+
+```bash
+./scripts/deploy-strategy-executor.sh
+```
+
 #### Testnet Configuration
 
 For testnet-oriented frontend configurations:
@@ -188,6 +202,7 @@ Users can enable auto-sign from the **Dark Vault** panel. The current setup stri
 
 Dive deeper into Sinergy's technical design:
 - **Architecture**: [docs/architecture.md](docs/architecture.md)
+- **Automatic Strategy Execution**: [docs/automatic-strategy-execution.md](docs/automatic-strategy-execution.md)
 - **Network Startup**: [docs/network-startup.md](docs/network-startup.md)
 - **Recent Price Patch**: [docs/price-patch-runbook.md](docs/price-patch-runbook.md)
 - **Testnet Runbook**: [docs/testnet-runbook.md](docs/testnet-runbook.md)
