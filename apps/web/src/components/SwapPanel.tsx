@@ -202,6 +202,7 @@ export function SwapPanel({
     try {
       const result = await api<{ quote: QuoteResponse }>("/swap/quote", {
         method: "POST",
+        authAddress: address,
         body: JSON.stringify({
           userAddress: address,
           marketId: selectedMarket.id,
@@ -244,6 +245,7 @@ export function SwapPanel({
         quote: QuoteResponse;
       }>("/swap/execute", {
         method: "POST",
+        authAddress: address,
         body: JSON.stringify({
           userAddress: address,
           marketId: selectedMarket.id,
