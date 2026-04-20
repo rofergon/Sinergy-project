@@ -164,6 +164,8 @@ npm run zk:setup:withdrawal -- /path/to/powersOfTau.ptau
 node scripts/zk/export-withdrawal-vkey-calldata.mjs > .tmp/zk/withdrawal/vkey-calldata.json
 ```
 
+The source for this proof system lives in [`circuits/`](circuits), currently with [`circuits/withdrawal.circom`](circuits/withdrawal.circom) as the main withdrawal circuit. This file defines the private statement proven during a withdrawal: a note exists in the committed Merkle tree, it matches the requested `token` and `amount`, the prover knows the note secret, and the derived `nullifier` prevents double withdrawal. In practice, this directory is the cryptographic source of truth for the Groth16 withdrawal flow used by the matcher and verified on-chain by `DarkVaultV2`.
+
 Then deploy or configure the ZK stack so `deployments/local.json` contains:
 - `contracts.zkVault`
 - `contracts.stateAnchor`
