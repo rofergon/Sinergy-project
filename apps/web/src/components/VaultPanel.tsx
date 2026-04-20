@@ -294,6 +294,7 @@ export function VaultPanel({
 
       await api("/vault/sync-deposit", {
         method: "POST",
+        authAddress: address,
         body: JSON.stringify({
           txHash: depositTx.transactionHash,
           userAddress: address,
@@ -378,6 +379,7 @@ export function VaultPanel({
           proof: Hex;
         }>("/vault/zk-withdrawal-package", {
           method: "POST",
+          authAddress: address,
           body: JSON.stringify({
             userAddress: address,
             token: selectedToken.address,
@@ -389,6 +391,7 @@ export function VaultPanel({
           "/vault/withdrawal-quote",
           {
             method: "POST",
+            authAddress: address,
             body: JSON.stringify({
               userAddress: address,
               token: selectedToken.address,
@@ -439,6 +442,7 @@ export function VaultPanel({
 
       await api("/vault/sync-withdrawal", {
         method: "POST",
+        authAddress: address,
         body: JSON.stringify({
           txHash: withdrawTx.transactionHash,
           userAddress: address,
@@ -475,6 +479,7 @@ export function VaultPanel({
         try {
           await api("/vault/cancel-zk-withdrawal", {
             method: "POST",
+            authAddress: address,
             body: JSON.stringify({
               userAddress: address,
               token: selectedToken.address,
@@ -490,6 +495,7 @@ export function VaultPanel({
         try {
           await api("/vault/cancel-withdrawal", {
             method: "POST",
+            authAddress: address,
             body: JSON.stringify({
               userAddress: address,
               token: selectedToken.address,
