@@ -42,6 +42,9 @@ const envSchema = z.object({
   ROUTER_CANONICAL_ASSETS_JSON: z.string().default("{}"),
   ROUTER_MARKETS_JSON: z.string().default("{}"),
   ROUTER_BOOTSTRAP_INVENTORY_JSON: z.string().default("{}"),
+  AUTH_TOKEN_SECRET: z.string().optional(),
+  AUTH_NONCE_TTL_MS: z.coerce.number().int().positive().default(5 * 60_000),
+  AUTH_TOKEN_TTL_MS: z.coerce.number().int().positive().default(15 * 60_000),
   ZK_WITHDRAWAL_PACKAGE_FILE: z.string().optional(),
   ZK_WITHDRAWAL_WASM_FILE: z.string().default(resolve(zkBuildDir, "withdrawal_js/withdrawal.wasm")),
   ZK_WITHDRAWAL_ZKEY_FILE: z.string().default(resolve(zkBuildDir, "withdrawal_final.zkey"))
