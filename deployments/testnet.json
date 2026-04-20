@@ -23,7 +23,8 @@
   "contracts": {
     "vault": "0x3fF37bE2C8B8179cBfd97CB1e75fEd91e5e38B19",
     "market": "0xe1d9c4EcC2ba58274733C61Fb25919F0eA902575",
-    "quoteToken": "0x6Ef1eB5AE5C6824F8B6ECA81E2DB193966D95967"
+    "quoteToken": "0x6Ef1eB5AE5C6824F8B6ECA81E2DB193966D95967",
+    "strategyExecutor": "0x0000000000000000000000000000000000000000"
   },
   "tokens": [
     {
