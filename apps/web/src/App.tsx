@@ -132,15 +132,8 @@ function Dashboard() {
     }
 
     const [balResult, orderResult] = await Promise.all([
-      api<{ available: Record<string, string>; locked: Record<string, string> }>(
-        `/balances/${userAddress}`,
-        {
-          authAddress: userAddress
-        }
-      ),
-      api<{ orders: any[] }>(`/orders/${userAddress}`, {
-        authAddress: userAddress
-      }),
+      api<{ available: Record<string, string>; locked: Record<string, string> }>(`/balances/${userAddress}`),
+      api<{ orders: any[] }>(`/orders/${userAddress}`),
     ]);
     setBalances(balResult);
     setOrders(orderResult.orders);
