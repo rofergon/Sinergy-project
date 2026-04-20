@@ -192,6 +192,46 @@ export const darkPoolMarketAbi = [
   }
 ] as const;
 
+export const strategyExecutorAbi = [
+  {
+    type: "function",
+    name: "consumeStrategyApproval",
+    stateMutability: "nonpayable",
+    inputs: [
+      {
+        name: "approval",
+        type: "tuple",
+        components: [
+          { name: "owner", type: "address" },
+          { name: "strategyIdHash", type: "bytes32" },
+          { name: "strategyHash", type: "bytes32" },
+          { name: "marketId", type: "bytes32" },
+          { name: "maxSlippageBps", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+          { name: "deadline", type: "uint256" }
+        ]
+      },
+      { name: "signature", type: "bytes" }
+    ],
+    outputs: []
+  },
+  {
+    type: "event",
+    name: "StrategyApprovalConsumed",
+    inputs: [
+      { indexed: true, name: "owner", type: "address" },
+      { indexed: true, name: "strategyIdHash", type: "bytes32" },
+      { indexed: true, name: "marketId", type: "bytes32" },
+      { indexed: false, name: "strategyHash", type: "bytes32" },
+      { indexed: false, name: "maxSlippageBps", type: "uint256" },
+      { indexed: false, name: "nonce", type: "uint256" },
+      { indexed: false, name: "deadline", type: "uint256" },
+      { indexed: false, name: "executor", type: "address" }
+    ],
+    anonymous: false
+  }
+] as const;
+
 export const darkStateAnchorAbi = [
   {
     type: "function",
