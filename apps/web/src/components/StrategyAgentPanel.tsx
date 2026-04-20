@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSignTypedData } from "wagmi";
 import type {
   HexString,
   StrategyBacktestSummary,
@@ -7,10 +8,18 @@ import type {
   StrategyTimeframe,
   StrategyToolName
 } from "@sinergy/shared";
-import { agentApi, agentApiStream } from "../lib/api";
+import {
+  agentApi,
+  agentApiStream,
+  createStrategyExecutionIntent,
+  executeApprovedStrategy,
+  fetchStrategyExecutionApproval,
+  saveStrategyExecutionApproval
+} from "../lib/api";
 import type {
   ChartViewport,
   MarketSnapshot,
+  StrategyApprovalRecord,
   StrategyAgentPlanResponse,
   StrategyAgentRunResponse,
   StrategyAgentSessionListItem,
@@ -361,6 +370,9 @@ export function StrategyAgentPanel({
   const [historyBusy, setHistoryBusy] = useState(false);
   const [historyRailOpen, setHistoryRailOpen] = useState(false);
   const [planModeEnabled, setPlanModeEnabled] = useState(false);
+  const [approvalBusy, setApprovalBusy] = useState(false);
+  const [executionBusy, setExecutionBusy] = useState(false);
+  const [approval, setApproval] = useState<StrategyApprovalRecord | null>(null);
   const [clarifierOpen, setClarifierOpen] = useState(false);
   const [clarifierMode, setClarifierMode] = useState<"plan" | "run" | null>(null);
   const [clarifierGoal, setClarifierGoal] = useState("");
@@ -378,6 +390,7 @@ export function StrategyAgentPanel({
   const threadRef = useRef<HTMLDivElement | null>(null);
   const activeRunMessageIdRef = useRef<string | null>(null);
   const emptyConversationSuggestion = buildEmptyConversationSuggestion();
+  const { signTypedDataAsync } = useSignTypedData();
 
   const storageKey = useMemo(() => {
     if (!address || !selectedMarket?.id) return null;
@@ -509,6 +522,33 @@ export function StrategyAgentPanel({
 
     window.sessionStorage.setItem(storageKey, JSON.stringify(payload));
   }, [prompt, session?.sessionId, storageKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadApproval() {
+      if (!address || !session?.strategyId) {
+        setApproval(null);
+        return;
+      }
+
+      try {
+        const result = await fetchStrategyExecutionApproval(address, session.strategyId);
+        if (!cancelled) {
+          setApproval(result);
+        }
+      } catch {
+        if (!cancelled) {
+          setApproval(null);
+        }
+      }
+    }
+
+    void loadApproval();
+    return () => {
+      cancelled = true;
+    };
+  }, [address, session?.strategyId, session?.updatedAt]);
 
   useEffect(() => {
     const textarea = promptTextareaRef.current;
@@ -832,6 +872,83 @@ export function StrategyAgentPanel({
     onBacktestResult(null);
   }
 
+  async function authorizeOnchainExecution() {
+    if (!address || !session?.strategyId) {
+      return;
+    }
+
+    setApprovalBusy(true);
+    setStatus("Preparing onchain authorization...");
+
+    try {
+      const intent = await createStrategyExecutionIntent({
+        ownerAddress: address,
+        strategyId: session.strategyId
+      });
+
+      const signature = await signTypedDataAsync({
+        domain: intent.domain,
+        types: intent.types,
+        primaryType: intent.primaryType,
+        message: {
+          owner: intent.message.owner,
+          strategyIdHash: intent.message.strategyIdHash,
+          strategyHash: intent.message.strategyHash,
+          marketId: intent.message.marketId,
+          maxSlippageBps: BigInt(intent.message.maxSlippageBps),
+          nonce: BigInt(intent.message.nonce),
+          deadline: BigInt(intent.message.deadline)
+        }
+      });
+
+      const record = await saveStrategyExecutionApproval({
+        ownerAddress: address,
+        strategyId: session.strategyId,
+        message: intent.message,
+        signature
+      });
+
+      setApproval(record);
+      setStatus("Strategy authorized for onchain execution.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setApprovalBusy(false);
+    }
+  }
+
+  async function runAuthorizedExecution() {
+    if (!address || !session?.strategyId) {
+      return;
+    }
+
+    setExecutionBusy(true);
+    setStatus("Executing approved strategy...");
+
+    try {
+      const result = await executeApprovedStrategy({
+        ownerAddress: address,
+        strategyId: session.strategyId
+      });
+
+      setApproval(null);
+
+      if (result.action === "no_action") {
+        setStatus(typeof result.reason === "string" ? result.reason : "No live action was taken.");
+      } else if (result.action === "router_swap") {
+        setStatus("Approved strategy executed through the router.");
+      } else if (result.action === "dark_pool_order") {
+        setStatus("Approved strategy placed a dark-pool order.");
+      } else {
+        setStatus("Approved strategy execution finished.");
+      }
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setExecutionBusy(false);
+    }
+  }
+
   if (!address) {
     return (
       <div className="strategy-agent-panel">
@@ -871,33 +988,68 @@ export function StrategyAgentPanel({
         <strong>{selectedTimeframe}</strong>
         <span>Strategy</span>
         <strong>{session?.strategy?.name ?? shortId(session?.strategyId)}</strong>
+        <span>Onchain</span>
+        <strong>{approval ? "Authorized" : "Pending"}</strong>
       </div>
 
       <div className={`strategy-agent-workspace ${historyRailOpen ? "sessions-open" : "sessions-closed"}`}>
         <div className="strategy-agent-main">
-          <div className="strategy-agent-main-toolbar">
-            <div className="strategy-agent-main-copy">
-              <strong>Conversation</strong>
-              <small>
+            <div className="strategy-agent-main-toolbar">
+              <div className="strategy-agent-main-copy">
+                <strong>Conversation</strong>
+                <small>
                 {session
                   ? `${session.turnCount} turns in memory • session ${shortId(session.sessionId)}`
                   : "Start a fresh run or reopen one from the sessions rail."}
               </small>
+              {session?.strategyId && (
+                <small>
+                  {approval
+                    ? `Onchain approval active until ${new Date(Number(approval.deadline) * 1000).toLocaleString()}`
+                    : "This strategy still needs a user signature before the agent can execute it onchain."}
+                </small>
+              )}
+              </div>
+            <div className="strategy-agent-chips">
+              {session?.strategyId && (
+                <button
+                  type="button"
+                  className="strategy-agent-review-btn"
+                  onClick={() => void authorizeOnchainExecution()}
+                  disabled={approvalBusy || executionBusy || busy !== null}
+                >
+                  {approvalBusy
+                    ? "Authorizing..."
+                    : approval
+                      ? "Refresh Onchain Approval"
+                      : "Authorize Onchain Execution"}
+                </button>
+              )}
+              {session?.strategyId && approval && (
+                <button
+                  type="button"
+                  className="strategy-agent-review-btn"
+                  onClick={() => void runAuthorizedExecution()}
+                  disabled={executionBusy || approvalBusy || busy !== null}
+                >
+                  {executionBusy ? "Executing..." : "Execute Approved Strategy"}
+                </button>
+              )}
+              <button
+                type="button"
+                className="strategy-agent-rail-toggle"
+                onClick={() => setHistoryRailOpen((current) => !current)}
+                aria-expanded={historyRailOpen}
+                aria-label={historyRailOpen ? "Hide sessions panel" : "Show sessions panel"}
+              >
+                <span className="strategy-agent-rail-icon" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+                <span>{historyRailOpen ? "Hide Sessions" : "Show Sessions"}</span>
+              </button>
             </div>
-            <button
-              type="button"
-              className="strategy-agent-rail-toggle"
-              onClick={() => setHistoryRailOpen((current) => !current)}
-              aria-expanded={historyRailOpen}
-              aria-label={historyRailOpen ? "Hide sessions panel" : "Show sessions panel"}
-            >
-              <span className="strategy-agent-rail-icon" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </span>
-              <span>{historyRailOpen ? "Hide Sessions" : "Show Sessions"}</span>
-            </button>
           </div>
 
           <div className="strategy-agent-thread" ref={threadRef}>
