@@ -303,6 +303,7 @@ export function BridgeLanding({
         "/bridge/claim",
         {
           method: "POST",
+          authAddress: address,
           body: JSON.stringify({
             tokenSymbol: selectedBridgeAssetSymbol,
             initiaAddress,
@@ -348,6 +349,7 @@ export function BridgeLanding({
         }
       >("/bridge/redeem", {
         method: "POST",
+        authAddress: address,
         body: JSON.stringify({
           tokenSymbol: selectedBridgeAssetSymbol,
           initiaAddress,
