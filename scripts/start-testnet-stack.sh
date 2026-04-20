@@ -5,12 +5,14 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNTIME_DIR="${RUNTIME_DIR:-$ROOT_DIR/.tmp/testnet-runtime}"
 
 START_FRONTENDS="${START_FRONTENDS:-1}"
+START_STRATEGY_AGENT="${START_STRATEGY_AGENT:-1}"
 WEB_HOST="${WEB_HOST:-0.0.0.0}"
 BRIDGE_HOST="${BRIDGE_HOST:-0.0.0.0}"
 
 ROLLUP_RPC_URL="${ROLLUP_RPC_URL:-http://127.0.0.1:26657/status}"
 EXECUTOR_STATUS_URL="${EXECUTOR_STATUS_URL:-http://127.0.0.1:3000/status}"
 MATCHER_HEALTH_URL="${MATCHER_HEALTH_URL:-http://127.0.0.1:8787/health}"
+STRATEGY_AGENT_URL="${STRATEGY_AGENT_URL:-http://127.0.0.1:8790/agent/capabilities}"
 WEB_URL="${WEB_URL:-http://127.0.0.1:5173}"
 BRIDGE_URL="${BRIDGE_URL:-http://127.0.0.1:5174}"
 
@@ -101,7 +103,7 @@ start_executor() {
     weave opinit restart executor >/dev/null 2>&1 || weave opinit start executor --detach
   fi
 
-  wait_for_http "$EXECUTOR_STATUS_URL" "executor status"
+  wait_for_http "$EXECUTOR_STATUS_URL" "executor status" || true
 }
 
 start_relayer() {
@@ -159,6 +161,15 @@ start_matcher() {
   wait_for_http "$MATCHER_HEALTH_URL" "matcher health"
 }
 
+start_strategy_agent() {
+  start_background_process \
+    "strategy-agent" \
+    "8790" \
+    "cd '$ROOT_DIR/services/strategy-agent' && npm run dev"
+
+  wait_for_http "$STRATEGY_AGENT_URL" "strategy agent" 30 1 || true
+}
+
 start_web() {
   start_background_process \
     "web" \
@@ -183,6 +194,7 @@ print_status() {
   printf '  executor: %s\n' "$(systemctl --user is-active opinitd.executor.service 2>/dev/null || echo inactive)"
   printf '  relayer:  %s\n' "$(docker ps --format '{{.Names}}' | has_exact_line 'weave-relayer' && echo active || echo inactive)"
   printf '  matcher:  %s\n' "$(systemctl --user is-active sinergy-matcher.service 2>/dev/null || echo inactive) / $(is_http_ready "$MATCHER_HEALTH_URL" && echo ready || echo unavailable)"
+  printf '  agent:    %s\n' "$(is_http_ready "$STRATEGY_AGENT_URL" && echo ready || echo unavailable)"
   printf '  web:      %s\n' "$(is_http_ready "$WEB_URL" && echo ready || echo unavailable)"
   printf '  bridge:   %s\n' "$(is_http_ready "$BRIDGE_URL" && echo ready || echo unavailable)"
 }
@@ -196,6 +208,9 @@ main() {
       start_executor
       start_relayer
       start_matcher
+      if [[ "$START_STRATEGY_AGENT" == "1" ]]; then
+        start_strategy_agent
+      fi
       if [[ "$START_FRONTENDS" == "1" ]]; then
         start_web
         start_bridge
