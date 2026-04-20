@@ -211,13 +211,8 @@ function resolveProtectedAddress(request: {
   }
 
   switch (`${method} ${route}`) {
-    case "GET /balances/:address":
-    case "GET /orders/:address":
-    case "GET /strategy/execution/history/:ownerAddress":
-      return normalizeAddressCandidate(params.address ?? params.ownerAddress);
     case "POST /orders":
     case "POST /orders/:id/cancel":
-    case "POST /swap/quote":
     case "POST /swap/execute":
     case "POST /vault/sync-deposit":
     case "POST /vault/withdrawal-quote":
@@ -234,10 +229,6 @@ function resolveProtectedAddress(request: {
     case "POST /strategy/execution/intent":
     case "POST /strategy/execution/approve":
     case "POST /strategy/execution/execute":
-      return normalizeAddressCandidate(body.ownerAddress);
-    case "GET /strategy/execution/:strategyId":
-      return normalizeAddressCandidate(query.ownerAddress);
-    case "POST /strategy-tools/:tool":
       return normalizeAddressCandidate(body.ownerAddress);
     default:
       return undefined;
