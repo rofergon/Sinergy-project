@@ -1,5 +1,10 @@
 import type {
   HexString,
+  StrategyApprovalIntent,
+  StrategyApprovalMessage,
+  StrategyApprovalRecord,
+  StrategyExecutionRecord,
+  StrategyExecutionStrategySummary,
   StrategyStatus,
   StrategyBacktestSummary,
   StrategyBacktestTrade,
@@ -126,4 +131,12 @@ export type StrategyAgentStrategySummary = {
 export type StrategyAgentSessionListItem = Omit<StrategyAgentSessionSnapshot, "recentTurns"> & {
   lastUserMessage?: string;
   lastAssistantMessage?: string;
+};
+
+export type {
+  StrategyApprovalIntent,
+  StrategyApprovalMessage,
+  StrategyApprovalRecord,
+  StrategyExecutionRecord,
+  StrategyExecutionStrategySummary
 };
