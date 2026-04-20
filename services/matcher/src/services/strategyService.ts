@@ -4,6 +4,10 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
   HexString,
+  StrategyApprovalIntent,
+  StrategyApprovalMessage,
+  StrategyApprovalRecord,
+  StrategyExecutionRecord,
   StrategyDefinition,
   StrategyBacktestSummary,
   StrategyBacktestTrade,
@@ -17,7 +21,16 @@ import type {
   StrategyTemplate,
   StrategyValidationResult
 } from "@sinergy/shared";
-import { STRATEGY_TOOL_LIMITS } from "@sinergy/shared";
+import {
+  STRATEGY_APPROVAL_PRIMARY_TYPE,
+  STRATEGY_EXECUTION_DOMAIN_NAME,
+  STRATEGY_EXECUTION_DOMAIN_VERSION,
+  STRATEGY_TOOL_LIMITS,
+  hashStrategyId,
+  hashStrategyPayload,
+  strategyApprovalTypes
+} from "@sinergy/shared";
+import { hashTypedData, isAddressEqual, recoverTypedDataAddress, zeroAddress } from "viem";
 import {
   buildStrategyCapabilities,
   buildStrategyTemplates,
@@ -35,6 +48,8 @@ type StrategyServiceOptions = {
   dbFile: string;
   markets: ResolvedMarket[];
   priceService: PriceService;
+  chainId: number;
+  strategyExecutorAddress?: HexString;
 };
 
 function keyOf(value: string) {
@@ -294,6 +309,422 @@ export class StrategyService {
       });
     }
     return normalizeStrategyDefinition(JSON.parse(row.body_json));
+  }
+
+  createExecutionIntent(input: {
+    ownerAddress: HexString;
+    strategyId: string;
+    maxSlippageBps?: number;
+    validForSeconds?: number;
+  }): StrategyApprovalIntent {
+    this.assertOwnerAddress(input.ownerAddress);
+    const strategy = this.getStrategy(input.strategyId, input.ownerAddress);
+    if (strategy.status !== "saved") {
+      throw new StrategyToolError(
+        "Only saved strategies can be authorized for live execution.",
+        "strategy_not_saved_for_execution",
+        409
+      );
+    }
+    const verifyingContract = this.getStrategyExecutorAddress();
+    const maxSlippageBps = input.maxSlippageBps ?? 150;
+    const nextNonce = this.nextApprovalNonce(input.ownerAddress);
+    const deadline = Math.floor(Date.now() / 1000) + (input.validForSeconds ?? 15 * 60);
+    const message: StrategyApprovalMessage = {
+      owner: input.ownerAddress,
+      strategyIdHash: hashStrategyId(strategy.id),
+      strategyHash: this.computeStrategyHash(strategy),
+      marketId: strategy.marketId,
+      maxSlippageBps: String(maxSlippageBps),
+      nonce: String(nextNonce),
+      deadline: String(deadline)
+    };
+    const domain = {
+      name: STRATEGY_EXECUTION_DOMAIN_NAME,
+      version: STRATEGY_EXECUTION_DOMAIN_VERSION,
+      chainId: this.options.chainId,
+      verifyingContract
+    } as const;
+
+    const digest = hashTypedData({
+      domain,
+      types: strategyApprovalTypes,
+      primaryType: STRATEGY_APPROVAL_PRIMARY_TYPE,
+      message: this.toTypedApprovalMessage(message)
+    });
+
+    return {
+      strategyId: strategy.id,
+      strategyName: strategy.name,
+      chainId: this.options.chainId,
+      verifyingContract,
+      primaryType: STRATEGY_APPROVAL_PRIMARY_TYPE,
+      domain,
+      types: strategyApprovalTypes,
+      message,
+      digest
+    };
+  }
+
+  async saveExecutionApproval(input: {
+    ownerAddress: HexString;
+    strategyId: string;
+    message: StrategyApprovalMessage;
+    signature: HexString;
+  }): Promise<StrategyApprovalRecord> {
+    this.assertOwnerAddress(input.ownerAddress);
+    const strategy = this.getStrategy(input.strategyId, input.ownerAddress);
+    if (strategy.status !== "saved") {
+      throw new StrategyToolError(
+        "Only saved strategies can store a live execution approval.",
+        "strategy_not_saved_for_execution",
+        409
+      );
+    }
+    const verifyingContract = this.getStrategyExecutorAddress();
+
+    if (!isAddressEqual(input.ownerAddress, input.message.owner)) {
+      throw new StrategyToolError("Approval owner does not match the connected owner.", "approval_owner_mismatch", 403);
+    }
+    if (input.message.marketId.toLowerCase() !== strategy.marketId.toLowerCase()) {
+      throw new StrategyToolError("Approval market does not match the strategy market.", "approval_market_mismatch", 422);
+    }
+    if (input.message.strategyIdHash.toLowerCase() !== hashStrategyId(strategy.id).toLowerCase()) {
+      throw new StrategyToolError("Approval strategy identifier does not match the current strategy.", "approval_strategy_id_mismatch", 422);
+    }
+
+    const strategyHash = this.computeStrategyHash(strategy);
+    if (input.message.strategyHash.toLowerCase() !== strategyHash.toLowerCase()) {
+      throw new StrategyToolError("Approval strategy hash is stale. Generate a fresh approval intent.", "stale_strategy_approval", 409);
+    }
+
+    const recovered = await recoverTypedDataAddress({
+      domain: {
+        name: STRATEGY_EXECUTION_DOMAIN_NAME,
+        version: STRATEGY_EXECUTION_DOMAIN_VERSION,
+        chainId: this.options.chainId,
+        verifyingContract
+      },
+      types: strategyApprovalTypes,
+      primaryType: STRATEGY_APPROVAL_PRIMARY_TYPE,
+      message: this.toTypedApprovalMessage(input.message),
+      signature: input.signature
+    });
+
+    if (!isAddressEqual(recovered, input.ownerAddress)) {
+      throw new StrategyToolError("Approval signature was not produced by the strategy owner.", "invalid_approval_signature", 403);
+    }
+
+    const now = isoNow();
+    const deadlineUnix = BigInt(input.message.deadline);
+    if (deadlineUnix <= BigInt(Math.floor(Date.now() / 1000))) {
+      throw new StrategyToolError("Approval signature is already expired.", "expired_strategy_approval", 422);
+    }
+
+    this.db
+      .prepare(
+        `
+          UPDATE strategy_execution_approvals
+          SET status = 'superseded', updated_at = ?
+          WHERE strategy_id = ? AND owner_address = ? AND status = 'active'
+        `
+      )
+      .run(now, strategy.id, keyOf(input.ownerAddress));
+
+    this.db
+      .prepare(
+        `
+          INSERT INTO strategy_execution_approvals (
+            id,
+            strategy_id,
+            owner_address,
+            market_id,
+            strategy_hash,
+            max_slippage_bps,
+            nonce,
+            deadline,
+            verifying_contract,
+            chain_id,
+            signature,
+            status,
+            created_at,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+        `
+      )
+      .run(
+        randomUUID(),
+        strategy.id,
+        keyOf(input.ownerAddress),
+        keyOf(strategy.marketId),
+        strategyHash,
+        Number(input.message.maxSlippageBps),
+        input.message.nonce,
+        input.message.deadline,
+        verifyingContract,
+        this.options.chainId,
+        input.signature,
+        now,
+        now
+      );
+
+    return this.getExecutionApproval(strategy.id, input.ownerAddress);
+  }
+
+  getExecutionApproval(strategyId: string, ownerAddress: HexString): StrategyApprovalRecord {
+    this.assertOwnerAddress(ownerAddress);
+    const strategy = this.getStrategy(strategyId, ownerAddress);
+    const row = this.db
+      .prepare(
+        `
+          SELECT
+            strategy_id,
+            owner_address,
+            market_id,
+            strategy_hash,
+            max_slippage_bps,
+            nonce,
+            deadline,
+            verifying_contract,
+          chain_id,
+          signature,
+          status,
+          created_at,
+            updated_at
+          FROM strategy_execution_approvals
+          WHERE strategy_id = ? AND owner_address = ? AND status = 'active'
+          ORDER BY created_at DESC
+          LIMIT 1
+        `
+      )
+      .get(strategyId, keyOf(ownerAddress)) as
+      | {
+          strategy_id: string;
+          owner_address: string;
+          market_id: string;
+          strategy_hash: HexString;
+          max_slippage_bps: number;
+          nonce: string;
+          deadline: string;
+          verifying_contract: HexString;
+          chain_id: number;
+          signature: HexString;
+          status: "active" | "superseded" | "consumed";
+          created_at: string;
+          updated_at: string;
+        }
+      | undefined;
+
+    if (!row) {
+      throw new StrategyToolError("No active execution approval found for this strategy.", "strategy_approval_not_found", 404);
+    }
+
+    const strategyHash = this.computeStrategyHash(strategy);
+    if (row.strategy_hash.toLowerCase() !== strategyHash.toLowerCase()) {
+      throw new StrategyToolError("Stored strategy approval is stale. Re-authorize the updated strategy.", "stale_strategy_approval", 409);
+    }
+
+    if (BigInt(row.deadline) <= BigInt(Math.floor(Date.now() / 1000))) {
+      throw new StrategyToolError("Stored strategy approval has expired. Re-authorize the strategy.", "expired_strategy_approval", 409);
+    }
+
+    return {
+      strategyId: row.strategy_id,
+      ownerAddress,
+      marketId: strategy.marketId,
+      strategyHash: row.strategy_hash,
+      maxSlippageBps: Number(row.max_slippage_bps),
+      nonce: row.nonce,
+      deadline: row.deadline,
+      signature: row.signature,
+      verifyingContract: row.verifying_contract,
+      chainId: Number(row.chain_id),
+      status: row.status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    };
+  }
+
+  consumeExecutionApproval(input: {
+    strategyId: string;
+    ownerAddress: HexString;
+    nonce: string;
+  }) {
+    this.assertOwnerAddress(input.ownerAddress);
+    const now = isoNow();
+    const result = this.db
+      .prepare(
+        `
+          UPDATE strategy_execution_approvals
+          SET status = 'consumed', updated_at = ?
+          WHERE strategy_id = ? AND owner_address = ? AND nonce = ? AND status = 'active'
+        `
+      )
+      .run(now, input.strategyId, keyOf(input.ownerAddress), input.nonce);
+
+    if (Number(result.changes ?? 0) === 0) {
+      throw new StrategyToolError(
+        "Active execution approval not found or already consumed.",
+        "strategy_approval_not_active",
+        409
+      );
+    }
+  }
+
+  recordExecution(input: Omit<StrategyExecutionRecord, "id" | "createdAt" | "updatedAt">) {
+    const now = isoNow();
+    const id = randomUUID();
+    this.db
+      .prepare(
+        `
+          INSERT INTO strategy_execution_history (
+            id,
+            owner_address,
+            strategy_id,
+            strategy_name,
+            market_id,
+            signal,
+            action,
+            approval_created_at,
+            approval_nonce,
+            approval_tx_hash,
+            status,
+            from_token,
+            to_token,
+            amount_in_atomic,
+            quoted_out_atomic,
+            actual_out_atomic,
+            execution_price,
+            route_preference,
+            swap_job_id,
+            order_id,
+            order_side,
+            order_quantity,
+            order_limit_price,
+            l1_tx_hash,
+            reason,
+            created_at,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `
+      )
+      .run(
+        id,
+        keyOf(input.ownerAddress),
+        input.strategyId,
+        input.strategyName,
+        keyOf(input.marketId),
+        input.signal,
+        input.action,
+        input.approvalCreatedAt,
+        input.approvalNonce,
+        input.approvalTxHash ?? null,
+        input.status,
+        input.fromToken ? keyOf(input.fromToken) : null,
+        input.toToken ? keyOf(input.toToken) : null,
+        input.amountInAtomic ?? null,
+        input.quotedOutAtomic ?? null,
+        input.actualOutAtomic ?? null,
+        input.executionPrice ?? null,
+        input.routePreference ?? null,
+        input.swapJobId ?? null,
+        input.orderId ?? null,
+        input.orderSide ?? null,
+        input.orderQuantity ?? null,
+        input.orderLimitPrice ?? null,
+        input.l1TxHash ?? null,
+        input.reason ?? null,
+        now,
+        now
+      );
+
+    return this.getExecutionRecord(id, input.ownerAddress);
+  }
+
+  updateExecutionRecord(
+    executionId: string,
+    ownerAddress: HexString,
+    patch: Partial<Pick<
+      StrategyExecutionRecord,
+      "status" | "actualOutAtomic" | "quotedOutAtomic" | "executionPrice" | "l1TxHash" | "reason"
+    >>
+  ) {
+    this.assertOwnerAddress(ownerAddress);
+    const existing = this.getExecutionRecord(executionId, ownerAddress);
+    const updatedAt = isoNow();
+    this.db
+      .prepare(
+        `
+          UPDATE strategy_execution_history
+          SET
+            status = ?,
+            actual_out_atomic = ?,
+            quoted_out_atomic = ?,
+            execution_price = ?,
+            l1_tx_hash = ?,
+            reason = ?,
+            updated_at = ?
+          WHERE id = ? AND owner_address = ?
+        `
+      )
+      .run(
+        patch.status ?? existing.status,
+        patch.actualOutAtomic ?? existing.actualOutAtomic ?? null,
+        patch.quotedOutAtomic ?? existing.quotedOutAtomic ?? null,
+        patch.executionPrice ?? existing.executionPrice ?? null,
+        patch.l1TxHash ?? existing.l1TxHash ?? null,
+        patch.reason ?? existing.reason ?? null,
+        updatedAt,
+        executionId,
+        keyOf(ownerAddress)
+      );
+
+    return this.getExecutionRecord(executionId, ownerAddress);
+  }
+
+  listExecutionRecords(ownerAddress: HexString) {
+    this.assertOwnerAddress(ownerAddress);
+    const rows = this.db
+      .prepare(
+        `
+          SELECT
+            id,
+            owner_address,
+            strategy_id,
+            strategy_name,
+            market_id,
+            signal,
+            action,
+            approval_created_at,
+            approval_nonce,
+            approval_tx_hash,
+            status,
+            from_token,
+            to_token,
+            amount_in_atomic,
+            quoted_out_atomic,
+            actual_out_atomic,
+            execution_price,
+            route_preference,
+            swap_job_id,
+            order_id,
+            order_side,
+            order_quantity,
+            order_limit_price,
+            l1_tx_hash,
+            reason,
+            created_at,
+            updated_at
+          FROM strategy_execution_history
+          WHERE owner_address = ?
+          ORDER BY created_at DESC
+        `
+      )
+      .all(keyOf(ownerAddress)) as Array<Record<string, unknown>>;
+
+    return rows.map((row) => this.mapExecutionRecordRow(row, ownerAddress));
   }
 
   updateDraft(input: { ownerAddress: HexString; strategy: unknown }) {
@@ -660,6 +1091,16 @@ export class StrategyService {
         `
       )
       .run(randomUUID(), strategy.id, Number(latestVersion.version ?? 0) + 1, isoNow(), bodyJson);
+
+    this.db
+      .prepare(
+        `
+          UPDATE strategy_execution_approvals
+          SET status = 'superseded', updated_at = ?
+          WHERE strategy_id = ? AND status = 'active'
+        `
+      )
+      .run(isoNow(), strategy.id);
   }
 
   private assertOwnerAddress(ownerAddress: HexString) {
@@ -704,6 +1145,124 @@ export class StrategyService {
         }
       );
     }
+  }
+
+  private computeStrategyHash(strategy: StrategyDefinition) {
+    return hashStrategyPayload(JSON.stringify(normalizeStrategyDefinition(strategy)));
+  }
+
+  private nextApprovalNonce(ownerAddress: HexString) {
+    const row = this.db
+      .prepare(
+        `
+          SELECT COALESCE(MAX(CAST(nonce AS INTEGER)), -1) AS nonce
+          FROM strategy_execution_approvals
+          WHERE owner_address = ?
+        `
+      )
+      .get(keyOf(ownerAddress)) as { nonce: number };
+    return Number(row.nonce ?? -1) + 1;
+  }
+
+  private toTypedApprovalMessage(message: StrategyApprovalMessage) {
+    return {
+      owner: message.owner,
+      strategyIdHash: message.strategyIdHash,
+      strategyHash: message.strategyHash,
+      marketId: message.marketId,
+      maxSlippageBps: BigInt(message.maxSlippageBps),
+      nonce: BigInt(message.nonce),
+      deadline: BigInt(message.deadline)
+    };
+  }
+
+  private getStrategyExecutorAddress() {
+    const address = this.options.strategyExecutorAddress;
+    if (!address || address.toLowerCase() === zeroAddress) {
+      throw new StrategyToolError(
+        "Strategy executor contract is not configured in this deployment.",
+        "strategy_executor_not_configured",
+        409
+      );
+    }
+    return address;
+  }
+
+  private getExecutionRecord(executionId: string, ownerAddress: HexString) {
+    const row = this.db
+      .prepare(
+        `
+          SELECT
+            id,
+            owner_address,
+            strategy_id,
+            strategy_name,
+            market_id,
+            signal,
+            action,
+            approval_created_at,
+            approval_nonce,
+            approval_tx_hash,
+            status,
+            from_token,
+            to_token,
+            amount_in_atomic,
+            quoted_out_atomic,
+            actual_out_atomic,
+            execution_price,
+            route_preference,
+            swap_job_id,
+            order_id,
+            order_side,
+            order_quantity,
+            order_limit_price,
+            l1_tx_hash,
+            reason,
+            created_at,
+            updated_at
+          FROM strategy_execution_history
+          WHERE id = ? AND owner_address = ?
+        `
+      )
+      .get(executionId, keyOf(ownerAddress)) as Record<string, unknown> | undefined;
+
+    if (!row) {
+      throw new StrategyToolError("Strategy execution record not found.", "strategy_execution_not_found", 404);
+    }
+
+    return this.mapExecutionRecordRow(row, ownerAddress);
+  }
+
+  private mapExecutionRecordRow(row: Record<string, unknown>, ownerAddress: HexString): StrategyExecutionRecord {
+    return {
+      id: String(row.id),
+      ownerAddress,
+      strategyId: String(row.strategy_id),
+      strategyName: String(row.strategy_name),
+      marketId: row.market_id as HexString,
+      signal: row.signal as StrategyExecutionRecord["signal"],
+      action: row.action as StrategyExecutionRecord["action"],
+      approvalCreatedAt: String(row.approval_created_at),
+      approvalNonce: String(row.approval_nonce),
+      approvalTxHash: (row.approval_tx_hash ?? undefined) as HexString | undefined,
+      status: String(row.status),
+      fromToken: (row.from_token ?? undefined) as HexString | undefined,
+      toToken: (row.to_token ?? undefined) as HexString | undefined,
+      amountInAtomic: (row.amount_in_atomic ?? undefined) as string | undefined,
+      quotedOutAtomic: (row.quoted_out_atomic ?? undefined) as string | undefined,
+      actualOutAtomic: (row.actual_out_atomic ?? undefined) as string | undefined,
+      executionPrice: row.execution_price === null || row.execution_price === undefined ? undefined : Number(row.execution_price),
+      routePreference: (row.route_preference ?? undefined) as "auto" | "local" | "dex" | undefined,
+      swapJobId: (row.swap_job_id ?? undefined) as string | undefined,
+      orderId: (row.order_id ?? undefined) as string | undefined,
+      orderSide: (row.order_side ?? undefined) as "BUY" | "SELL" | undefined,
+      orderQuantity: (row.order_quantity ?? undefined) as string | undefined,
+      orderLimitPrice: (row.order_limit_price ?? undefined) as string | undefined,
+      l1TxHash: (row.l1_tx_hash ?? undefined) as string | undefined,
+      reason: (row.reason ?? undefined) as string | undefined,
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at)
+    };
   }
 
   private ensureSchema() {
@@ -756,6 +1315,59 @@ export class StrategyService {
         updated_at TEXT NOT NULL,
         body_json TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS strategy_execution_approvals (
+        id TEXT PRIMARY KEY,
+        strategy_id TEXT NOT NULL,
+        owner_address TEXT NOT NULL,
+        market_id TEXT NOT NULL,
+        strategy_hash TEXT NOT NULL,
+        max_slippage_bps INTEGER NOT NULL,
+        nonce TEXT NOT NULL,
+        deadline TEXT NOT NULL,
+        verifying_contract TEXT NOT NULL,
+        chain_id INTEGER NOT NULL,
+        signature TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_strategy_execution_approvals_lookup
+      ON strategy_execution_approvals(strategy_id, owner_address, status, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS strategy_execution_history (
+        id TEXT PRIMARY KEY,
+        owner_address TEXT NOT NULL,
+        strategy_id TEXT NOT NULL,
+        strategy_name TEXT NOT NULL,
+        market_id TEXT NOT NULL,
+        signal TEXT NOT NULL,
+        action TEXT NOT NULL,
+        approval_created_at TEXT NOT NULL,
+        approval_nonce TEXT NOT NULL,
+        approval_tx_hash TEXT,
+        status TEXT NOT NULL,
+        from_token TEXT,
+        to_token TEXT,
+        amount_in_atomic TEXT,
+        quoted_out_atomic TEXT,
+        actual_out_atomic TEXT,
+        execution_price REAL,
+        route_preference TEXT,
+        swap_job_id TEXT,
+        order_id TEXT,
+        order_side TEXT,
+        order_quantity TEXT,
+        order_limit_price TEXT,
+        l1_tx_hash TEXT,
+        reason TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_strategy_execution_history_owner
+      ON strategy_execution_history(owner_address, created_at DESC);
     `);
   }
 
