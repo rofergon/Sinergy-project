@@ -3,9 +3,10 @@ import { MsgInitiateTokenDeposit, MsgInitiateTokenDepositResponse } from "@initi
 import { useInterwovenKit } from "@initia/interwovenkit-react";
 import type { Address } from "viem";
 import { formatUnits, parseUnits } from "viem";
-import { useBalance } from "wagmi";
+import { useBalance, useSignMessage } from "wagmi";
 import { sepolia } from "wagmi/chains";
 import { buildPublicSubdomainHost, isDirectHost } from "@sinergy/shared";
+import { setAuthSigner } from "./auth";
 import { ThemeToggle } from "./ThemeToggle";
 import {
   buildBridgeDefaults,
@@ -161,6 +162,7 @@ export default function App() {
     openBridge,
     requestTxBlock,
   } = useInterwovenKit();
+  const { signMessageAsync } = useSignMessage();
   const sepoliaBalance = useBalance({
     address: address as `0x${string}` | undefined,
     chainId: sepolia.id,
@@ -185,6 +187,22 @@ export default function App() {
   const [redeemAmount, setRedeemAmount] = useState("1");
   const [redeemStatus, setRedeemStatus] = useState("");
   const [isRedeeming, setIsRedeeming] = useState(false);
+
+  useEffect(() => {
+    setAuthSigner(
+      signMessageAsync
+        ? async ({ message }) =>
+            signMessageAsync({
+              message
+            })
+        : undefined
+    );
+
+    return () => {
+      setAuthSigner(undefined);
+    };
+  }, [signMessageAsync]);
+
   const selectedBridgeAsset = useMemo(
     () => resolveBridgeAsset(selectedBridgeAssetSymbol),
     [selectedBridgeAssetSymbol]
@@ -344,6 +362,7 @@ export default function App() {
         "/bridge/claim",
         {
           method: "POST",
+          authAddress: address,
           body: JSON.stringify({
             tokenSymbol: selectedBridgeAssetSymbol,
             initiaAddress,
@@ -389,6 +408,7 @@ export default function App() {
         }
       >("/bridge/redeem", {
         method: "POST",
+        authAddress: address,
         body: JSON.stringify({
           tokenSymbol: selectedBridgeAssetSymbol,
           initiaAddress,
