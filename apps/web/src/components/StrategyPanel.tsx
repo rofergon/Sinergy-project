@@ -964,6 +964,43 @@ export function StrategyPanel({
     }
   }
 
+  async function deleteDraft() {
+    if (!address || !draft) return;
+    const confirmed = window.confirm(`Delete strategy "${draft.name}"? This will also remove its backtests and live execution history.`);
+    if (!confirmed) return;
+
+    setBusy("saving");
+    try {
+      await strategyTool<{ strategyId: string; deleted: true }>("delete_strategy", {
+        ownerAddress: address,
+        strategyId: draft.id
+      });
+
+      const remaining = strategies.filter((entry) => entry.id !== draft.id);
+      setStrategies(remaining);
+      setValidation(null);
+      setSelectedStrategyId(remaining[0]?.id ?? "");
+      setStatus("Strategy deleted.");
+      onBacktestResult(null);
+
+      if (remaining[0]) {
+        const next = await strategyTool<{ strategy: StrategyDefinition }>("get_strategy", {
+          ownerAddress: address,
+          strategyId: remaining[0].id
+        });
+        setDraft(next.strategy);
+        onSelectMarket(next.strategy.marketId);
+        onTimeframeChange(next.strategy.timeframe);
+      } else {
+        setDraft(null);
+      }
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function runBacktest() {
     if (!address || !draft) return;
     setBusy("running");
@@ -1260,6 +1297,22 @@ export function StrategyPanel({
                   />
                 </label>
                 <label className="se-risk-field">
+                  <span>Starting Equity</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={draft.costModel.startingEquity}
+                    onChange={(ev) =>
+                      setDraft({
+                        ...cloneStrategy(draft),
+                        costModel: { ...draft.costModel, startingEquity: Number(ev.target.value) },
+                        updatedAt: new Date().toISOString()
+                      })
+                    }
+                  />
+                </label>
+                <label className="se-risk-field">
                   <span>Fees (bps)</span>
                   <input
                     type="number"
@@ -1364,6 +1417,14 @@ export function StrategyPanel({
 
             {/* ── FOOTER ── */}
             <div className="strategy-panel-footer">
+              <button
+                type="button"
+                className="strategy-danger-btn"
+                onClick={() => void deleteDraft()}
+                disabled={busy !== null}
+              >
+                Delete
+              </button>
               <button type="button" onClick={() => void validateDraft()} disabled={busy !== null}>
                 Validate
               </button>
