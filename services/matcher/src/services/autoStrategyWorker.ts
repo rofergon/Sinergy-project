@@ -108,6 +108,9 @@ export class AutoStrategyWorker {
         strategyId,
         consumeApproval: false
       });
+      if (!result) {
+        throw new Error("Live strategy execution returned no result.");
+      }
 
       this.deps.strategyService.markAutoExecutionEvaluation({
         ownerAddress,
