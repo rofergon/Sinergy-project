@@ -1,19 +1,21 @@
 import { formatUnits, parseUnits } from "viem";
 import type {
   HexString,
+  StrategyChartOverlay,
   StrategyDefinition,
   StrategyExecutionRecord,
   StrategyExecutionStrategySummary
 } from "@sinergy/shared";
 import {
   buildRuntimeIndicatorSeriesMap,
+  collectIndicatorReferencesFromRuntime,
   compileStrategyToRuntime,
   evaluateRuntimeCondition,
   runtimeEntryConditionForSide,
   runtimeExitConditionForSide
 } from "./strategyRuntime.js";
 import { compileEngineToRuntime } from "./strategySourceCompiler.js";
-import type { StrategyCandle } from "./indicatorEngine.js";
+import { buildIndicatorOverlays, type StrategyCandle } from "./indicatorEngine.js";
 import type { LiquidityRouter } from "./router.js";
 import type { MatchingService } from "./matcher.js";
 import type { VaultService } from "./vault.js";
@@ -59,8 +61,45 @@ function normalizeDecimalAmount(value: number, decimals: number) {
   return safe.toFixed(Math.min(decimals, 8));
 }
 
+type StrategyManagedPosition = {
+  basePositionAtomic: bigint;
+  quoteCashFlow: number;
+};
+
 export class StrategyExecutionService {
   constructor(private readonly deps: StrategyExecutionDeps) {}
+
+  getLiveChartOverlay(input: {
+    ownerAddress: HexString;
+    strategyId: string;
+    candleLookback?: number;
+  }): StrategyChartOverlay {
+    const strategy = this.deps.strategyService.getStrategy(input.strategyId, input.ownerAddress);
+    const market = this.resolveMarket(strategy.marketId);
+    const candles = this.loadCandles(
+      market.baseToken.symbol,
+      strategy,
+      input.candleLookback ?? this.liveOverlayLookback(strategy.timeframe)
+    );
+    const runtime = strategy.engine
+      ? compileEngineToRuntime(strategy, strategy.engine)
+      : compileStrategyToRuntime(strategy);
+    const seriesMap = buildRuntimeIndicatorSeriesMap(candles, runtime);
+
+    return {
+      runId: `live-${strategy.id}-${candles[candles.length - 1]?.ts ?? Date.now()}`,
+      strategyId: strategy.id,
+      marketId: strategy.marketId,
+      timeframe: strategy.timeframe,
+      indicators: buildIndicatorOverlays(
+        candles,
+        strategy,
+        seriesMap,
+        collectIndicatorReferencesFromRuntime(runtime)
+      ),
+      markers: []
+    };
+  }
 
   inspectApprovedStrategy(input: {
     ownerAddress: HexString;
@@ -71,7 +110,13 @@ export class StrategyExecutionService {
     const approval = this.deps.strategyService.getExecutionApproval(input.strategyId, input.ownerAddress);
     const market = this.resolveMarket(strategy.marketId);
     const candles = this.loadCandles(market.baseToken.symbol, strategy, input.candleLookback ?? 240);
-    const signal = this.resolveSignal(strategy, candles);
+    const balances = this.deps.store.get().balances;
+    const baseBalanceAtomic = readAtomicBalance(balances, input.ownerAddress, market.baseToken.address);
+    const quoteBalanceAtomic = readAtomicBalance(balances, input.ownerAddress, market.quoteToken.address);
+    const managedPosition = this.getManagedPosition(input.ownerAddress, input.strategyId, market);
+    const signal = this.resolveSignal(strategy, candles, {
+      hasManagedLongPosition: managedPosition.basePositionAtomic > 0n
+    });
 
     return {
       strategy,
@@ -79,6 +124,9 @@ export class StrategyExecutionService {
       market,
       candles,
       signal,
+      baseBalanceAtomic,
+      quoteBalanceAtomic,
+      managedBasePositionAtomic: managedPosition.basePositionAtomic,
       lastCandleTs: candles[candles.length - 1]?.ts
     };
   }
@@ -91,7 +139,7 @@ export class StrategyExecutionService {
     consumeApproval?: boolean;
   }) {
     const inspection = this.inspectApprovedStrategy(input);
-    const { strategy, approval, market, signal, lastCandleTs } = inspection;
+    const { strategy, approval, market, signal, lastCandleTs, managedBasePositionAtomic } = inspection;
     const balances = this.deps.store.get().balances;
     const baseBalanceAtomic = readAtomicBalance(balances, input.ownerAddress, market.baseToken.address);
     const quoteBalanceAtomic = readAtomicBalance(balances, input.ownerAddress, market.quoteToken.address);
@@ -108,6 +156,7 @@ export class StrategyExecutionService {
       signal,
       strategy,
       market,
+      managedBasePositionAtomic,
       baseBalanceAtomic,
       quoteBalanceAtomic,
       routePreference: input.routePreference ?? "auto"
@@ -202,45 +251,6 @@ export class StrategyExecutionService {
         candleTs: lastCandleTs
       };
     }
-
-    const order = this.deps.matchingService.placeOrder({
-      userAddress: input.ownerAddress,
-      marketId: market.id,
-      side: plan.side,
-      quantity: plan.quantity,
-      limitPrice: plan.limitPrice
-    });
-    const record = this.deps.strategyService.recordExecution({
-      ownerAddress: input.ownerAddress,
-      strategyId: strategy.id,
-      strategyName: strategy.name,
-      marketId: market.id,
-      signal,
-      action: "dark_pool_order",
-      approvalCreatedAt: approval.createdAt,
-      approvalNonce: approval.nonce,
-      approvalTxHash,
-      status: order.status,
-      orderId: order.id,
-      orderSide: order.side,
-      orderQuantity: plan.quantity,
-      orderLimitPrice: plan.limitPrice,
-      executionPrice: Number(plan.limitPrice)
-    });
-
-    return {
-      strategyId: strategy.id,
-      signal,
-      action: "dark_pool_order" as const,
-      executionId: record.id,
-      approvalTxHash,
-      marketId: market.id,
-      side: plan.side,
-      quantity: plan.quantity,
-      limitPrice: plan.limitPrice,
-      order,
-      candleTs: lastCandleTs
-    };
   }
 
   listExecutionHistory(ownerAddress: HexString) {
@@ -259,28 +269,12 @@ export class StrategyExecutionService {
       const sorted = [...strategyRecords].sort((left, right) =>
         left.createdAt.localeCompare(right.createdAt)
       );
+      const executableRecords = sorted.filter((record) => record.action !== "no_action");
       const market = this.resolveMarket(sorted[0]!.marketId);
-      let currentPositionBase = 0;
-      let quoteCashFlow = 0;
+      const managedPosition = this.getManagedPositionFromRecords(sorted, market);
       let hasPending = false;
 
       for (const record of sorted) {
-        if (record.action === "router_swap" && record.status === "completed" && record.amountInAtomic) {
-          if (
-            record.fromToken?.toLowerCase() === market.quoteToken.address.toLowerCase() &&
-            record.toToken?.toLowerCase() === market.baseToken.address.toLowerCase()
-          ) {
-            currentPositionBase += Number(formatUnits(BigInt(record.actualOutAtomic ?? record.quotedOutAtomic ?? "0"), market.baseToken.decimals));
-            quoteCashFlow -= Number(formatUnits(BigInt(record.amountInAtomic), market.quoteToken.decimals));
-          } else if (
-            record.fromToken?.toLowerCase() === market.baseToken.address.toLowerCase() &&
-            record.toToken?.toLowerCase() === market.quoteToken.address.toLowerCase()
-          ) {
-            currentPositionBase -= Number(formatUnits(BigInt(record.amountInAtomic), market.baseToken.decimals));
-            quoteCashFlow += Number(formatUnits(BigInt(record.actualOutAtomic ?? record.quotedOutAtomic ?? "0"), market.quoteToken.decimals));
-          }
-        }
-
         if (record.status !== "completed" && record.status !== "failed" && record.status !== "no_action") {
           hasPending = true;
         }
@@ -288,10 +282,13 @@ export class StrategyExecutionService {
 
       const currentPrice = Number(this.deps.priceService.getReferencePrice(market.baseToken.symbol));
       const currentPnlQuote =
-        Number.isFinite(currentPrice) ? quoteCashFlow + (currentPositionBase * currentPrice) : undefined;
+        Number.isFinite(currentPrice)
+          ? managedPosition.quoteCashFlow +
+            (Number(formatUnits(managedPosition.basePositionAtomic, market.baseToken.decimals)) * currentPrice)
+          : undefined;
 
       const summaryStatus: StrategyExecutionStrategySummary["status"] =
-        hasPending ? "pending" : currentPositionBase > 0 ? "active" : "idle";
+        hasPending ? "pending" : managedPosition.basePositionAtomic > 0n ? "active" : "idle";
 
       return {
         strategyId,
@@ -299,10 +296,10 @@ export class StrategyExecutionService {
         marketId: sorted[0]!.marketId,
         marketSymbol: market.symbol,
         startedAt: sorted[0]!.approvalCreatedAt,
-        lastTradeAt: sorted[sorted.length - 1]?.createdAt,
+        lastTradeAt: executableRecords[executableRecords.length - 1]?.createdAt,
         status: summaryStatus,
-        tradesCount: sorted.length,
-        currentPositionBase: currentPositionBase.toFixed(8),
+        tradesCount: executableRecords.length,
+        currentPositionBase: formatUnits(managedPosition.basePositionAtomic, market.baseToken.decimals),
         currentPnlQuote,
         currentPrice
       };
@@ -318,6 +315,7 @@ export class StrategyExecutionService {
     signal: StrategySignal;
     strategy: StrategyDefinition;
     market: ResolvedMarket;
+    managedBasePositionAtomic: bigint;
     baseBalanceAtomic: bigint;
     quoteBalanceAtomic: bigint;
     routePreference: "auto" | "local" | "dex";
@@ -337,11 +335,18 @@ export class StrategyExecutionService {
       };
     }
 
+    if (!input.market.routeable) {
+      return {
+        kind: "no_action" as const,
+        reason: "Live strategy execution only supports router-enabled markets with routed liquidity."
+      };
+    }
+
     if (input.signal === "long_entry") {
-      if (input.baseBalanceAtomic > 0n) {
+      if (input.managedBasePositionAtomic > 0n) {
         return {
           kind: "no_action" as const,
-          reason: "A long inventory balance already exists, so no new long entry was placed."
+          reason: "This live strategy already has an open managed long position, so no new long entry was placed."
         };
       }
 
@@ -349,7 +354,6 @@ export class StrategyExecutionService {
         input.strategy,
         input.market,
         input.quoteBalanceAtomic,
-        input.baseBalanceAtomic,
         referencePrice
       );
 
@@ -360,55 +364,34 @@ export class StrategyExecutionService {
         };
       }
 
-      if (input.market.routeable) {
-        return {
-          kind: "router_swap" as const,
-          fromToken: input.market.quoteToken.address,
-          amount: formatUnits(quoteAmountAtomic, input.market.quoteToken.decimals),
-          routePreference: input.routePreference
-        };
-      }
-
-      const priceAtomic = parseUnits(String(referencePrice), input.market.quoteToken.decimals);
-      const quantityAtomic =
-        (quoteAmountAtomic * (10n ** BigInt(input.market.baseToken.decimals))) / priceAtomic;
-      if (quantityAtomic <= 0n) {
-        return {
-          kind: "no_action" as const,
-          reason: "The computed long entry size rounds down to zero at current market precision."
-        };
-      }
-
       return {
-        kind: "dark_pool_order" as const,
-        side: "BUY" as const,
-        quantity: formatUnits(quantityAtomic, input.market.baseToken.decimals),
-        limitPrice: String(referencePrice)
+        kind: "router_swap" as const,
+        fromToken: input.market.quoteToken.address,
+        amount: formatUnits(quoteAmountAtomic, input.market.quoteToken.decimals),
+        routePreference: input.routePreference
       };
     }
 
     if (input.signal === "long_exit") {
-      if (input.baseBalanceAtomic <= 0n) {
+      if (input.managedBasePositionAtomic <= 0n) {
         return {
           kind: "no_action" as const,
-          reason: "The strategy wants to exit long, but no base inventory is available."
+          reason: "The strategy wants to exit long, but it does not have an open live position to close."
         };
       }
 
-      if (input.market.routeable) {
+      if (input.baseBalanceAtomic < input.managedBasePositionAtomic) {
         return {
-          kind: "router_swap" as const,
-          fromToken: input.market.baseToken.address,
-          amount: formatUnits(input.baseBalanceAtomic, input.market.baseToken.decimals),
-          routePreference: input.routePreference
+          kind: "no_action" as const,
+          reason: "The strategy has an open live position, but the wallet no longer holds enough base inventory to close it."
         };
       }
 
       return {
-        kind: "dark_pool_order" as const,
-        side: "SELL" as const,
-        quantity: formatUnits(input.baseBalanceAtomic, input.market.baseToken.decimals),
-        limitPrice: String(referencePrice)
+        kind: "router_swap" as const,
+        fromToken: input.market.baseToken.address,
+        amount: formatUnits(input.managedBasePositionAtomic, input.market.baseToken.decimals),
+        routePreference: input.routePreference
       };
     }
 
@@ -422,7 +405,6 @@ export class StrategyExecutionService {
     strategy: StrategyDefinition,
     market: ResolvedMarket,
     quoteBalanceAtomic: bigint,
-    baseBalanceAtomic: bigint,
     referencePrice: number
   ) {
     if (strategy.sizing.mode === "fixed_quote_notional") {
@@ -431,8 +413,7 @@ export class StrategyExecutionService {
     }
 
     const quoteBalance = Number(formatUnits(quoteBalanceAtomic, market.quoteToken.decimals));
-    const baseBalance = Number(formatUnits(baseBalanceAtomic, market.baseToken.decimals));
-    const totalEquityQuote = quoteBalance + (baseBalance * referencePrice);
+    const totalEquityQuote = quoteBalance;
     const desiredQuote = totalEquityQuote * (strategy.sizing.value / 100);
     const desiredAtomic = parseUnits(
       normalizeDecimalAmount(desiredQuote, market.quoteToken.decimals),
@@ -441,7 +422,13 @@ export class StrategyExecutionService {
     return desiredAtomic < quoteBalanceAtomic ? desiredAtomic : quoteBalanceAtomic;
   }
 
-  private resolveSignal(strategy: StrategyDefinition, candles: StrategyCandle[]): StrategySignal {
+  private resolveSignal(
+    strategy: StrategyDefinition,
+    candles: StrategyCandle[],
+    state?: {
+      hasManagedLongPosition?: boolean;
+    }
+  ): StrategySignal {
     if (candles.length < 2) {
       throw new StrategyToolError("Not enough candles to evaluate a live strategy signal.", "insufficient_live_candles", 422);
     }
@@ -464,12 +451,77 @@ export class StrategyExecutionService {
     const shortExit = strategy.enabledSides.includes("short")
       ? evaluateRuntimeCondition(runtimeExitConditionForSide(runtime, "short"), candles, seriesMap, index)
       : false;
+    const hasManagedLongPosition = Boolean(state?.hasManagedLongPosition);
 
     if (longEntry && !longExit && !shortEntry) return "long_entry";
-    if (longExit && !longEntry) return "long_exit";
+    if (longExit && !longEntry && hasManagedLongPosition) return "long_exit";
     if (shortEntry && !shortExit && !longEntry) return "short_entry";
     if (shortExit && !shortEntry) return "short_exit";
     return "none";
+  }
+
+  private getManagedPosition(ownerAddress: HexString, strategyId: string, market: ResolvedMarket): StrategyManagedPosition {
+    const records = this.deps.strategyService
+      .listExecutionRecords(ownerAddress)
+      .filter((record) => record.strategyId === strategyId)
+      .map((record) => this.enrichExecutionRecord(ownerAddress, record));
+
+    return this.getManagedPositionFromRecords(records, market);
+  }
+
+  private getManagedPositionFromRecords(
+    records: StrategyExecutionRecord[],
+    market: ResolvedMarket
+  ): StrategyManagedPosition {
+    let basePositionAtomic = 0n;
+    let quoteCashFlow = 0;
+
+    for (const record of records.sort((left, right) => left.createdAt.localeCompare(right.createdAt))) {
+      if (record.action !== "router_swap" || record.status !== "completed" || !record.amountInAtomic) {
+        continue;
+      }
+
+      const fromToken = record.fromToken?.toLowerCase();
+      const toToken = record.toToken?.toLowerCase();
+      const baseToken = market.baseToken.address.toLowerCase();
+      const quoteToken = market.quoteToken.address.toLowerCase();
+
+      if (fromToken === quoteToken && toToken === baseToken) {
+        const baseOutAtomic = BigInt(record.actualOutAtomic ?? record.quotedOutAtomic ?? "0");
+        basePositionAtomic += baseOutAtomic;
+        quoteCashFlow -= Number(formatUnits(BigInt(record.amountInAtomic), market.quoteToken.decimals));
+        continue;
+      }
+
+      if (fromToken === baseToken && toToken === quoteToken) {
+        const baseInAtomic = BigInt(record.amountInAtomic);
+        if (basePositionAtomic <= 0n) {
+          continue;
+        }
+
+        const normalizedBaseInAtomic = baseInAtomic > basePositionAtomic ? basePositionAtomic : baseInAtomic;
+        const normalizedQuoteOutAtomic = this.scaleAtomicAmount(
+          BigInt(record.actualOutAtomic ?? record.quotedOutAtomic ?? "0"),
+          normalizedBaseInAtomic,
+          baseInAtomic
+        );
+
+        basePositionAtomic -= normalizedBaseInAtomic;
+        quoteCashFlow += Number(formatUnits(normalizedQuoteOutAtomic, market.quoteToken.decimals));
+      }
+    }
+
+    return {
+      basePositionAtomic,
+      quoteCashFlow
+    };
+  }
+
+  private scaleAtomicAmount(totalAtomicOut: bigint, partialAtomicIn: bigint, fullAtomicIn: bigint) {
+    if (fullAtomicIn <= 0n) {
+      return 0n;
+    }
+    return (totalAtomicOut * partialAtomicIn) / fullAtomicIn;
   }
 
   private loadCandles(symbol: string, strategy: StrategyDefinition, limit: number) {
@@ -481,6 +533,23 @@ export class StrategyExecutionService {
       close: Number(bar.close),
       volume: Number(bar.volume)
     }));
+  }
+
+  private liveOverlayLookback(timeframe: StrategyDefinition["timeframe"]) {
+    switch (timeframe) {
+      case "1m":
+        return 720;
+      case "5m":
+        return 1440;
+      case "15m":
+        return 1920;
+      case "1h":
+        return 1440;
+      case "4h":
+        return 1080;
+      case "1d":
+        return 730;
+    }
   }
 
   private resolveMarket(marketId: HexString) {
