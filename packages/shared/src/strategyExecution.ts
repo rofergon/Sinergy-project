@@ -1,5 +1,5 @@
 import { keccak256, stringToHex } from "viem";
-import type { HexString, StrategyTimeframe, StrategyStatus } from "./strategy";
+import type { HexString, StrategyIndicatorKind, StrategyTimeframe, StrategyStatus } from "./strategy";
 
 export const STRATEGY_EXECUTION_DOMAIN_NAME = "SinergyStrategyExecutor";
 export const STRATEGY_EXECUTION_DOMAIN_VERSION = "1";
@@ -148,6 +148,8 @@ export type StrategyDashboardCard = {
   marketId: HexString;
   marketSymbol: string;
   timeframe: StrategyTimeframe;
+  enabledSides: Array<"long" | "short">;
+  indicators: StrategyIndicatorKind[];
   status: StrategyStatus;
   updatedAt: string;
   latestBacktest?: StrategyLastBacktestPreview;
