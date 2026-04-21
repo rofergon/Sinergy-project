@@ -9,6 +9,7 @@ import { StateStore } from "./services/state.js";
 import { StrategyService } from "./services/strategyService.js";
 import { StrategyExecutionService } from "./services/strategyExecution.js";
 import { AutoStrategyWorker } from "./services/autoStrategyWorker.js";
+import { StrategyToolError } from "./services/strategyToolSecurity.js";
 import type { ResolvedMarket, ResolvedToken } from "./types.js";
 
 function makeToken(symbol: string, address: HexString): ResolvedToken {
@@ -294,6 +295,31 @@ test("auto strategy worker expires timed activations and avoids duplicate execut
     assert.equal(expiredState.status, "expired");
   } finally {
     worker.stop();
+    harness.cleanup();
+  }
+});
+
+test("auto execution activation rejects markets without routed liquidity", async () => {
+  const harness = buildHarness();
+  harness.market.routeable = false;
+  harness.market.routePolicy = "dark-pool-only";
+
+  try {
+    const strategyId = await createSavedStrategy(harness);
+    await createApproval(harness, strategyId);
+
+    assert.throws(
+      () =>
+        harness.strategyService.activateAutoExecution({
+          ownerAddress: harness.ownerAddress,
+          strategyId,
+          mode: "until_disabled"
+        }),
+      (error: unknown) =>
+        error instanceof StrategyToolError &&
+        error.code === "strategy_auto_execution_market_not_routeable"
+    );
+  } finally {
     harness.cleanup();
   }
 });
