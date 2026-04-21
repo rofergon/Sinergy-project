@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSignTypedData } from "wagmi";
-import type { HexString, StrategyChartOverlay } from "@sinergy/shared";
+import type { HexString, StrategyChartOverlay, StrategyIndicatorKind } from "@sinergy/shared";
 import {
   activateStrategyAutoExecution,
   createStrategyExecutionIntent,
@@ -49,6 +49,65 @@ function liveStrategyStatusLabel(status?: StrategyExecutionStrategySummary["stat
 
 function isLiveMarketSupported(market?: MarketSnapshot) {
   return Boolean(market?.routeable);
+}
+
+function liveStrategySideLabel(enabledSides: StrategyDashboardCard["enabledSides"]) {
+  if (enabledSides.includes("long") && enabledSides.includes("short")) {
+    return "Long + Short";
+  }
+  if (enabledSides.includes("short")) {
+    return "Short";
+  }
+  return "Long";
+}
+
+function indicatorBadgeLabel(indicator: StrategyIndicatorKind) {
+  switch (indicator) {
+    case "rolling_high":
+      return "Rolling High";
+    case "rolling_low":
+      return "Rolling Low";
+    case "candle_body_pct":
+      return "Body %";
+    case "candle_direction":
+      return "Candle Dir";
+    case "macd":
+      return "MACD";
+    case "rsi":
+      return "RSI";
+    case "atr":
+      return "ATR";
+    case "vwap":
+      return "VWAP";
+    case "ema":
+      return "EMA";
+    case "sma":
+      return "SMA";
+    case "roc":
+      return "ROC";
+    case "stoch":
+      return "Stoch";
+    case "bollinger":
+      return "Bollinger";
+  }
+}
+
+function renderStrategyBadgeItems(card: StrategyDashboardCard) {
+  return (
+    <>
+      <span className="strategy-preview-kicker strategy-preview-kicker-side">
+        {liveStrategySideLabel(card.enabledSides)}
+      </span>
+      {card.indicators.map((indicator) => (
+        <span
+          key={`${card.strategyId}-${indicator}`}
+          className="strategy-preview-kicker strategy-preview-kicker-indicator"
+        >
+          {indicatorBadgeLabel(indicator)}
+        </span>
+      ))}
+    </>
+  );
 }
 
 function statusLabel(card: StrategyDashboardCard) {
@@ -594,6 +653,9 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
       >
         <div className="strategy-dashboard-card-head">
           <div>
+            <div className="strategy-preview-kickers strategy-dashboard-kickers">
+              {renderStrategyBadgeItems(card)}
+            </div>
             <strong>{card.name}</strong>
             <p>{market?.symbol ?? card.marketSymbol}</p>
           </div>
@@ -784,7 +846,10 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
       >
         <div className="strategy-preview-tile-head">
           <div>
-            <span className="strategy-preview-kicker">Running</span>
+            <div className="strategy-preview-kickers">
+              <span className="strategy-preview-kicker">Running</span>
+              {renderStrategyBadgeItems(card)}
+            </div>
             <h3>{card.name}</h3>
             <p>{market?.symbol ?? card.marketSymbol} · {card.timeframe}</p>
           </div>
