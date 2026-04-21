@@ -182,6 +182,92 @@ test("strategy tool API can create, validate, save and backtest a draft", async 
   }
 });
 
+test("strategy tool API can delete a strategy and its derived artifacts", async () => {
+  const harness = makeHarness();
+  const ownerAddress = "0x00000000000000000000000000000000000000c4" as HexString;
+
+  try {
+    const draftResult = await harness.api.execute("create_strategy_draft", {
+      ownerAddress,
+      marketId: harness.market.id
+    }) as { strategy: import("@sinergy/shared").StrategyDefinition };
+    const draft = draftResult.strategy;
+
+    draft.enabledSides = ["long"];
+    draft.entryRules.long = [
+      {
+        id: "entry-1",
+        rules: [
+          {
+            id: "entry-rule-1",
+            left: { type: "price_field", field: "close" },
+            operator: ">",
+            right: { type: "constant", value: 10 }
+          }
+        ]
+      }
+    ];
+    draft.exitRules.long = [
+      {
+        id: "exit-1",
+        rules: [
+          {
+            id: "exit-rule-1",
+            left: { type: "price_field", field: "close" },
+            operator: ">=",
+            right: { type: "constant", value: 12 }
+          }
+        ]
+      }
+    ];
+    draft.entryRules.short = [];
+    draft.exitRules.short = [];
+    draft.costModel.startingEquity = 1000;
+    draft.costModel.feeBps = 0;
+    draft.costModel.slippageBps = 0;
+    draft.riskRules = {};
+
+    await harness.api.execute("update_strategy_draft", {
+      ownerAddress,
+      strategy: draft
+    });
+
+    await harness.api.execute("save_strategy", {
+      ownerAddress,
+      strategyId: draft.id
+    });
+
+    const backtest = await harness.api.execute("run_strategy_backtest", {
+      ownerAddress,
+      strategyId: draft.id,
+      bars: 5
+    }) as { summary: import("@sinergy/shared").StrategyBacktestSummary };
+
+    const deleted = await harness.api.execute("delete_strategy", {
+      ownerAddress,
+      strategyId: draft.id
+    }) as { strategyId: string; deleted: true };
+
+    assert.equal(deleted.deleted, true);
+    assert.equal(deleted.strategyId, draft.id);
+
+    const strategies = await harness.api.execute("list_user_strategies", {
+      ownerAddress
+    }) as { strategies: import("@sinergy/shared").StrategyDefinition[] };
+    assert.equal(strategies.strategies.length, 0);
+
+    assert.throws(
+      () => harness.service.getBacktestSummary({
+        ownerAddress,
+        runId: backtest.summary.runId
+      }),
+      () => true
+    );
+  } finally {
+    harness.cleanup();
+  }
+});
+
 test("strategy execution approvals can be created, signed, stored, and invalidated after strategy edits", async () => {
   const harness = makeHarness();
   const ownerPk = "0x00000000000000000000000000000000000000000000000000000000000000c3";
