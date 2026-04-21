@@ -86,6 +86,7 @@ export type StrategyToolName =
   | "save_strategy"
   | "list_user_strategies"
   | "get_strategy"
+  | "delete_strategy"
   | "clone_strategy_template";
 
 export type StrategyIndicatorParams = {
