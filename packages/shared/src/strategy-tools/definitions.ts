@@ -87,6 +87,12 @@ export const strategyToolDefinitions = [
     endpoint: "/strategy-tools/get_strategy"
   },
   {
+    name: "delete_strategy",
+    description: "Mutation tool. Use when the user explicitly wants to permanently remove a strategy and its derived artifacts. Deletes the strategy, live execution history, approvals, auto-execution state, backtest runs, and stored versions.",
+    inputSchema: strategyToolInputSchemas.delete_strategy,
+    endpoint: "/strategy-tools/delete_strategy"
+  },
+  {
     name: "clone_strategy_template",
     description: "Mutation tool. Use when a template already matches the request better than creating from scratch. Do not use without marketId and templateId. Produces a cloned strategy draft.",
     inputSchema: strategyToolInputSchemas.clone_strategy_template,
