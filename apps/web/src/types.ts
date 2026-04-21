@@ -1,10 +1,15 @@
 import type {
+  ActivateStrategyAutoExecutionInput,
+  DeactivateStrategyAutoExecutionInput,
+  StrategyAutoExecutionState,
   HexString,
   StrategyApprovalIntent,
   StrategyApprovalMessage,
   StrategyApprovalRecord,
+  StrategyDashboardCard,
   StrategyExecutionRecord,
   StrategyExecutionStrategySummary,
+  StrategyLastBacktestPreview,
   StrategyStatus,
   StrategyBacktestSummary,
   StrategyBacktestTrade,
@@ -134,9 +139,14 @@ export type StrategyAgentSessionListItem = Omit<StrategyAgentSessionSnapshot, "r
 };
 
 export type {
+  ActivateStrategyAutoExecutionInput,
+  DeactivateStrategyAutoExecutionInput,
+  StrategyAutoExecutionState,
   StrategyApprovalIntent,
   StrategyApprovalMessage,
   StrategyApprovalRecord,
+  StrategyDashboardCard,
   StrategyExecutionRecord,
-  StrategyExecutionStrategySummary
+  StrategyExecutionStrategySummary,
+  StrategyLastBacktestPreview
 };

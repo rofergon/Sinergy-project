@@ -20,6 +20,7 @@ import { BridgeClaimService } from "./services/bridgeClaims.js";
 import { ZkProofService } from "./services/zkProofs.js";
 import { StrategyService } from "./services/strategyService.js";
 import { StrategyExecutionService } from "./services/strategyExecution.js";
+import { AutoStrategyWorker } from "./services/autoStrategyWorker.js";
 import { StrategyToolApi } from "./services/strategyToolApi.js";
 import { makeStrategyToolMeta, toStrategyToolErrorPayload } from "./services/strategyToolSecurity.js";
 import { MatcherAuthService } from "./services/auth.js";
@@ -172,6 +173,12 @@ const strategyExecutionService = new StrategyExecutionService({
   vaultService,
   markets
 });
+const autoStrategyWorker = new AutoStrategyWorker({
+  strategyService,
+  executionService: strategyExecutionService,
+  intervalMs: env.AUTO_STRATEGY_INTERVAL_MS
+});
+autoStrategyWorker.start();
 const authService = new MatcherAuthService({
   secret:
     env.AUTH_TOKEN_SECRET ??
@@ -229,7 +236,12 @@ function resolveProtectedAddress(request: {
     case "POST /strategy/execution/intent":
     case "POST /strategy/execution/approve":
     case "POST /strategy/execution/execute":
+    case "POST /strategy/auto/activate":
+    case "POST /strategy/auto/deactivate":
+    case "POST /strategy/run-now":
       return normalizeAddressCandidate(body.ownerAddress);
+    case "GET /strategy/dashboard/:ownerAddress":
+      return normalizeAddressCandidate(params.ownerAddress);
     default:
       return undefined;
   }
@@ -555,6 +567,131 @@ app.get("/strategy/execution/history/:ownerAddress", async (request, reply) => {
     };
   } catch (error) {
     const payload = toStrategyToolErrorPayload(error, "strategy_execution_history");
+    reply.code(payload.statusCode);
+    return payload.body;
+  }
+});
+
+app.get("/strategy/dashboard/:ownerAddress", async (request, reply) => {
+  const { ownerAddress } = request.params as { ownerAddress?: `0x${string}` };
+  if (!ownerAddress) {
+    reply.code(422);
+    return {
+      ok: false,
+      error: {
+        message: "ownerAddress is required."
+      }
+    };
+  }
+
+  try {
+    return {
+      ok: true,
+      result: strategyService.getStrategyDashboard(ownerAddress)
+    };
+  } catch (error) {
+    const payload = toStrategyToolErrorPayload(error, "strategy_dashboard");
+    reply.code(payload.statusCode);
+    return payload.body;
+  }
+});
+
+app.post("/strategy/auto/activate", async (request, reply) => {
+  const body = (request.body ?? {}) as {
+    ownerAddress?: `0x${string}`;
+    strategyId?: string;
+    mode?: "until_disabled" | "until_timestamp";
+    expiresAt?: string;
+  };
+
+  if (!body.ownerAddress || !body.strategyId || !body.mode) {
+    reply.code(422);
+    return {
+      ok: false,
+      error: {
+        message: "ownerAddress, strategyId, and mode are required."
+      }
+    };
+  }
+
+  try {
+    return {
+      ok: true,
+      result: strategyService.activateAutoExecution({
+        ownerAddress: body.ownerAddress,
+        strategyId: body.strategyId,
+        mode: body.mode,
+        expiresAt: body.expiresAt
+      })
+    };
+  } catch (error) {
+    const payload = toStrategyToolErrorPayload(error, "strategy_auto_activate");
+    reply.code(payload.statusCode);
+    return payload.body;
+  }
+});
+
+app.post("/strategy/auto/deactivate", async (request, reply) => {
+  const body = (request.body ?? {}) as {
+    ownerAddress?: `0x${string}`;
+    strategyId?: string;
+  };
+
+  if (!body.ownerAddress || !body.strategyId) {
+    reply.code(422);
+    return {
+      ok: false,
+      error: {
+        message: "ownerAddress and strategyId are required."
+      }
+    };
+  }
+
+  try {
+    return {
+      ok: true,
+      result: strategyService.deactivateAutoExecution({
+        ownerAddress: body.ownerAddress,
+        strategyId: body.strategyId
+      })
+    };
+  } catch (error) {
+    const payload = toStrategyToolErrorPayload(error, "strategy_auto_deactivate");
+    reply.code(payload.statusCode);
+    return payload.body;
+  }
+});
+
+app.post("/strategy/run-now", async (request, reply) => {
+  const body = (request.body ?? {}) as {
+    ownerAddress?: `0x${string}`;
+    strategyId?: string;
+    routePreference?: RoutePreference;
+    candleLookback?: number;
+  };
+
+  if (!body.ownerAddress || !body.strategyId) {
+    reply.code(422);
+    return {
+      ok: false,
+      error: {
+        message: "ownerAddress and strategyId are required."
+      }
+    };
+  }
+
+  try {
+    return {
+      ok: true,
+      result: await strategyExecutionService.executeApprovedStrategy({
+        ownerAddress: body.ownerAddress,
+        strategyId: body.strategyId,
+        routePreference: body.routePreference,
+        candleLookback: body.candleLookback
+      })
+    };
+  } catch (error) {
+    const payload = toStrategyToolErrorPayload(error, "strategy_run_now");
     reply.code(payload.statusCode);
     return payload.body;
   }

@@ -11,6 +11,7 @@ const envSchema = z.object({
   PRICE_BAND_BPS: z.coerce.number().int().positive().default(1000),
   PRICE_DB_FILE: z.string().default(resolve(process.cwd(), "./data/prices.sqlite")),
   STRATEGY_DB_FILE: z.string().default(resolve(process.cwd(), "./data/strategies.sqlite")),
+  AUTO_STRATEGY_INTERVAL_MS: z.coerce.number().int().positive().default(15_000),
   PRICE_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
   T_BOND_PROXY_SYMBOL: z.string().default("TLT"),
   TWELVE_DATA_API_KEY: z.string().optional(),

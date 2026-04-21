@@ -62,10 +62,9 @@ function normalizeDecimalAmount(value: number, decimals: number) {
 export class StrategyExecutionService {
   constructor(private readonly deps: StrategyExecutionDeps) {}
 
-  async executeApprovedStrategy(input: {
+  inspectApprovedStrategy(input: {
     ownerAddress: HexString;
     strategyId: string;
-    routePreference?: "auto" | "local" | "dex";
     candleLookback?: number;
   }) {
     const strategy = this.deps.strategyService.getStrategy(input.strategyId, input.ownerAddress);
@@ -73,6 +72,26 @@ export class StrategyExecutionService {
     const market = this.resolveMarket(strategy.marketId);
     const candles = this.loadCandles(market.baseToken.symbol, strategy, input.candleLookback ?? 240);
     const signal = this.resolveSignal(strategy, candles);
+
+    return {
+      strategy,
+      approval,
+      market,
+      candles,
+      signal,
+      lastCandleTs: candles[candles.length - 1]?.ts
+    };
+  }
+
+  async executeApprovedStrategy(input: {
+    ownerAddress: HexString;
+    strategyId: string;
+    routePreference?: "auto" | "local" | "dex";
+    candleLookback?: number;
+    consumeApproval?: boolean;
+  }) {
+    const inspection = this.inspectApprovedStrategy(input);
+    const { strategy, approval, market, signal, lastCandleTs } = inspection;
     const balances = this.deps.store.get().balances;
     const baseBalanceAtomic = readAtomicBalance(balances, input.ownerAddress, market.baseToken.address);
     const quoteBalanceAtomic = readAtomicBalance(balances, input.ownerAddress, market.quoteToken.address);
@@ -113,20 +132,24 @@ export class StrategyExecutionService {
         action: "no_action" as const,
         reason: plan.reason,
         marketId: market.id,
-        executionId: record.id
+        executionId: record.id,
+        candleTs: lastCandleTs
       };
     }
 
-    const approvalTxHash = await this.deps.vaultService.consumeStrategyApproval({
-      approval,
-      ownerAddress: input.ownerAddress,
-      marketId: market.id
-    });
-    this.deps.strategyService.consumeExecutionApproval({
-      strategyId: strategy.id,
-      ownerAddress: input.ownerAddress,
-      nonce: approval.nonce
-    });
+    let approvalTxHash: HexString | undefined;
+    if (input.consumeApproval !== false) {
+      approvalTxHash = await this.deps.vaultService.consumeStrategyApproval({
+        approval,
+        ownerAddress: input.ownerAddress,
+        marketId: market.id
+      });
+      this.deps.strategyService.consumeExecutionApproval({
+        strategyId: strategy.id,
+        ownerAddress: input.ownerAddress,
+        nonce: approval.nonce
+      });
+    }
 
     if (plan.kind === "router_swap") {
       const result = await this.deps.liquidityRouter.execute({
@@ -175,7 +198,8 @@ export class StrategyExecutionService {
         marketId: market.id,
         fromToken: plan.fromToken,
         amount: plan.amount,
-        result
+        result,
+        candleTs: lastCandleTs
       };
     }
 
@@ -214,7 +238,8 @@ export class StrategyExecutionService {
       side: plan.side,
       quantity: plan.quantity,
       limitPrice: plan.limitPrice,
-      order
+      order,
+      candleTs: lastCandleTs
     };
   }
 

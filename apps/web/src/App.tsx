@@ -10,6 +10,7 @@ import { TickerStrip } from "./components/TickerStrip";
 import { PortfolioView } from "./components/PortfolioView";
 import { BridgeLanding } from "./components/BridgeLanding";
 import { LandingPage } from "./components/LandingPage";
+import { StrategyDashboardPage } from "./components/StrategyDashboardPage";
 import { StrategyExecutionHistoryPage } from "./components/StrategyExecutionHistoryPage";
 import { StrategyStudio } from "./components/StrategyStudio";
 import { TransactionPopup, useTransactionPopup } from "./components/TransactionPopup";
@@ -61,9 +62,14 @@ function Dashboard() {
   const [orders, setOrders] = useState<any[]>([]);
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus | null>(null);
   const [error, setError] = useState("");
-  const [activeView, setActiveView] = useState<"agent" | "portfolio" | "history" | "bridge">("agent");
+  const [activeView, setActiveView] = useState<"strategies" | "agent" | "portfolio" | "history" | "bridge">("strategies");
   const [chartTimeframe, setChartTimeframe] = useState<StrategyTimeframe>("15m");
   const [strategyBacktest, setStrategyBacktest] = useState<StrategyBacktestBundle | null>(null);
+  const [strategyReviewRequest, setStrategyReviewRequest] = useState<{
+    strategyId: string;
+    runId?: string;
+    token: number;
+  } | null>(null);
   const { popup, showTx, closeTx } = useTransactionPopup();
 
   const userAddress = address as Address | undefined;
@@ -175,7 +181,7 @@ function Dashboard() {
     );
   }, [userAddress]);
 
-  function navigateTo(view: "agent" | "portfolio" | "history" | "bridge") {
+  function navigateTo(view: "strategies" | "agent" | "portfolio" | "history" | "bridge") {
     setActiveView(view);
   }
 
@@ -269,6 +275,19 @@ function Dashboard() {
           address={userAddress}
           markets={marketSnapshots}
         />
+      ) : activeView === "strategies" ? (
+        <StrategyDashboardPage
+          address={userAddress}
+          markets={marketSnapshots}
+          onOpenStrategy={(strategyId, runId) => {
+            setStrategyReviewRequest({
+              strategyId,
+              runId,
+              token: Date.now()
+            });
+            setActiveView("agent");
+          }}
+        />
       ) : (
         <StrategyStudio
           address={userAddress}
@@ -279,6 +298,7 @@ function Dashboard() {
           onTimeframeChange={setChartTimeframe}
           strategyBacktest={strategyBacktest}
           onBacktestResult={setStrategyBacktest}
+          reviewRequest={strategyReviewRequest}
         />
       )}
 

@@ -1,0 +1,690 @@
+import { useEffect, useMemo, useState } from "react";
+import { useSignTypedData } from "wagmi";
+import type { HexString } from "@sinergy/shared";
+import {
+  activateStrategyAutoExecution,
+  createStrategyExecutionIntent,
+  deactivateStrategyAutoExecution,
+  fetchBacktestBundle,
+  fetchStrategyDashboard,
+  fetchStrategyExecutionApproval,
+  runStrategyNow,
+  saveStrategyExecutionApproval,
+  strategyTool
+} from "../lib/api";
+import type { MarketSnapshot, StrategyBacktestBundle, StrategyDashboardCard } from "../types";
+import { TradingViewChart } from "./TradingViewChart";
+
+type Props = {
+  address?: HexString;
+  markets: MarketSnapshot[];
+  onOpenStrategy: (strategyId: string, runId?: string) => void;
+};
+
+function timeframeDaysLabel(bundle: StrategyBacktestBundle | null) {
+  if (!bundle) return null;
+  const days = (bundle.summary.candleCount * timeframeDaysMultiplier(bundle.summary.timeframe));
+  if (!Number.isFinite(days) || days <= 0) {
+    return null;
+  }
+  return days >= 10 ? `${days.toFixed(0)}d` : `${days.toFixed(1)}d`;
+}
+
+function timeframeDaysMultiplier(timeframe: StrategyBacktestBundle["summary"]["timeframe"]) {
+  switch (timeframe) {
+    case "1m":
+      return 1 / 1440;
+    case "5m":
+      return 5 / 1440;
+    case "15m":
+      return 15 / 1440;
+    case "1h":
+      return 1 / 24;
+    case "4h":
+      return 4 / 24;
+    case "1d":
+      return 1;
+  }
+}
+
+function formatMetric(value?: number, digits = 2) {
+  if (value === undefined || value === null || !Number.isFinite(value)) {
+    return "--";
+  }
+  return value.toFixed(digits);
+}
+
+function statusLabel(card: StrategyDashboardCard) {
+  switch (card.autoExecution.status) {
+    case "active":
+      return card.autoExecution.expiresAt
+        ? `Expires ${new Date(card.autoExecution.expiresAt).toLocaleString()}`
+        : "Auto active";
+    case "expired":
+      return "Auto expired";
+    case "needs_reactivation":
+      return "Needs reactivation";
+    case "paused":
+      return "Paused";
+    default:
+      return "Auto inactive";
+  }
+}
+
+function statusClass(card: StrategyDashboardCard) {
+  if (card.autoExecution.status === "active") return "buy";
+  if (card.autoExecution.status === "needs_reactivation" || card.autoExecution.lastError) return "sell";
+  return "";
+}
+
+function tenYearsInSeconds() {
+  return 60 * 60 * 24 * 365 * 10;
+}
+
+export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Props) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [cards, setCards] = useState<StrategyDashboardCard[]>([]);
+  const [runningId, setRunningId] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [configStrategyId, setConfigStrategyId] = useState<string | null>(null);
+  const [activationMode, setActivationMode] = useState<"until_disabled" | "until_timestamp">("until_disabled");
+  const [activationExpiry, setActivationExpiry] = useState("");
+  const [previewBundles, setPreviewBundles] = useState<Record<string, StrategyBacktestBundle | null>>({});
+  const { signTypedDataAsync } = useSignTypedData();
+
+  async function loadDashboard(options?: { silent?: boolean }) {
+    if (!address) {
+      setCards([]);
+      return;
+    }
+
+    if (!options?.silent) {
+      setBusy(true);
+    }
+    try {
+      const result = await fetchStrategyDashboard(address);
+      setCards(result.cards);
+      setError("");
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : String(loadError));
+    } finally {
+      if (!options?.silent) {
+        setBusy(false);
+      }
+    }
+  }
+
+  useEffect(() => {
+    void loadDashboard();
+    if (!address) return;
+
+    const timer = window.setInterval(() => {
+      void loadDashboard({ silent: true });
+    }, 15_000);
+
+    return () => window.clearInterval(timer);
+  }, [address]);
+
+  const cardMarkets = useMemo(() => {
+    return new Map(markets.map((market) => [market.id.toLowerCase(), market]));
+  }, [markets]);
+  const activeCards = useMemo(
+    () => cards.filter((card) => card.autoExecution.status === "active"),
+    [cards]
+  );
+  const previewCards = useMemo(() => {
+    return [...activeCards]
+      .sort((left, right) => {
+        const rightPrimary = Date.parse(
+          right.autoExecution.lastExecutedAt ??
+          right.autoExecution.lastCheckedAt ??
+          right.updatedAt
+        );
+        const leftPrimary = Date.parse(
+          left.autoExecution.lastExecutedAt ??
+          left.autoExecution.lastCheckedAt ??
+          left.updatedAt
+        );
+        return rightPrimary - leftPrimary;
+      })
+      .slice(0, 4);
+  }, [activeCards]);
+  const hiddenActiveCount = Math.max(activeCards.length - previewCards.length, 0);
+  const inactiveCards = useMemo(
+    () => cards.filter((card) => card.autoExecution.status !== "active"),
+    [cards]
+  );
+
+  useEffect(() => {
+    if (!address || previewCards.length === 0) {
+      setPreviewBundles({});
+      return;
+    }
+
+    const ownerAddress = address;
+    let cancelled = false;
+    const targetCards = previewCards.filter(
+      (card): card is StrategyDashboardCard & { latestBacktest: NonNullable<StrategyDashboardCard["latestBacktest"]> } =>
+        Boolean(card.latestBacktest?.runId)
+    );
+
+    async function loadPreviewBundles() {
+      const nextEntries = await Promise.all(
+        targetCards.map(async (card) => {
+          try {
+            const bundle = await fetchBacktestBundle(ownerAddress, card.latestBacktest.runId);
+            return [card.strategyId, bundle] as const;
+          } catch {
+            return [card.strategyId, null] as const;
+          }
+        })
+      );
+
+      if (cancelled) {
+        return;
+      }
+
+      const nextMap = Object.fromEntries(nextEntries);
+      for (const card of previewCards) {
+        if (!(card.strategyId in nextMap)) {
+          nextMap[card.strategyId] = null;
+        }
+      }
+      setPreviewBundles(nextMap);
+    }
+
+    void loadPreviewBundles();
+    return () => {
+      cancelled = true;
+    };
+  }, [address, previewCards]);
+
+  async function ensureSavedStrategy(card: StrategyDashboardCard) {
+    if (!address) {
+      throw new Error("Connect wallet to manage strategies.");
+    }
+
+    if (card.status === "saved") {
+      return;
+    }
+
+    const result = await strategyTool<{
+      strategy: { status: string; id: string; name: string };
+      validation: {
+        ok: boolean;
+        issues: Array<{ message: string }>;
+      };
+    }>("save_strategy", {
+      ownerAddress: address,
+      strategyId: card.strategyId
+    });
+
+    if (!result.validation.ok) {
+      const issueText = result.validation.issues.map((issue) => issue.message).join("; ");
+      throw new Error(
+        issueText
+          ? `The strategy could not be saved for execution: ${issueText}`
+          : "The strategy could not be saved for execution."
+      );
+    }
+  }
+
+  async function ensureApproval(strategyId: string, validForSeconds: number) {
+    if (!address) {
+      throw new Error("Connect wallet to authorize strategy execution.");
+    }
+
+    try {
+      const approval = await fetchStrategyExecutionApproval(address, strategyId);
+      const remainingSeconds = Math.floor((Number(approval.deadline) * 1000 - Date.now()) / 1000);
+      if (remainingSeconds >= Math.max(60, validForSeconds - 60)) {
+        return approval;
+      }
+    } catch {
+      // Fall through and mint a fresh approval.
+    }
+
+    {
+      const intent = await createStrategyExecutionIntent({
+        ownerAddress: address,
+        strategyId,
+        validForSeconds
+      });
+
+      const signature = await signTypedDataAsync({
+        domain: intent.domain,
+        types: intent.types,
+        primaryType: intent.primaryType,
+        message: {
+          owner: intent.message.owner,
+          strategyIdHash: intent.message.strategyIdHash,
+          strategyHash: intent.message.strategyHash,
+          marketId: intent.message.marketId,
+          maxSlippageBps: BigInt(intent.message.maxSlippageBps),
+          nonce: BigInt(intent.message.nonce),
+          deadline: BigInt(intent.message.deadline)
+        }
+      });
+
+      return await saveStrategyExecutionApproval({
+        ownerAddress: address,
+        strategyId,
+        message: intent.message,
+        signature
+      });
+    }
+  }
+
+  async function handleRunNow(card: StrategyDashboardCard) {
+    if (!address) return;
+    setRunningId(card.strategyId);
+    setError("");
+    try {
+      await ensureSavedStrategy(card);
+      await ensureApproval(card.strategyId, 15 * 60);
+      await runStrategyNow({
+        ownerAddress: address,
+        strategyId: card.strategyId
+      });
+      await loadDashboard({ silent: true });
+    } catch (runError) {
+      setError(runError instanceof Error ? runError.message : String(runError));
+    } finally {
+      setRunningId(null);
+    }
+  }
+
+  async function handleActivate(card: StrategyDashboardCard) {
+    if (!address) return;
+    setTogglingId(card.strategyId);
+    setError("");
+    try {
+      await ensureSavedStrategy(card);
+      const expiresAt =
+        activationMode === "until_timestamp" && activationExpiry
+          ? new Date(activationExpiry).toISOString()
+          : undefined;
+      const validForSeconds = activationMode === "until_timestamp" && expiresAt
+        ? Math.max(60, Math.floor((Date.parse(expiresAt) - Date.now()) / 1000))
+        : tenYearsInSeconds();
+
+      await ensureApproval(card.strategyId, validForSeconds);
+      await activateStrategyAutoExecution({
+        ownerAddress: address,
+        strategyId: card.strategyId,
+        mode: activationMode,
+        expiresAt
+      });
+      setConfigStrategyId(null);
+      setActivationExpiry("");
+      setActivationMode("until_disabled");
+      await loadDashboard({ silent: true });
+    } catch (activateError) {
+      setError(activateError instanceof Error ? activateError.message : String(activateError));
+    } finally {
+      setTogglingId(null);
+    }
+  }
+
+  async function handleDeactivate(card: StrategyDashboardCard) {
+    if (!address) return;
+    setTogglingId(card.strategyId);
+    setError("");
+    try {
+      await deactivateStrategyAutoExecution({
+        ownerAddress: address,
+        strategyId: card.strategyId
+      });
+      await loadDashboard({ silent: true });
+    } catch (deactivateError) {
+      setError(deactivateError instanceof Error ? deactivateError.message : String(deactivateError));
+    } finally {
+      setTogglingId(null);
+    }
+  }
+
+  function renderStrategyCard(card: StrategyDashboardCard, options?: { spotlight?: boolean }) {
+    const market = cardMarkets.get(card.marketId.toLowerCase());
+    const configOpen = configStrategyId === card.strategyId;
+
+    return (
+      <article
+        className={`strategy-dashboard-card ${options?.spotlight ? "spotlight" : ""}`}
+        key={card.strategyId}
+      >
+        <div className="strategy-dashboard-card-head">
+          <div>
+            <strong>{card.name}</strong>
+            <p>{market?.symbol ?? card.marketSymbol}</p>
+          </div>
+          <span className={`order-status ${statusClass(card)}`}>
+            {statusLabel(card)}
+          </span>
+        </div>
+
+        <div className="strategy-dashboard-card-meta">
+          <span>{card.timeframe.toUpperCase()}</span>
+          <span>{card.status === "saved" ? "Saved" : "Draft"}</span>
+          <span>{new Date(card.updatedAt).toLocaleDateString()}</span>
+        </div>
+
+        {card.status !== "saved" && (
+          <div className="strategy-dashboard-inline-note">
+            This strategy is still a draft. The dashboard will try to save it before running or enabling auto-trading.
+          </div>
+        )}
+
+        {card.autoExecution.status === "active" && (
+          <div className="strategy-dashboard-live-strip">
+            <span>Monitoring signals</span>
+            <strong>
+              {card.autoExecution.lastCheckedAt
+                ? `Last check ${new Date(card.autoExecution.lastCheckedAt).toLocaleTimeString()}`
+                : "Waiting for first check"}
+            </strong>
+          </div>
+        )}
+
+        <div className="strategy-dashboard-backtest">
+          <div className="strategy-dashboard-backtest-head">
+            <span>Latest backtest</span>
+            <button
+              type="button"
+              className="strategy-studio-secondary-link"
+              onClick={() => onOpenStrategy(card.strategyId, card.latestBacktest?.runId)}
+            >
+              Open in Studio
+            </button>
+          </div>
+
+          {card.latestBacktest ? (
+            <div className="strategy-dashboard-stats">
+              <div>
+                <span>PnL</span>
+                <strong className={card.latestBacktest.netPnl >= 0 ? "order-side buy" : "order-side sell"}>
+                  {formatMetric(card.latestBacktest.netPnl, 2)}
+                </strong>
+              </div>
+              <div>
+                <span>PnL %</span>
+                <strong>{formatMetric(card.latestBacktest.netPnlPct, 2)}</strong>
+              </div>
+              <div>
+                <span>Trades</span>
+                <strong>{card.latestBacktest.tradeCount}</strong>
+              </div>
+              <div>
+                <span>Win rate</span>
+                <strong>{formatMetric(card.latestBacktest.winRate, 2)}</strong>
+              </div>
+              <div>
+                <span>PF</span>
+                <strong>{formatMetric(card.latestBacktest.profitFactor, 2)}</strong>
+              </div>
+              <div>
+                <span>Drawdown</span>
+                <strong>{formatMetric(card.latestBacktest.maxDrawdownPct, 2)}</strong>
+              </div>
+            </div>
+          ) : (
+            <div className="portfolio-empty">No backtest has been run for this strategy yet.</div>
+          )}
+        </div>
+
+        {card.autoExecution.lastError && (
+          <div className="strategy-dashboard-inline-error">{card.autoExecution.lastError}</div>
+        )}
+
+        <div className="strategy-dashboard-card-actions">
+          <button
+            type="button"
+            className="strategy-agent-review-btn"
+            disabled={runningId === card.strategyId}
+            onClick={() => void handleRunNow(card)}
+          >
+            {runningId === card.strategyId ? "Running..." : "Run now"}
+          </button>
+
+          {card.autoExecution.status === "active" ? (
+            <button
+              type="button"
+              className="strategy-agent-review-btn"
+              disabled={togglingId === card.strategyId}
+              onClick={() => void handleDeactivate(card)}
+            >
+              {togglingId === card.strategyId ? "Stopping..." : "Disable Auto"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="strategy-agent-review-btn"
+              disabled={togglingId === card.strategyId}
+              onClick={() => setConfigStrategyId(configOpen ? null : card.strategyId)}
+            >
+              {card.autoExecution.status === "needs_reactivation" ? "Reactivate Auto" : "Enable Auto"}
+            </button>
+          )}
+        </div>
+
+        {configOpen && (
+          <div className="strategy-dashboard-auto-config">
+            <label>
+              <span>Duration</span>
+              <select
+                value={activationMode}
+                onChange={(event) =>
+                  setActivationMode(event.target.value as "until_disabled" | "until_timestamp")
+                }
+              >
+                <option value="until_disabled">Until disabled</option>
+                <option value="until_timestamp">Until date/time</option>
+              </select>
+            </label>
+            {activationMode === "until_timestamp" && (
+              <label>
+                <span>Expires at</span>
+                <input
+                  type="datetime-local"
+                  value={activationExpiry}
+                  onChange={(event) => setActivationExpiry(event.target.value)}
+                />
+              </label>
+            )}
+            <div className="strategy-dashboard-card-actions">
+              <button
+                type="button"
+                className="strategy-agent-review-btn"
+                disabled={togglingId === card.strategyId || (activationMode === "until_timestamp" && !activationExpiry)}
+                onClick={() => void handleActivate(card)}
+              >
+                {togglingId === card.strategyId ? "Activating..." : "Confirm Auto"}
+              </button>
+              <button
+                type="button"
+                className="strategy-studio-secondary-link"
+                onClick={() => setConfigStrategyId(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </article>
+    );
+  }
+
+  function renderPreviewTile(card: StrategyDashboardCard, index: number) {
+    const market = cardMarkets.get(card.marketId.toLowerCase());
+    const bundle = previewBundles[card.strategyId] ?? null;
+    const backtestWindow = timeframeDaysLabel(bundle);
+
+    return (
+      <article
+        key={card.strategyId}
+        className="strategy-preview-tile"
+        style={{ animationDelay: `${index * 90}ms` }}
+      >
+        <div className="strategy-preview-tile-head">
+          <div>
+            <span className="strategy-preview-kicker">Running</span>
+            <h3>{card.name}</h3>
+            <p>{market?.symbol ?? card.marketSymbol} · {card.timeframe}</p>
+          </div>
+          <div className="strategy-preview-status">
+            <span className="strategy-preview-status-dot" />
+            <strong>Live</strong>
+            <small>
+              {card.autoExecution.lastCheckedAt
+                ? new Date(card.autoExecution.lastCheckedAt).toLocaleTimeString()
+                : "Waiting"}
+            </small>
+          </div>
+        </div>
+
+        <div className="strategy-preview-chart-shell">
+          <TradingViewChart
+            market={market}
+            timeframe={card.timeframe}
+            onTimeframeChange={() => {}}
+            overlay={bundle?.overlay ?? null}
+            variant="compact"
+          />
+        </div>
+
+        <div className="strategy-preview-backtest">
+          <div className="strategy-preview-backtest-head">
+            <span>Backtest snapshot{backtestWindow ? ` · ${backtestWindow} window` : ""}</span>
+            <div className="strategy-preview-actions">
+              <button
+                type="button"
+                className="strategy-studio-secondary-link"
+                onClick={() => onOpenStrategy(card.strategyId, card.latestBacktest?.runId)}
+              >
+                Open
+              </button>
+              <button
+                type="button"
+                className="strategy-studio-secondary-link"
+                disabled={togglingId === card.strategyId}
+                onClick={() => void handleDeactivate(card)}
+              >
+                {togglingId === card.strategyId ? "Stopping..." : "Disable"}
+              </button>
+            </div>
+          </div>
+
+          {card.latestBacktest ? (
+            <div className="strategy-preview-stats">
+              <div>
+                <span>PnL</span>
+                <strong className={card.latestBacktest.netPnl >= 0 ? "order-side buy" : "order-side sell"}>
+                  {formatMetric(card.latestBacktest.netPnl, 2)}
+                </strong>
+              </div>
+              <div>
+                <span>PnL %</span>
+                <strong>{formatMetric(card.latestBacktest.netPnlPct, 2)}</strong>
+              </div>
+              <div>
+                <span>Trades</span>
+                <strong>{card.latestBacktest.tradeCount}</strong>
+              </div>
+              <div>
+                <span>Win rate</span>
+                <strong>{formatMetric(card.latestBacktest.winRate, 2)}</strong>
+              </div>
+              <div>
+                <span>PF</span>
+                <strong>{formatMetric(card.latestBacktest.profitFactor, 2)}</strong>
+              </div>
+              <div>
+                <span>Drawdown</span>
+                <strong>{formatMetric(card.latestBacktest.maxDrawdownPct, 2)}</strong>
+              </div>
+            </div>
+          ) : (
+            <div className="strategy-preview-empty">
+              No backtest yet. The live chart still follows current market price until a run is available.
+            </div>
+          )}
+        </div>
+      </article>
+    );
+  }
+
+  return (
+    <div className="strategy-dashboard-page">
+      <div className="portfolio-hero strategy-dashboard-hero">
+        <div>
+          <div className="portfolio-kicker">Strategy Control</div>
+          <h1>Strategy Dashboard</h1>
+          <p>
+            Monitor, run, and automate your trading strategies from a single control surface.
+          </p>
+        </div>
+        <div className="portfolio-summary-grid">
+          <div className="portfolio-stat-card">
+            <span>Total</span>
+            <strong>{cards.length}</strong>
+          </div>
+          <div className="portfolio-stat-card">
+            <span>Live</span>
+            <strong>{cards.filter((card) => card.autoExecution.status === "active").length}</strong>
+          </div>
+          <div className="portfolio-stat-card">
+            <span>Tested</span>
+            <strong>{cards.filter((card) => card.latestBacktest).length}</strong>
+          </div>
+        </div>
+      </div>
+
+      {error && <div className="error-bar">{error}</div>}
+
+      <section className="strategy-dashboard-preview">
+        <div className="strategy-dashboard-preview-head">
+          <div>
+            <span className="panel-title">Live Monitoring</span>
+            <h2>Active Strategies</h2>
+            <p>
+              Strategies currently monitored by the execution engine. Each card shows the latest backtest snapshot and live chart.
+            </p>
+          </div>
+          <div className="strategy-dashboard-preview-pill">
+            <span>Running</span>
+            <strong>{activeCards.length}</strong>
+            {hiddenActiveCount > 0 && <small>+{hiddenActiveCount} more</small>}
+          </div>
+        </div>
+
+        {previewCards.length === 0 ? (
+          <div className="strategy-dashboard-preview-empty">
+            No active strategies yet. Enable auto-trading on any strategy below to see it here.
+          </div>
+        ) : (
+          <div className="strategy-dashboard-preview-grid">
+            {previewCards.map((card, index) => renderPreviewTile(card, index))}
+          </div>
+        )}
+      </section>
+
+      <section className="strategy-dashboard-section">
+        <div className="strategy-dashboard-section-head">
+          <div>
+            <span className="panel-title">Library</span>
+            <h2>All Strategies</h2>
+          </div>
+          <span>{inactiveCards.length} inactive</span>
+        </div>
+
+        <div className="strategy-dashboard-grid">
+          {cards.length === 0 ? (
+            <div className="portfolio-empty">No strategies available for this wallet yet.</div>
+          ) : (
+            inactiveCards.map((card) => renderStrategyCard(card))
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { StrategyTimeframe } from "@sinergy/shared";
 import { fetchBacktestBundle } from "../lib/api";
 import type { ChartViewport, StrategyBacktestBundle, MarketSnapshot } from "../types";
@@ -16,6 +16,11 @@ type Props = {
   onTimeframeChange: (timeframe: StrategyTimeframe) => void;
   strategyBacktest: StrategyBacktestBundle | null;
   onBacktestResult: (result: StrategyBacktestBundle | null) => void;
+  reviewRequest?: {
+    strategyId: string;
+    runId?: string;
+    token: number;
+  } | null;
 };
 
 export function StrategyStudio({
@@ -27,6 +32,7 @@ export function StrategyStudio({
   onTimeframeChange,
   strategyBacktest,
   onBacktestResult,
+  reviewRequest,
 }: Props) {
   const [focusStrategyId, setFocusStrategyId] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
@@ -57,6 +63,11 @@ export function StrategyStudio({
     }
     setManualBuilderOpen(true);
   }
+
+  useEffect(() => {
+    if (!reviewRequest) return;
+    void reviewStrategy(reviewRequest.strategyId, null, reviewRequest.runId);
+  }, [reviewRequest?.token]);
 
   return (
     <div className="strategy-studio-page">

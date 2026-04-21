@@ -3,11 +3,17 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
+  ActivateStrategyAutoExecutionInput,
+  DeactivateStrategyAutoExecutionInput,
   HexString,
+  StrategyAutoExecutionMode,
+  StrategyAutoExecutionState,
   StrategyApprovalIntent,
   StrategyApprovalMessage,
   StrategyApprovalRecord,
+  StrategyDashboardCard,
   StrategyExecutionRecord,
+  StrategyExecutionSignal,
   StrategyDefinition,
   StrategyBacktestSummary,
   StrategyBacktestTrade,
@@ -15,6 +21,7 @@ import type {
   StrategyChartOverlay,
   StrategyCompilationPreview,
   StrategyEngineDefinition,
+  StrategyLastBacktestPreview,
   StrategyMarketAnalysis,
   StrategySourceCompilation,
   StrategyTimeframe,
@@ -58,6 +65,12 @@ function keyOf(value: string) {
 
 function isoNow() {
   return new Date().toISOString();
+}
+
+function parseTimestamp(value?: string | null) {
+  if (!value) return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function normalizeBacktestSummary(summary: StrategyBacktestSummary): StrategyBacktestSummary {
@@ -290,6 +303,34 @@ export class StrategyService {
       .all(keyOf(ownerAddress)) as Array<{ body_json: string }>;
 
     return rows.map((row) => normalizeStrategyDefinition(JSON.parse(row.body_json)));
+  }
+
+  getStrategyDashboard(ownerAddress: HexString): { cards: StrategyDashboardCard[] } {
+    this.assertOwnerAddress(ownerAddress);
+    const strategies = this.listUserStrategies(ownerAddress);
+
+    const cards = strategies.map((strategy) => {
+      const market = this.marketsById.get(strategy.marketId.toLowerCase());
+      const latestBacktest = this.getLatestBacktestPreview(strategy.id, ownerAddress);
+      const autoExecution = this.getAutoExecutionState(strategy.id, ownerAddress);
+
+      return {
+        strategyId: strategy.id,
+        ownerAddress,
+        name: strategy.name,
+        marketId: strategy.marketId,
+        marketSymbol: market?.symbol ?? strategy.marketId,
+        timeframe: strategy.timeframe,
+        status: strategy.status,
+        updatedAt: strategy.updatedAt,
+        latestBacktest,
+        autoExecution
+      } satisfies StrategyDashboardCard;
+    });
+
+    return {
+      cards: cards.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    };
   }
 
   getStrategy(strategyId: string, ownerAddress: HexString) {
@@ -963,6 +1004,269 @@ export class StrategyService {
     return JSON.parse(row.overlay_json) as StrategyChartOverlay;
   }
 
+  activateAutoExecution(input: ActivateStrategyAutoExecutionInput) {
+    this.assertOwnerAddress(input.ownerAddress);
+    const strategy = this.getStrategy(input.strategyId, input.ownerAddress);
+    if (strategy.status !== "saved") {
+      throw new StrategyToolError(
+        "Only saved strategies can be activated for automatic execution.",
+        "strategy_not_saved_for_auto_execution",
+        409
+      );
+    }
+
+    if (input.mode === "until_timestamp") {
+      const expiresAtTs = parseTimestamp(input.expiresAt);
+      if (!expiresAtTs || expiresAtTs <= Date.now()) {
+        throw new StrategyToolError(
+          "expiresAt must be a valid future timestamp when using until_timestamp mode.",
+          "invalid_auto_execution_expiry",
+          422
+        );
+      }
+    }
+
+    let approval: StrategyApprovalRecord;
+    try {
+      approval = this.getExecutionApproval(strategy.id, input.ownerAddress);
+    } catch (error) {
+      throw new StrategyToolError(
+        "A fresh strategy approval is required before enabling automatic execution.",
+        "auto_execution_requires_approval",
+        409,
+        {
+          cause: error instanceof Error ? error.message : String(error)
+        }
+      );
+    }
+
+    const now = isoNow();
+    const strategyHash = this.computeStrategyHash(strategy);
+    this.db
+      .prepare(
+        `
+          INSERT INTO strategy_auto_executions (
+            strategy_id,
+            owner_address,
+            strategy_hash,
+            approval_nonce,
+            approval_deadline,
+            status,
+            mode,
+            expires_at,
+            last_error,
+            created_at,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, 'active', ?, ?, NULL, ?, ?)
+          ON CONFLICT(strategy_id, owner_address) DO UPDATE SET
+            strategy_hash = excluded.strategy_hash,
+            approval_nonce = excluded.approval_nonce,
+            approval_deadline = excluded.approval_deadline,
+            status = 'active',
+            mode = excluded.mode,
+            expires_at = excluded.expires_at,
+            last_error = NULL,
+            updated_at = excluded.updated_at
+        `
+      )
+      .run(
+        strategy.id,
+        keyOf(input.ownerAddress),
+        strategyHash,
+        approval.nonce,
+        approval.deadline,
+        input.mode,
+        input.mode === "until_timestamp" ? input.expiresAt ?? null : null,
+        now,
+        now
+      );
+
+    return this.getAutoExecutionState(strategy.id, input.ownerAddress);
+  }
+
+  deactivateAutoExecution(input: DeactivateStrategyAutoExecutionInput) {
+    this.assertOwnerAddress(input.ownerAddress);
+    this.getStrategy(input.strategyId, input.ownerAddress);
+    const now = isoNow();
+    this.db
+      .prepare(
+        `
+          UPDATE strategy_auto_executions
+          SET status = 'inactive', updated_at = ?
+          WHERE strategy_id = ? AND owner_address = ?
+        `
+      )
+      .run(now, input.strategyId, keyOf(input.ownerAddress));
+
+    return this.getAutoExecutionState(input.strategyId, input.ownerAddress);
+  }
+
+  getAutoExecutionState(strategyId: string, ownerAddress: HexString): StrategyAutoExecutionState {
+    this.assertOwnerAddress(ownerAddress);
+    const strategy = this.getStrategy(strategyId, ownerAddress);
+    const row = this.db
+      .prepare(
+        `
+          SELECT
+            strategy_id,
+            owner_address,
+            strategy_hash,
+            approval_nonce,
+            approval_deadline,
+            status,
+            mode,
+            expires_at,
+            last_checked_at,
+            last_checked_candle_ts,
+            last_executed_at,
+            last_executed_candle_ts,
+            last_signal,
+            last_execution_id,
+            last_error,
+            created_at,
+            updated_at
+          FROM strategy_auto_executions
+          WHERE strategy_id = ? AND owner_address = ?
+          LIMIT 1
+        `
+      )
+      .get(strategyId, keyOf(ownerAddress)) as Record<string, unknown> | undefined;
+
+    if (!row) {
+      return {
+        strategyId,
+        ownerAddress,
+        status: "inactive"
+      };
+    }
+
+    const strategyHash = this.computeStrategyHash(strategy);
+    const expiresAt = (row.expires_at ?? undefined) as string | undefined;
+    const approvalDeadline = typeof row.approval_deadline === "string"
+      ? row.approval_deadline
+      : row.approval_deadline === null || row.approval_deadline === undefined
+        ? undefined
+        : String(row.approval_deadline);
+
+    let status = row.status as StrategyAutoExecutionState["status"];
+    let lastError = (row.last_error ?? undefined) as string | undefined;
+    if ((row.strategy_hash as string).toLowerCase() !== strategyHash.toLowerCase()) {
+      status = "needs_reactivation";
+      lastError = "Strategy changed after activation. Reactivate automatic execution.";
+    } else if (
+      approvalDeadline &&
+      BigInt(approvalDeadline) <= BigInt(Math.floor(Date.now() / 1000))
+    ) {
+      status = "needs_reactivation";
+      lastError = "The stored strategy approval has expired. Reactivate automatic execution.";
+    } else if (expiresAt && parseTimestamp(expiresAt) !== undefined && parseTimestamp(expiresAt)! <= Date.now()) {
+      status = "expired";
+    }
+
+    if (status !== row.status || lastError !== (row.last_error ?? undefined)) {
+      this.db
+        .prepare(
+          `
+            UPDATE strategy_auto_executions
+            SET status = ?, last_error = ?, updated_at = ?
+            WHERE strategy_id = ? AND owner_address = ?
+          `
+        )
+        .run(status, lastError ?? null, isoNow(), strategyId, keyOf(ownerAddress));
+    }
+
+    return {
+      strategyId,
+      ownerAddress,
+      status,
+      mode: (row.mode ?? undefined) as StrategyAutoExecutionMode | undefined,
+      expiresAt,
+      activationCreatedAt: String(row.created_at),
+      activationUpdatedAt: String(row.updated_at),
+      approvalExpiresAt: approvalDeadline,
+      lastCheckedAt: (row.last_checked_at ?? undefined) as string | undefined,
+      lastCheckedCandleTs: row.last_checked_candle_ts === null || row.last_checked_candle_ts === undefined
+        ? undefined
+        : Number(row.last_checked_candle_ts),
+      lastExecutedAt: (row.last_executed_at ?? undefined) as string | undefined,
+      lastExecutedCandleTs: row.last_executed_candle_ts === null || row.last_executed_candle_ts === undefined
+        ? undefined
+        : Number(row.last_executed_candle_ts),
+      lastSignal: (row.last_signal ?? undefined) as StrategyExecutionSignal | undefined,
+      lastExecutionId: (row.last_execution_id ?? undefined) as string | undefined,
+      lastError
+    };
+  }
+
+  listActiveAutoExecutions() {
+    const rows = this.db
+      .prepare(
+        `
+          SELECT strategy_id, owner_address
+          FROM strategy_auto_executions
+          WHERE status = 'active'
+          ORDER BY updated_at ASC
+        `
+      )
+      .all() as Array<{ strategy_id: string; owner_address: string }>;
+
+    return rows.map((row) => ({
+      strategyId: row.strategy_id,
+      ownerAddress: row.owner_address as HexString
+    }));
+  }
+
+  markAutoExecutionEvaluation(input: {
+    strategyId: string;
+    ownerAddress: HexString;
+    status?: StrategyAutoExecutionState["status"];
+    lastCheckedAt?: string;
+    lastCheckedCandleTs?: number;
+    lastExecutedAt?: string;
+    lastExecutedCandleTs?: number;
+    lastSignal?: StrategyExecutionSignal;
+    lastExecutionId?: string;
+    lastError?: string | null;
+  }) {
+    this.assertOwnerAddress(input.ownerAddress);
+    const existing = this.getAutoExecutionState(input.strategyId, input.ownerAddress);
+    const now = isoNow();
+
+    this.db
+      .prepare(
+        `
+          UPDATE strategy_auto_executions
+          SET
+            status = ?,
+            last_checked_at = ?,
+            last_checked_candle_ts = ?,
+            last_executed_at = ?,
+            last_executed_candle_ts = ?,
+            last_signal = ?,
+            last_execution_id = ?,
+            last_error = ?,
+            updated_at = ?
+          WHERE strategy_id = ? AND owner_address = ?
+        `
+      )
+      .run(
+        input.status ?? existing.status,
+        input.lastCheckedAt ?? existing.lastCheckedAt ?? null,
+        input.lastCheckedCandleTs ?? existing.lastCheckedCandleTs ?? null,
+        input.lastExecutedAt ?? existing.lastExecutedAt ?? null,
+        input.lastExecutedCandleTs ?? existing.lastExecutedCandleTs ?? null,
+        input.lastSignal ?? existing.lastSignal ?? null,
+        input.lastExecutionId ?? existing.lastExecutionId ?? null,
+        input.lastError === undefined ? existing.lastError ?? null : input.lastError,
+        now,
+        input.strategyId,
+        keyOf(input.ownerAddress)
+      );
+
+    return this.getAutoExecutionState(input.strategyId, input.ownerAddress);
+  }
+
   getOpenApiSpec() {
     return {
       openapi: "3.1.0",
@@ -1045,6 +1349,37 @@ export class StrategyService {
     };
   }
 
+  private getLatestBacktestPreview(strategyId: string, ownerAddress: HexString): StrategyLastBacktestPreview | undefined {
+    const row = this.db
+      .prepare(
+        `
+          SELECT summary_json
+          FROM backtest_runs
+          WHERE strategy_id = ? AND owner_address = ?
+          ORDER BY created_at DESC
+          LIMIT 1
+        `
+      )
+      .get(strategyId, keyOf(ownerAddress)) as { summary_json: string } | undefined;
+
+    if (!row) {
+      return undefined;
+    }
+
+    const summary = normalizeBacktestSummary(JSON.parse(row.summary_json) as StrategyBacktestSummary);
+    return {
+      runId: summary.runId,
+      createdAt: summary.createdAt,
+      timeframe: summary.timeframe,
+      tradeCount: summary.tradeCount,
+      netPnl: summary.netPnl,
+      netPnlPct: summary.netPnlPct,
+      winRate: summary.winRate,
+      maxDrawdownPct: summary.maxDrawdownPct,
+      profitFactor: summary.profitFactor
+    };
+  }
+
   private writeStrategy(strategy: StrategyDefinition) {
     const bodyJson = JSON.stringify(strategy);
     this.db
@@ -1098,6 +1433,27 @@ export class StrategyService {
           UPDATE strategy_execution_approvals
           SET status = 'superseded', updated_at = ?
           WHERE strategy_id = ? AND status = 'active'
+        `
+      )
+      .run(isoNow(), strategy.id);
+
+    this.db
+      .prepare(
+        `
+          UPDATE strategy_auto_executions
+          SET
+            status = CASE
+              WHEN status = 'inactive' THEN 'inactive'
+              WHEN status = 'expired' THEN 'expired'
+              ELSE 'needs_reactivation'
+            END,
+            updated_at = ?,
+            last_error = CASE
+              WHEN status = 'inactive' THEN last_error
+              WHEN status = 'expired' THEN last_error
+              ELSE 'Strategy changed after activation. Reactivate automatic execution.'
+            END
+          WHERE strategy_id = ?
         `
       )
       .run(isoNow(), strategy.id);
@@ -1179,11 +1535,7 @@ export class StrategyService {
   private getStrategyExecutorAddress() {
     const address = this.options.strategyExecutorAddress;
     if (!address || address.toLowerCase() === zeroAddress) {
-      throw new StrategyToolError(
-        "Strategy executor contract is not configured in this deployment.",
-        "strategy_executor_not_configured",
-        409
-      );
+      return zeroAddress as HexString;
     }
     return address;
   }
@@ -1368,6 +1720,30 @@ export class StrategyService {
 
       CREATE INDEX IF NOT EXISTS idx_strategy_execution_history_owner
       ON strategy_execution_history(owner_address, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS strategy_auto_executions (
+        strategy_id TEXT NOT NULL,
+        owner_address TEXT NOT NULL,
+        strategy_hash TEXT NOT NULL,
+        approval_nonce TEXT NOT NULL,
+        approval_deadline TEXT NOT NULL,
+        status TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        expires_at TEXT,
+        last_checked_at TEXT,
+        last_checked_candle_ts INTEGER,
+        last_executed_at TEXT,
+        last_executed_candle_ts INTEGER,
+        last_signal TEXT,
+        last_execution_id TEXT,
+        last_error TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (strategy_id, owner_address)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_strategy_auto_executions_status
+      ON strategy_auto_executions(status, updated_at ASC);
     `);
   }
 

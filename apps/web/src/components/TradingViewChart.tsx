@@ -24,6 +24,7 @@ type Props = {
   onTimeframeChange: (timeframe: StrategyTimeframe) => void;
   overlay?: StrategyChartOverlay | null;
   onVisibleBarsChange?: (viewport: ChartViewport | null) => void;
+  variant?: "full" | "compact";
 };
 
 type Candle = {
@@ -136,7 +137,8 @@ export function TradingViewChart({
   timeframe,
   onTimeframeChange,
   overlay,
-  onVisibleBarsChange
+  onVisibleBarsChange,
+  variant = "full"
 }: Props) {
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -156,6 +158,7 @@ export function TradingViewChart({
   const pendingRangeRef = useRef<LogicalRange | null>(null);
   const shouldFitContentRef = useRef(true);
   const activeDatasetRef = useRef("");
+  const isCompact = variant === "compact";
 
   useEffect(() => {
     candlesRef.current = candles;
@@ -356,7 +359,7 @@ export function TradingViewChart({
         background: { type: ColorType.Solid, color: theme === "dark" ? "#0b0e11" : "#ffffff" },
         textColor: theme === "dark" ? "#848e9c" : "#5e6673",
         fontFamily: "'Inter', sans-serif",
-        fontSize: 11
+        fontSize: isCompact ? 10 : 11
       },
       grid: {
         vertLines: { color: theme === "dark" ? "rgba(43, 49, 57, 0.5)" : "rgba(224, 227, 231, 0.5)" },
@@ -375,7 +378,7 @@ export function TradingViewChart({
       },
       rightPriceScale: {
         borderColor: theme === "dark" ? "#2b3139" : "#e0e3e7",
-        scaleMargins: { top: 0.1, bottom: 0.2 }
+        scaleMargins: isCompact ? { top: 0.08, bottom: 0.08 } : { top: 0.1, bottom: 0.2 }
       },
       timeScale: {
         borderColor: theme === "dark" ? "#2b3139" : "#e0e3e7",
@@ -394,7 +397,9 @@ export function TradingViewChart({
           ? candles
           : fallbackCandles(market.series, Number(market.referencePrice), timeframe);
 
-      if (chartType === "candle") {
+      const resolvedChartType = isCompact ? "candle" : chartType;
+
+      if (resolvedChartType === "candle") {
         const series = chart.addSeries(CandlestickSeries, {
           upColor: "#0ecb81",
           downColor: "#f6465d",
@@ -414,23 +419,25 @@ export function TradingViewChart({
         seriesRef.current = series;
       }
 
-      const volumeSeries = chart.addSeries(HistogramSeries, {
-        priceFormat: { type: "volume" },
-        priceScaleId: "volume"
-      });
-      chart.priceScale("volume").applyOptions({
-        scaleMargins: { top: 0.8, bottom: 0 }
-      });
-      volumeSeries.setData(
-        chartCandles.map((candle) => ({
-          time: candle.time,
-          value: candle.volume,
-          color:
-            candle.close >= candle.open
-              ? "rgba(14, 203, 129, 0.25)"
-              : "rgba(246, 70, 93, 0.25)"
-        }))
-      );
+      if (!isCompact) {
+        const volumeSeries = chart.addSeries(HistogramSeries, {
+          priceFormat: { type: "volume" },
+          priceScaleId: "volume"
+        });
+        chart.priceScale("volume").applyOptions({
+          scaleMargins: { top: 0.8, bottom: 0 }
+        });
+        volumeSeries.setData(
+          chartCandles.map((candle) => ({
+            time: candle.time,
+            value: candle.volume,
+            color:
+              candle.close >= candle.open
+                ? "rgba(14, 203, 129, 0.25)"
+                : "rgba(246, 70, 93, 0.25)"
+          }))
+        );
+      }
 
       if (activeOverlay) {
         let hasOscillatorPane = false;
@@ -444,11 +451,11 @@ export function TradingViewChart({
           }
           const indicatorSeries = chart.addSeries(LineSeries, {
             color: indicator.color,
-            lineWidth: indicator.pane === "oscillator" ? 1 : 2,
+            lineWidth: isCompact ? 1 : indicator.pane === "oscillator" ? 1 : 2,
             lineStyle: indicator.pane === "oscillator" ? LineStyle.Dashed : LineStyle.Solid,
             lastValueVisible: false,
             priceLineVisible: false,
-            title: indicator.label
+            title: isCompact ? "" : indicator.label
           }, paneIndex);
           indicatorSeries.setData(
             indicator.values.map((value) => ({
@@ -477,7 +484,7 @@ export function TradingViewChart({
               position: marker.position,
               shape: marker.shape,
               color: marker.color,
-              text: marker.text
+              text: isCompact ? undefined : marker.text
             }))
           );
         }
@@ -524,7 +531,7 @@ export function TradingViewChart({
 
     ro.observe(containerRef.current);
     cleanupRef.current = () => ro.disconnect();
-  }, [activeOverlay, candles, chartType, emitVisibleBars, hiddenIndicatorIds, loadCandles, market, theme, timeframe]);
+  }, [activeOverlay, candles, chartType, emitVisibleBars, hiddenIndicatorIds, isCompact, loadCandles, market, theme, timeframe]);
 
   useEffect(() => {
     buildChart();
@@ -537,39 +544,41 @@ export function TradingViewChart({
   }, [buildChart]);
 
   return (
-    <div className="tv-chart-wrapper">
-      <div className="tv-chart-toolbar">
-        {TIMEFRAMES.map((item) => (
+    <div className={`tv-chart-wrapper ${isCompact ? "compact" : ""}`}>
+      {!isCompact && (
+        <div className="tv-chart-toolbar">
+          {TIMEFRAMES.map((item) => (
+            <button
+              key={item.value}
+              className={`tv-tf-btn ${timeframe === item.value ? "active" : ""}`}
+              onClick={() => onTimeframeChange(item.value)}
+            >
+              {item.label}
+            </button>
+          ))}
+          <div className="tv-tf-sep" />
           <button
-            key={item.value}
-            className={`tv-tf-btn ${timeframe === item.value ? "active" : ""}`}
-            onClick={() => onTimeframeChange(item.value)}
+            className={`tv-tf-btn ${chartType === "candle" ? "active" : ""}`}
+            onClick={() => setChartType("candle")}
+            title="Candlestick"
           >
-            {item.label}
+            Candles
           </button>
-        ))}
-        <div className="tv-tf-sep" />
-        <button
-          className={`tv-tf-btn ${chartType === "candle" ? "active" : ""}`}
-          onClick={() => setChartType("candle")}
-          title="Candlestick"
-        >
-          Candles
-        </button>
-        <button
-          className={`tv-tf-btn ${chartType === "line" ? "active" : ""}`}
-          onClick={() => setChartType("line")}
-          title="Line"
-        >
-          Line
-        </button>
-        <div className="tv-tf-sep" />
-        <span style={{ fontSize: 11, color: "var(--text-tertiary)", marginLeft: "auto" }}>
-          {market?.symbol ?? "---"} · {feedState === "live" ? "live data" : feedState}
-          {loadingMoreHistory ? " · loading history" : ""}
-        </span>
-      </div>
-      {indicatorLegendItems.length > 0 && (
+          <button
+            className={`tv-tf-btn ${chartType === "line" ? "active" : ""}`}
+            onClick={() => setChartType("line")}
+            title="Line"
+          >
+            Line
+          </button>
+          <div className="tv-tf-sep" />
+          <span style={{ fontSize: 11, color: "var(--text-tertiary)", marginLeft: "auto" }}>
+            {market?.symbol ?? "---"} · {feedState === "live" ? "live data" : feedState}
+            {loadingMoreHistory ? " · loading history" : ""}
+          </span>
+        </div>
+      )}
+      {!isCompact && indicatorLegendItems.length > 0 && (
         <div className="tv-indicator-legend">
           {indicatorLegendItems.map((item) => (
             <div key={item.id} className={`tv-indicator-chip ${item.hidden ? "is-hidden" : ""}`}>

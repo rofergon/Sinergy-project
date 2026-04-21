@@ -1,5 +1,5 @@
 import { keccak256, stringToHex } from "viem";
-import type { HexString } from "./strategy";
+import type { HexString, StrategyTimeframe, StrategyStatus } from "./strategy";
 
 export const STRATEGY_EXECUTION_DOMAIN_NAME = "SinergyStrategyExecutor";
 export const STRATEGY_EXECUTION_DOMAIN_VERSION = "1";
@@ -105,6 +105,65 @@ export type StrategyExecutionStrategySummary = {
   currentPositionBase: string;
   currentPnlQuote?: number;
   currentPrice?: number;
+};
+
+export type StrategyAutoExecutionMode = "until_disabled" | "until_timestamp";
+export type StrategyAutoExecutionStatus = "inactive" | "active" | "expired" | "paused" | "needs_reactivation";
+
+export type StrategyLastBacktestPreview = {
+  runId: string;
+  createdAt: string;
+  timeframe: StrategyTimeframe;
+  tradeCount: number;
+  netPnl: number;
+  netPnlPct: number;
+  winRate: number;
+  maxDrawdownPct: number;
+  profitFactor: number;
+};
+
+export type StrategyAutoExecutionState = {
+  strategyId: string;
+  ownerAddress: HexString;
+  status: StrategyAutoExecutionStatus;
+  mode?: StrategyAutoExecutionMode;
+  expiresAt?: string;
+  activationCreatedAt?: string;
+  activationUpdatedAt?: string;
+  approvalExpiresAt?: string;
+  approvalCreatedAt?: string;
+  lastCheckedAt?: string;
+  lastCheckedCandleTs?: number;
+  lastExecutedAt?: string;
+  lastExecutedCandleTs?: number;
+  lastSignal?: StrategyExecutionSignal;
+  lastExecutionId?: string;
+  lastError?: string;
+};
+
+export type StrategyDashboardCard = {
+  strategyId: string;
+  ownerAddress: HexString;
+  name: string;
+  marketId: HexString;
+  marketSymbol: string;
+  timeframe: StrategyTimeframe;
+  status: StrategyStatus;
+  updatedAt: string;
+  latestBacktest?: StrategyLastBacktestPreview;
+  autoExecution: StrategyAutoExecutionState;
+};
+
+export type ActivateStrategyAutoExecutionInput = {
+  ownerAddress: HexString;
+  strategyId: string;
+  mode: StrategyAutoExecutionMode;
+  expiresAt?: string;
+};
+
+export type DeactivateStrategyAutoExecutionInput = {
+  ownerAddress: HexString;
+  strategyId: string;
 };
 
 export function hashStrategyId(strategyId: string): HexString {
