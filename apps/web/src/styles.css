@@ -5566,6 +5566,33 @@ a { color: inherit; text-decoration: none; }
   border: 1px solid rgba(30, 157, 242, 0.15);
 }
 
+.strategy-preview-kickers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.strategy-preview-kickers .strategy-preview-kicker {
+  margin-bottom: 0;
+}
+
+.strategy-dashboard-kickers {
+  margin-bottom: 10px;
+}
+
+.strategy-preview-kicker-side {
+  color: #8fd6b3;
+  background: rgba(33, 186, 117, 0.12);
+  border-color: rgba(33, 186, 117, 0.2);
+}
+
+.strategy-preview-kicker-indicator {
+  color: #f3d07a;
+  background: rgba(243, 208, 122, 0.12);
+  border-color: rgba(243, 208, 122, 0.2);
+}
+
 .strategy-preview-tile-head h3 {
   font-size: 18px;
   font-weight: 700;
