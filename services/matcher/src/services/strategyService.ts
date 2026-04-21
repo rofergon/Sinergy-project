@@ -38,6 +38,7 @@ import {
   strategyApprovalTypes
 } from "@sinergy/shared";
 import { hashTypedData, isAddressEqual, recoverTypedDataAddress, zeroAddress } from "viem";
+import { collectIndicatorReferences } from "./indicatorEngine.js";
 import {
   buildStrategyCapabilities,
   buildStrategyTemplates,
@@ -313,6 +314,7 @@ export class StrategyService {
       const market = this.marketsById.get(strategy.marketId.toLowerCase());
       const latestBacktest = this.getLatestBacktestPreview(strategy.id, ownerAddress);
       const autoExecution = this.getAutoExecutionState(strategy.id, ownerAddress);
+      const indicators = [...new Set(collectIndicatorReferences(strategy).map((ref) => ref.indicator))];
 
       return {
         strategyId: strategy.id,
@@ -321,6 +323,8 @@ export class StrategyService {
         marketId: strategy.marketId,
         marketSymbol: market?.symbol ?? strategy.marketId,
         timeframe: strategy.timeframe,
+        enabledSides: strategy.enabledSides,
+        indicators,
         status: strategy.status,
         updatedAt: strategy.updatedAt,
         latestBacktest,
