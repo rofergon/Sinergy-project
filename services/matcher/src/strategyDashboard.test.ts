@@ -222,6 +222,8 @@ test("dashboard returns latest backtest preview and active auto execution state"
     const dashboard = harness.strategyService.getStrategyDashboard(harness.ownerAddress);
     assert.equal(dashboard.cards.length, 1);
     assert.equal(dashboard.cards[0]?.latestBacktest?.runId, backtest.summary.runId);
+    assert.deepEqual(dashboard.cards[0]?.enabledSides, ["long"]);
+    assert.deepEqual(dashboard.cards[0]?.indicators, []);
     assert.equal(dashboard.cards[0]?.autoExecution.status, "active");
   } finally {
     harness.cleanup();
