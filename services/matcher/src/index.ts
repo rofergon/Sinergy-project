@@ -345,6 +345,34 @@ app.post("/auth/verify", async (request, reply) => {
   }
 });
 
+app.post("/auth/refresh", async (request, reply) => {
+  const authHeader = request.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: {
+        message: "Authentication required."
+      }
+    };
+  }
+
+  try {
+    return {
+      ok: true,
+      result: authService.refreshToken(authHeader.slice("Bearer ".length).trim())
+    };
+  } catch (error) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: {
+        message: error instanceof Error ? error.message : "Authentication failed."
+      }
+    };
+  }
+});
+
 app.get("/health", async () => ({
   ok: true,
   matcher: account.address,
@@ -567,6 +595,39 @@ app.get("/strategy/execution/history/:ownerAddress", async (request, reply) => {
     };
   } catch (error) {
     const payload = toStrategyToolErrorPayload(error, "strategy_execution_history");
+    reply.code(payload.statusCode);
+    return payload.body;
+  }
+});
+
+app.get("/strategy/execution/live-overlay/:ownerAddress/:strategyId", async (request, reply) => {
+  const { ownerAddress, strategyId } = request.params as {
+    ownerAddress?: `0x${string}`;
+    strategyId?: string;
+  };
+  const { candleLookback } = request.query as { candleLookback?: string };
+
+  if (!ownerAddress || !strategyId) {
+    reply.code(422);
+    return {
+      ok: false,
+      error: {
+        message: "ownerAddress and strategyId are required."
+      }
+    };
+  }
+
+  try {
+    return {
+      ok: true,
+      result: strategyExecutionService.getLiveChartOverlay({
+        ownerAddress,
+        strategyId,
+        candleLookback: candleLookback ? Number(candleLookback) : undefined
+      })
+    };
+  } catch (error) {
+    const payload = toStrategyToolErrorPayload(error, "strategy_execution_live_overlay");
     reply.code(payload.statusCode);
     return payload.body;
   }
