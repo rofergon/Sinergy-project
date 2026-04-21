@@ -139,6 +139,11 @@ export class StrategyToolApi {
             payload.ownerAddress as `0x${string}`
           )
         };
+      case "delete_strategy":
+        return this.strategyService.deleteStrategy({
+          ownerAddress: payload.ownerAddress as `0x${string}`,
+          strategyId: payload.strategyId as string
+        });
       case "clone_strategy_template":
         return {
           strategy: this.strategyService.cloneTemplate({
