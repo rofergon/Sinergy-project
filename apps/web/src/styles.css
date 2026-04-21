@@ -2166,6 +2166,27 @@ a { color: inherit; text-decoration: none; }
   font-weight: 700;
 }
 
+.strategy-danger-btn {
+  margin-top: 12px;
+  border: 1px solid rgba(246, 70, 93, 0.28);
+  background: rgba(246, 70, 93, 0.08);
+  color: var(--red);
+  border-radius: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.strategy-danger-btn:hover {
+  border-color: rgba(246, 70, 93, 0.45);
+  background: rgba(246, 70, 93, 0.14);
+}
+
+.strategy-danger-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .strategy-agent-compose {
   padding: 16px;
   border-top: 1px solid var(--border);
@@ -2409,7 +2430,7 @@ a { color: inherit; text-decoration: none; }
 .portfolio-section {
   border: 1px solid var(--border);
   border-radius: 18px;
-  background: rgba(18, 22, 28, 0.94);
+  background: var(--bg-elevated);
   overflow: hidden;
 }
 
@@ -2454,12 +2475,12 @@ a { color: inherit; text-decoration: none; }
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
+  border-bottom: 1px solid var(--border);
 }
 
 .portfolio-orders-row {
   font-size: 12px;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
+  border-bottom: 1px solid var(--border);
 }
 
 .portfolio-orders-row:last-child {
@@ -2532,7 +2553,7 @@ a { color: inherit; text-decoration: none; }
 .strategy-history-strategy-card {
   border: 1px solid var(--border);
   border-radius: 18px;
-  background: rgba(24, 28, 35, 0.94);
+  background: var(--bg-secondary);
   padding: 18px;
   display: grid;
   gap: 16px;
@@ -2559,7 +2580,7 @@ a { color: inherit; text-decoration: none; }
 .strategy-history-strategy-grid div {
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(11, 14, 17, 0.6);
+  background: var(--bg-primary);
   padding: 12px;
   display: grid;
   gap: 6px;
@@ -2575,6 +2596,51 @@ a { color: inherit; text-decoration: none; }
 .strategy-history-trades-table {
   display: grid;
   gap: 8px;
+}
+
+.strategy-history-trade-header {
+  display: grid;
+  grid-template-columns: 0.6fr 1.4fr 1.4fr 0.8fr 0.8fr 0.8fr;
+  padding: 6px 14px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.strategy-history-trade-row {
+  display: grid;
+  grid-template-columns: 0.6fr 1.4fr 1.4fr 0.8fr 0.8fr 0.8fr;
+  padding: 10px 14px;
+  font-size: 12px;
+  align-items: center;
+  gap: 10px;
+  transition: background 0.1s;
+}
+
+.strategy-history-trade-row:hover { background: var(--bg-hover); }
+
+.strategy-history-trade-kind {
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.strategy-history-trade-cell {
+  display: grid;
+  gap: 4px;
+}
+
+.strategy-history-trade-cell strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.strategy-history-trade-cell small {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .strategy-history-txhash {
@@ -3232,8 +3298,8 @@ a { color: inherit; text-decoration: none; }
   border: 1px solid var(--border);
   border-radius: 24px;
   background:
-    radial-gradient(circle at top left, rgba(255, 255, 255, 0.08), transparent 34%),
-    linear-gradient(135deg, rgba(17, 23, 39, 0.96), rgba(8, 11, 18, 0.98));
+    radial-gradient(circle at top left, var(--blue-soft), transparent 34%),
+    linear-gradient(135deg, var(--bg-secondary), var(--bg-elevated));
 }
 
 .bridge-kicker {
@@ -3290,15 +3356,15 @@ a { color: inherit; text-decoration: none; }
 }
 
 .bridge-secondary-btn {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--bg-elevated);
   color: var(--text-primary);
   border: 1px solid var(--border);
 }
 
 .bridge-wallet-pill {
   margin-top: 14px;
-  background: rgba(75, 214, 156, 0.12);
-  color: #b9f3d8;
+  background: var(--green-soft);
+  color: var(--green);
 }
 
 .bridge-note {
@@ -3312,7 +3378,7 @@ a { color: inherit; text-decoration: none; }
   padding: 18px;
   border: 1px solid rgba(75, 214, 156, 0.22);
   border-radius: 20px;
-  background: rgba(75, 214, 156, 0.08);
+  background: color-mix(in srgb, var(--green-soft) 60%, var(--bg-elevated));
   display: grid;
   gap: 14px;
 }
@@ -3362,8 +3428,8 @@ a { color: inherit; text-decoration: none; }
 .bridge-direct-address {
   min-height: 48px;
   border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(8, 11, 18, 0.55);
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
 }
 
 .bridge-direct-input-wrap {
@@ -3412,8 +3478,9 @@ a { color: inherit; text-decoration: none; }
 .bridge-direct-status {
   padding: 12px 14px;
   border-radius: 14px;
-  background: rgba(8, 11, 18, 0.55);
-  color: #c9f7df;
+  background: var(--bg-primary);
+  color: var(--green);
+  border: 1px solid var(--border);
 }
 
 .bridge-direct-hash {
@@ -3422,9 +3489,9 @@ a { color: inherit; text-decoration: none; }
 }
 
 .bridge-visual-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--bg-secondary);
   padding: 20px;
   display: grid;
   gap: 10px;
@@ -3436,7 +3503,8 @@ a { color: inherit; text-decoration: none; }
   gap: 4px;
   padding: 14px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
 }
 
 .bridge-chain-label {
@@ -3462,7 +3530,7 @@ a { color: inherit; text-decoration: none; }
   padding: 22px;
   border: 1px solid var(--border);
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--bg-elevated);
 }
 
 .bridge-step-index {
@@ -3487,7 +3555,7 @@ a { color: inherit; text-decoration: none; }
   padding: 18px 20px;
   border-radius: 18px;
   border: 1px solid rgba(75, 214, 156, 0.18);
-  background: rgba(75, 214, 156, 0.08);
+  background: color-mix(in srgb, var(--green-soft) 55%, var(--bg-elevated));
 }
 
 .bridge-callout strong {
@@ -4124,7 +4192,7 @@ a { color: inherit; text-decoration: none; }
   padding: 10px 24px;
   border-radius: 10px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-elevated);
   color: var(--text-primary);
   font-weight: 600;
   font-size: 13px;
@@ -4134,7 +4202,7 @@ a { color: inherit; text-decoration: none; }
 
 .landing-nav-connect:hover {
   border-color: var(--green);
-  background: rgba(14, 203, 129, 0.08);
+  background: var(--green-soft);
   color: var(--green);
 }
 
@@ -4260,7 +4328,7 @@ a { color: inherit; text-decoration: none; }
   padding: 14px 24px;
   border-radius: 12px;
   border: 1px solid var(--border);
-  background: rgba(255,255,255,0.03);
+  background: var(--bg-elevated);
   color: var(--text-secondary);
   font-weight: 600;
   font-size: 14px;
@@ -4272,7 +4340,7 @@ a { color: inherit; text-decoration: none; }
 .landing-cta-secondary:hover {
   border-color: var(--border-focus);
   color: var(--text-primary);
-  background: rgba(255,255,255,0.06);
+  background: var(--bg-secondary);
 }
 
 /* Stats strip */
@@ -4284,7 +4352,7 @@ a { color: inherit; text-decoration: none; }
   padding: 16px 32px;
   border: 1px solid var(--border);
   border-radius: 16px;
-  background: rgba(18, 22, 28, 0.6);
+  background: var(--bg-elevated);
   backdrop-filter: blur(16px);
 }
 
@@ -4328,7 +4396,7 @@ a { color: inherit; text-decoration: none; }
   padding: 28px 24px 24px;
   border-radius: 16px;
   border: 1px solid var(--border);
-  background: rgba(18, 22, 28, 0.5);
+  background: var(--bg-elevated);
   backdrop-filter: blur(12px);
   display: flex;
   flex-direction: column;
@@ -4358,7 +4426,7 @@ a { color: inherit; text-decoration: none; }
 .landing-feature-card:hover {
   border-color: rgba(14, 203, 129, 0.25);
   transform: translateY(-4px);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.12);
 }
 
 .landing-feature-card:hover::before {
@@ -4372,7 +4440,7 @@ a { color: inherit; text-decoration: none; }
   width: 52px;
   height: 52px;
   border-radius: 14px;
-  background: rgba(14, 203, 129, 0.06);
+  background: var(--green-soft);
   border: 1px solid rgba(14, 203, 129, 0.1);
 }
 
@@ -4409,7 +4477,7 @@ a { color: inherit; text-decoration: none; }
   padding: 32px;
   border-radius: 20px;
   border: 1px solid var(--border);
-  background: rgba(18, 22, 28, 0.4);
+  background: var(--bg-elevated);
   backdrop-filter: blur(12px);
 }
 
