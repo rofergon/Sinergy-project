@@ -192,6 +192,12 @@ export const strategyToolInputSchemas = {
       strategyId: z.string().uuid()
     })
     .strict(),
+  delete_strategy: z
+    .object({
+      ownerAddress: strategyOwnerAddressSchema,
+      strategyId: z.string().uuid()
+    })
+    .strict(),
   clone_strategy_template: z
     .object({
       ownerAddress: strategyOwnerAddressSchema,
