@@ -36,6 +36,7 @@ export type StrategyToolResultMap = {
   save_strategy: { strategy: StrategyDefinition; validation: StrategyValidationResult };
   list_user_strategies: { strategies: StrategyDefinition[] };
   get_strategy: { strategy: StrategyDefinition };
+  delete_strategy: { strategyId: string; deleted: true };
   clone_strategy_template: { strategy: StrategyDefinition };
 };
 
