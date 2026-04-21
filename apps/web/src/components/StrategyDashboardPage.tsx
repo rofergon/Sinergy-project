@@ -1,18 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSignTypedData } from "wagmi";
-import type { HexString } from "@sinergy/shared";
+import type { HexString, StrategyChartOverlay } from "@sinergy/shared";
 import {
   activateStrategyAutoExecution,
   createStrategyExecutionIntent,
   deactivateStrategyAutoExecution,
-  fetchBacktestBundle,
   fetchStrategyDashboard,
   fetchStrategyExecutionApproval,
+  fetchStrategyExecutionHistory,
+  fetchStrategyLiveOverlay,
   runStrategyNow,
   saveStrategyExecutionApproval,
   strategyTool
 } from "../lib/api";
-import type { MarketSnapshot, StrategyBacktestBundle, StrategyDashboardCard } from "../types";
+import type {
+  MarketSnapshot,
+  StrategyDashboardCard,
+  StrategyExecutionRecord,
+  StrategyExecutionStrategySummary
+} from "../types";
 import { TradingViewChart } from "./TradingViewChart";
 
 type Props = {
@@ -21,37 +27,28 @@ type Props = {
   onOpenStrategy: (strategyId: string, runId?: string) => void;
 };
 
-function timeframeDaysLabel(bundle: StrategyBacktestBundle | null) {
-  if (!bundle) return null;
-  const days = (bundle.summary.candleCount * timeframeDaysMultiplier(bundle.summary.timeframe));
-  if (!Number.isFinite(days) || days <= 0) {
-    return null;
-  }
-  return days >= 10 ? `${days.toFixed(0)}d` : `${days.toFixed(1)}d`;
-}
-
-function timeframeDaysMultiplier(timeframe: StrategyBacktestBundle["summary"]["timeframe"]) {
-  switch (timeframe) {
-    case "1m":
-      return 1 / 1440;
-    case "5m":
-      return 5 / 1440;
-    case "15m":
-      return 15 / 1440;
-    case "1h":
-      return 1 / 24;
-    case "4h":
-      return 4 / 24;
-    case "1d":
-      return 1;
-  }
-}
-
 function formatMetric(value?: number, digits = 2) {
   if (value === undefined || value === null || !Number.isFinite(value)) {
     return "--";
   }
   return value.toFixed(digits);
+}
+
+function liveStrategyStatusLabel(status?: StrategyExecutionStrategySummary["status"]) {
+  switch (status) {
+    case "active":
+      return "Active";
+    case "pending":
+      return "Pending";
+    case "idle":
+      return "Idle";
+    default:
+      return "--";
+  }
+}
+
+function isLiveMarketSupported(market?: MarketSnapshot) {
+  return Boolean(market?.routeable);
 }
 
 function statusLabel(card: StrategyDashboardCard) {
@@ -81,16 +78,184 @@ function tenYearsInSeconds() {
   return 60 * 60 * 24 * 365 * 10;
 }
 
+function isRealExecutionTrade(record: StrategyExecutionRecord) {
+  return record.status === "completed" && record.action !== "no_action";
+}
+
+type ExecutionTradeRow = {
+  id: string;
+  side: "long" | "short";
+  entry?: StrategyExecutionRecord;
+  exit?: StrategyExecutionRecord;
+  sortAt: string;
+};
+
+function buildExecutionTradeRows(records: StrategyExecutionRecord[]) {
+  const sorted = [...records].sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
+  const rows: ExecutionTradeRow[] = [];
+  let openLong: StrategyExecutionRecord | undefined;
+  let openShort: StrategyExecutionRecord | undefined;
+
+  for (const record of sorted) {
+    if (record.signal === "long_entry") {
+      if (openLong) {
+        rows.push({
+          id: `trade-${openLong.id}`,
+          side: "long",
+          entry: openLong,
+          sortAt: openLong.createdAt
+        });
+      }
+      openLong = record;
+      continue;
+    }
+
+    if (record.signal === "long_exit") {
+      rows.push({
+        id: `trade-${openLong?.id ?? record.id}-${record.id}`,
+        side: "long",
+        entry: openLong,
+        exit: record,
+        sortAt: record.createdAt
+      });
+      openLong = undefined;
+      continue;
+    }
+
+    if (record.signal === "short_entry") {
+      if (openShort) {
+        rows.push({
+          id: `trade-${openShort.id}`,
+          side: "short",
+          entry: openShort,
+          sortAt: openShort.createdAt
+        });
+      }
+      openShort = record;
+      continue;
+    }
+
+    if (record.signal === "short_exit") {
+      rows.push({
+        id: `trade-${openShort?.id ?? record.id}-${record.id}`,
+        side: "short",
+        entry: openShort,
+        exit: record,
+        sortAt: record.createdAt
+      });
+      openShort = undefined;
+    }
+  }
+
+  if (openLong) {
+    rows.push({
+      id: `trade-${openLong.id}`,
+      side: "long",
+      entry: openLong,
+      sortAt: openLong.createdAt
+    });
+  }
+
+  if (openShort) {
+    rows.push({
+      id: `trade-${openShort.id}`,
+      side: "short",
+      entry: openShort,
+      sortAt: openShort.createdAt
+    });
+  }
+
+  return rows.sort((left, right) => Date.parse(right.sortAt) - Date.parse(left.sortAt));
+}
+
+function liveTradeOverlay(
+  card: StrategyDashboardCard,
+  baseOverlay: StrategyChartOverlay | null,
+  records: StrategyExecutionRecord[]
+): StrategyChartOverlay | null {
+  const realTrades = records
+    .filter((record) => record.strategyId === card.strategyId)
+    .filter(isRealExecutionTrade)
+    .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
+
+  if (!baseOverlay && realTrades.length === 0) {
+    return null;
+  }
+
+  const markers = realTrades.map((record) => {
+    const time = Math.floor(Date.parse(record.createdAt) / 1000);
+    switch (record.signal) {
+      case "long_entry":
+        return {
+          id: `live-${record.id}`,
+          time,
+          position: "belowBar" as const,
+          shape: "arrowUp" as const,
+          color: "#0ecb81",
+          text: "Real buy"
+        };
+      case "short_entry":
+        return {
+          id: `live-${record.id}`,
+          time,
+          position: "aboveBar" as const,
+          shape: "arrowDown" as const,
+          color: "#f6465d",
+          text: "Real short"
+        };
+      case "long_exit":
+        return {
+          id: `live-${record.id}`,
+          time,
+          position: "aboveBar" as const,
+          shape: "circle" as const,
+          color: "#f0b90b",
+          text: "Real sell"
+        };
+      case "short_exit":
+        return {
+          id: `live-${record.id}`,
+          time,
+          position: "belowBar" as const,
+          shape: "circle" as const,
+          color: "#1e9df2",
+          text: "Real cover"
+        };
+      default:
+        return null;
+    }
+  }).filter((marker): marker is NonNullable<typeof marker> => marker !== null);
+
+  if (!baseOverlay) {
+    return {
+      runId: card.latestBacktest?.runId ?? `live-${card.strategyId}`,
+      strategyId: card.strategyId,
+      marketId: card.marketId,
+      timeframe: card.timeframe,
+      indicators: [],
+      markers
+    };
+  }
+
+  return {
+    ...baseOverlay,
+    markers
+  };
+}
+
 export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [cards, setCards] = useState<StrategyDashboardCard[]>([]);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [configStrategyId, setConfigStrategyId] = useState<string | null>(null);
   const [activationMode, setActivationMode] = useState<"until_disabled" | "until_timestamp">("until_disabled");
   const [activationExpiry, setActivationExpiry] = useState("");
-  const [previewBundles, setPreviewBundles] = useState<Record<string, StrategyBacktestBundle | null>>({});
+  const [previewOverlays, setPreviewOverlays] = useState<Record<string, StrategyChartOverlay | null>>({});
+  const [previewExecutions, setPreviewExecutions] = useState<Record<string, StrategyExecutionRecord[]>>({});
+  const [previewExecutionSummaries, setPreviewExecutionSummaries] = useState<Record<string, StrategyExecutionStrategySummary>>({});
   const { signTypedDataAsync } = useSignTypedData();
 
   async function loadDashboard(options?: { silent?: boolean }) {
@@ -158,23 +323,19 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
 
   useEffect(() => {
     if (!address || previewCards.length === 0) {
-      setPreviewBundles({});
+      setPreviewOverlays({});
       return;
     }
 
     const ownerAddress = address;
     let cancelled = false;
-    const targetCards = previewCards.filter(
-      (card): card is StrategyDashboardCard & { latestBacktest: NonNullable<StrategyDashboardCard["latestBacktest"]> } =>
-        Boolean(card.latestBacktest?.runId)
-    );
 
-    async function loadPreviewBundles() {
+    async function loadPreviewOverlays() {
       const nextEntries = await Promise.all(
-        targetCards.map(async (card) => {
+        previewCards.map(async (card) => {
           try {
-            const bundle = await fetchBacktestBundle(ownerAddress, card.latestBacktest.runId);
-            return [card.strategyId, bundle] as const;
+            const overlay = await fetchStrategyLiveOverlay(ownerAddress, card.strategyId);
+            return [card.strategyId, overlay] as const;
           } catch {
             return [card.strategyId, null] as const;
           }
@@ -191,10 +352,66 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
           nextMap[card.strategyId] = null;
         }
       }
-      setPreviewBundles(nextMap);
+      setPreviewOverlays(nextMap);
     }
 
-    void loadPreviewBundles();
+    void loadPreviewOverlays();
+    return () => {
+      cancelled = true;
+    };
+  }, [address, previewCards]);
+
+  useEffect(() => {
+    if (!address || previewCards.length === 0) {
+      setPreviewExecutions({});
+      setPreviewExecutionSummaries({});
+      return;
+    }
+
+    const ownerAddress = address;
+    let cancelled = false;
+    const strategyIds = new Set(previewCards.map((card) => card.strategyId));
+
+    async function loadPreviewExecutions() {
+      try {
+        const result = await fetchStrategyExecutionHistory(ownerAddress);
+        if (cancelled) {
+          return;
+        }
+
+        const grouped = result.trades.reduce<Record<string, StrategyExecutionRecord[]>>((acc, trade) => {
+          if (!strategyIds.has(trade.strategyId)) {
+            return acc;
+          }
+          const bucket = acc[trade.strategyId] ?? [];
+          bucket.push(trade);
+          acc[trade.strategyId] = bucket;
+          return acc;
+        }, {});
+
+        for (const card of previewCards) {
+          if (!grouped[card.strategyId]) {
+            grouped[card.strategyId] = [];
+          }
+        }
+
+        setPreviewExecutions(grouped);
+        setPreviewExecutionSummaries(
+          Object.fromEntries(
+            result.strategies
+              .filter((strategy) => strategyIds.has(strategy.strategyId))
+              .map((strategy) => [strategy.strategyId, strategy] as const)
+          )
+        );
+      } catch {
+        if (!cancelled) {
+          setPreviewExecutions({});
+          setPreviewExecutionSummaries({});
+        }
+      }
+    }
+
+    void loadPreviewExecutions();
     return () => {
       cancelled = true;
     };
@@ -203,10 +420,6 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
   async function ensureSavedStrategy(card: StrategyDashboardCard) {
     if (!address) {
       throw new Error("Connect wallet to manage strategies.");
-    }
-
-    if (card.status === "saved") {
-      return;
     }
 
     const result = await strategyTool<{
@@ -227,6 +440,10 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
           ? `The strategy could not be saved for execution: ${issueText}`
           : "The strategy could not be saved for execution."
       );
+    }
+
+    if (result.strategy.status !== "saved") {
+      throw new Error("The strategy is still not saved, so it cannot be used for live execution yet.");
     }
   }
 
@@ -344,9 +561,31 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
     }
   }
 
+  async function handleDelete(card: StrategyDashboardCard) {
+    if (!address) return;
+    const confirmed = window.confirm(`Delete strategy "${card.name}"? This will also remove its backtests and live execution history.`);
+    if (!confirmed) return;
+
+    setDeletingId(card.strategyId);
+    setError("");
+    try {
+      await strategyTool<{ strategyId: string; deleted: true }>("delete_strategy", {
+        ownerAddress: address,
+        strategyId: card.strategyId
+      });
+      setConfigStrategyId((current) => (current === card.strategyId ? null : current));
+      await loadDashboard({ silent: true });
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   function renderStrategyCard(card: StrategyDashboardCard, options?: { spotlight?: boolean }) {
     const market = cardMarkets.get(card.marketId.toLowerCase());
     const configOpen = configStrategyId === card.strategyId;
+    const liveSupported = isLiveMarketSupported(market);
 
     return (
       <article
@@ -372,6 +611,12 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
         {card.status !== "saved" && (
           <div className="strategy-dashboard-inline-note">
             This strategy is still a draft. The dashboard will try to save it before running or enabling auto-trading.
+          </div>
+        )}
+
+        {!liveSupported && (
+          <div className="strategy-dashboard-inline-note">
+            Live trading is available only on router-enabled markets with routed Initia testnet liquidity.
           </div>
         )}
 
@@ -440,7 +685,7 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
           <button
             type="button"
             className="strategy-agent-review-btn"
-            disabled={runningId === card.strategyId}
+            disabled={runningId === card.strategyId || deletingId === card.strategyId || !liveSupported}
             onClick={() => void handleRunNow(card)}
           >
             {runningId === card.strategyId ? "Running..." : "Run now"}
@@ -450,7 +695,7 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
             <button
               type="button"
               className="strategy-agent-review-btn"
-              disabled={togglingId === card.strategyId}
+              disabled={togglingId === card.strategyId || deletingId === card.strategyId}
               onClick={() => void handleDeactivate(card)}
             >
               {togglingId === card.strategyId ? "Stopping..." : "Disable Auto"}
@@ -459,15 +704,24 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
             <button
               type="button"
               className="strategy-agent-review-btn"
-              disabled={togglingId === card.strategyId}
+              disabled={togglingId === card.strategyId || deletingId === card.strategyId || !liveSupported}
               onClick={() => setConfigStrategyId(configOpen ? null : card.strategyId)}
             >
               {card.autoExecution.status === "needs_reactivation" ? "Reactivate Auto" : "Enable Auto"}
             </button>
           )}
+
+          <button
+            type="button"
+            className="strategy-danger-btn"
+            disabled={deletingId === card.strategyId || togglingId === card.strategyId || runningId === card.strategyId}
+            onClick={() => void handleDelete(card)}
+          >
+            {deletingId === card.strategyId ? "Deleting..." : "Delete"}
+          </button>
         </div>
 
-        {configOpen && (
+        {configOpen && liveSupported && (
           <div className="strategy-dashboard-auto-config">
             <label>
               <span>Duration</span>
@@ -516,8 +770,11 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
 
   function renderPreviewTile(card: StrategyDashboardCard, index: number) {
     const market = cardMarkets.get(card.marketId.toLowerCase());
-    const bundle = previewBundles[card.strategyId] ?? null;
-    const backtestWindow = timeframeDaysLabel(bundle);
+    const strategyExecutionRows = (previewExecutions[card.strategyId] ?? []).filter(isRealExecutionTrade);
+    const strategyTradeRows = buildExecutionTradeRows(strategyExecutionRows);
+    const liveOverlay = liveTradeOverlay(card, previewOverlays[card.strategyId] ?? null, previewExecutions[card.strategyId] ?? []);
+    const liveSummary = previewExecutionSummaries[card.strategyId];
+    const lastRealTradeAt = strategyTradeRows[0]?.exit?.createdAt ?? strategyTradeRows[0]?.entry?.createdAt;
 
     return (
       <article
@@ -547,14 +804,14 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
             market={market}
             timeframe={card.timeframe}
             onTimeframeChange={() => {}}
-            overlay={bundle?.overlay ?? null}
+            overlay={liveOverlay}
             variant="compact"
           />
         </div>
 
         <div className="strategy-preview-backtest">
           <div className="strategy-preview-backtest-head">
-            <span>Backtest snapshot{backtestWindow ? ` · ${backtestWindow} window` : ""}</span>
+            <span>Live execution snapshot</span>
             <div className="strategy-preview-actions">
               <button
                 type="button"
@@ -566,46 +823,54 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
               <button
                 type="button"
                 className="strategy-studio-secondary-link"
-                disabled={togglingId === card.strategyId}
+                disabled={togglingId === card.strategyId || deletingId === card.strategyId}
                 onClick={() => void handleDeactivate(card)}
               >
                 {togglingId === card.strategyId ? "Stopping..." : "Disable"}
               </button>
+              <button
+                type="button"
+                className="strategy-danger-btn"
+                disabled={deletingId === card.strategyId || togglingId === card.strategyId}
+                onClick={() => void handleDelete(card)}
+              >
+                {deletingId === card.strategyId ? "Deleting..." : "Delete"}
+              </button>
             </div>
           </div>
 
-          {card.latestBacktest ? (
+          {liveSummary ? (
             <div className="strategy-preview-stats">
               <div>
-                <span>PnL</span>
-                <strong className={card.latestBacktest.netPnl >= 0 ? "order-side buy" : "order-side sell"}>
-                  {formatMetric(card.latestBacktest.netPnl, 2)}
+                <span>PnL now</span>
+                <strong className={liveSummary.currentPnlQuote !== undefined && liveSummary.currentPnlQuote < 0 ? "order-side sell" : "order-side buy"}>
+                  {formatMetric(liveSummary.currentPnlQuote, 2)}
                 </strong>
               </div>
               <div>
-                <span>PnL %</span>
-                <strong>{formatMetric(card.latestBacktest.netPnlPct, 2)}</strong>
+                <span>Status</span>
+                <strong>{liveStrategyStatusLabel(liveSummary.status)}</strong>
               </div>
               <div>
                 <span>Trades</span>
-                <strong>{card.latestBacktest.tradeCount}</strong>
+                <strong>{strategyTradeRows.length}</strong>
               </div>
               <div>
-                <span>Win rate</span>
-                <strong>{formatMetric(card.latestBacktest.winRate, 2)}</strong>
+                <span>Position</span>
+                <strong>{liveSummary.currentPositionBase || "--"}</strong>
               </div>
               <div>
-                <span>PF</span>
-                <strong>{formatMetric(card.latestBacktest.profitFactor, 2)}</strong>
+                <span>Current price</span>
+                <strong>{formatMetric(liveSummary.currentPrice, 2)}</strong>
               </div>
               <div>
-                <span>Drawdown</span>
-                <strong>{formatMetric(card.latestBacktest.maxDrawdownPct, 2)}</strong>
+                <span>Last trade</span>
+                <strong>{lastRealTradeAt ? new Date(lastRealTradeAt).toLocaleTimeString() : "--"}</strong>
               </div>
             </div>
           ) : (
             <div className="strategy-preview-empty">
-              No backtest yet. The live chart still follows current market price until a run is available.
+              No live execution stats yet. This strategy is running, but it has not completed a tracked trade yet.
             </div>
           )}
         </div>
