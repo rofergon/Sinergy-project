@@ -112,6 +112,11 @@ export class MatcherAuthService {
     };
   }
 
+  refreshToken(token: string) {
+    const session = this.verifyToken(token);
+    return this.issueToken(session.address);
+  }
+
   private issueToken(address: string) {
     const expiresAt = Date.now() + this.options.tokenTtlMs;
     const payload: TokenPayload = {
