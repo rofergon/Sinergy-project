@@ -352,6 +352,93 @@ export class StrategyService {
     return normalizeStrategyDefinition(JSON.parse(row.body_json));
   }
 
+  deleteStrategy(input: { ownerAddress: HexString; strategyId: string }) {
+    this.assertOwnerAddress(input.ownerAddress);
+    this.getStrategy(input.strategyId, input.ownerAddress);
+
+    const ownerKey = keyOf(input.ownerAddress);
+    this.db.exec("BEGIN");
+    try {
+      this.db
+        .prepare(
+          `
+            DELETE FROM strategy_auto_executions
+            WHERE strategy_id = ? AND owner_address = ?
+          `
+        )
+        .run(input.strategyId, ownerKey);
+
+      this.db
+        .prepare(
+          `
+            DELETE FROM strategy_execution_approvals
+            WHERE strategy_id = ? AND owner_address = ?
+          `
+        )
+        .run(input.strategyId, ownerKey);
+
+      this.db
+        .prepare(
+          `
+            DELETE FROM strategy_execution_history
+            WHERE strategy_id = ? AND owner_address = ?
+          `
+        )
+        .run(input.strategyId, ownerKey);
+
+      this.db
+        .prepare(
+          `
+            DELETE FROM backtest_trades
+            WHERE strategy_id = ? AND owner_address = ?
+          `
+        )
+        .run(input.strategyId, ownerKey);
+
+      this.db
+        .prepare(
+          `
+            DELETE FROM backtest_runs
+            WHERE strategy_id = ? AND owner_address = ?
+          `
+        )
+        .run(input.strategyId, ownerKey);
+
+      this.db
+        .prepare(
+          `
+            DELETE FROM strategy_versions
+            WHERE strategy_id = ?
+          `
+        )
+        .run(input.strategyId);
+
+      const deleted = this.db
+        .prepare(
+          `
+            DELETE FROM strategies
+            WHERE id = ? AND owner_address = ?
+          `
+        )
+        .run(input.strategyId, ownerKey);
+
+      if (Number(deleted.changes ?? 0) === 0) {
+        throw new StrategyToolError("Strategy not found", "strategy_not_found", 404, {
+          strategyId: input.strategyId
+        });
+      }
+
+      this.db.exec("COMMIT");
+      return {
+        strategyId: input.strategyId,
+        deleted: true as const
+      };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   createExecutionIntent(input: {
     ownerAddress: HexString;
     strategyId: string;
@@ -1011,6 +1098,14 @@ export class StrategyService {
       throw new StrategyToolError(
         "Only saved strategies can be activated for automatic execution.",
         "strategy_not_saved_for_auto_execution",
+        409
+      );
+    }
+    const market = this.marketsById.get(strategy.marketId.toLowerCase());
+    if (!market?.routeable) {
+      throw new StrategyToolError(
+        "Automatic live execution only supports router-enabled markets with routed liquidity.",
+        "strategy_auto_execution_market_not_routeable",
         409
       );
     }
