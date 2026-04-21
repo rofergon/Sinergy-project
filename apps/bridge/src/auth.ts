@@ -50,6 +50,10 @@ function isSessionValid(session: StoredSession) {
   return Date.parse(session.expiresAt) - Date.now() > 30_000;
 }
 
+function shouldRefreshSession(session: StoredSession) {
+  return Date.parse(session.expiresAt) - Date.now() <= 5 * 60_000;
+}
+
 async function readError(response: Response) {
   const text = await response.text();
   if (!text) {
@@ -82,7 +86,7 @@ export function clearAuthSession(address: string) {
 export async function ensureAuthenticated(apiBase: string, address: string) {
   const normalizedAddress = normalizeAddress(address);
   const current = readStoredSession(normalizedAddress);
-  if (current && isSessionValid(current)) {
+  if (current && isSessionValid(current) && !shouldRefreshSession(current)) {
     return current.token;
   }
 
@@ -92,11 +96,32 @@ export async function ensureAuthenticated(apiBase: string, address: string) {
   }
 
   const authPromise = (async () => {
+    const base = trimTrailingSlash(apiBase);
+
+    if (current && isSessionValid(current)) {
+      const refreshResponse = await fetch(`${base}/auth/refresh`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${current.token}`
+        }
+      });
+
+      if (refreshResponse.ok) {
+        const refreshPayload = (await refreshResponse.json()) as {
+          ok: true;
+          result: StoredSession;
+        };
+        writeStoredSession(normalizedAddress, refreshPayload.result);
+        return refreshPayload.result.token;
+      }
+
+      clearAuthSession(normalizedAddress);
+    }
+
     if (!signMessageFn) {
       throw new Error("Connect your EVM wallet to authenticate this action.");
     }
 
-    const base = trimTrailingSlash(apiBase);
     const challengeResponse = await fetch(`${base}/auth/nonce`, {
       method: "POST",
       headers: {
