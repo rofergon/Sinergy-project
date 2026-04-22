@@ -591,7 +591,7 @@ app.get("/strategy/execution/history/:ownerAddress", async (request, reply) => {
   try {
     return {
       ok: true,
-      result: strategyExecutionService.listExecutionHistory(ownerAddress)
+      result: await strategyExecutionService.listExecutionHistory(ownerAddress)
     };
   } catch (error) {
     const payload = toStrategyToolErrorPayload(error, "strategy_execution_history");
@@ -663,6 +663,7 @@ app.post("/strategy/auto/activate", async (request, reply) => {
     strategyId?: string;
     mode?: "until_disabled" | "until_timestamp";
     expiresAt?: string;
+    initialCapitalQuote?: number;
   };
 
   if (!body.ownerAddress || !body.strategyId || !body.mode) {
@@ -682,7 +683,8 @@ app.post("/strategy/auto/activate", async (request, reply) => {
         ownerAddress: body.ownerAddress,
         strategyId: body.strategyId,
         mode: body.mode,
-        expiresAt: body.expiresAt
+        expiresAt: body.expiresAt,
+        initialCapitalQuote: body.initialCapitalQuote
       })
     };
   } catch (error) {

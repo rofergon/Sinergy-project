@@ -532,6 +532,125 @@ test("live execution on a non-routeable market does not place dark-pool strategy
   }
 });
 
+test("execution history values open strategy PnL from the live DEX quote instead of the chart reference price", async () => {
+  const root = mkdtempSync(join(tmpdir(), "sinergy-strategy-exec-"));
+  const ownerPk = "0x00000000000000000000000000000000000000000000000000000000000000c6";
+  const ownerAccount = privateKeyToAccount(ownerPk);
+  const ownerAddress = ownerAccount.address as HexString;
+  const base = makeToken("cINIT", "0x00000000000000000000000000000000000000e1");
+  const quote = makeToken("cUSDC", "0x00000000000000000000000000000000000000e2");
+  const market: ResolvedMarket = {
+    id: "0x0000000000000000000000000000000000000000000000000000000000000444",
+    symbol: "cINIT/cUSDC",
+    baseToken: base,
+    quoteToken: quote,
+    routeable: true,
+    routePolicy: "router-enabled"
+  };
+  const priceService = {
+    getCandles: () => [
+      { ts: 1, open: 1, high: 1, low: 1, close: 1, volume: 1 },
+      { ts: 2, open: 1, high: 1, low: 1, close: 1, volume: 1 }
+    ],
+    getReferencePrice: () => "0.8",
+    getSparkline: () => []
+  };
+
+  const strategyService = new StrategyService({
+    dbFile: join(root, "strategies.sqlite"),
+    markets: [market],
+    chainId: 1716124615666775,
+    strategyExecutorAddress: "0x0000000000000000000000000000000000000e11",
+    priceService: priceService as any
+  });
+
+  const created = strategyService.createDraft({
+    ownerAddress,
+    marketId: market.id,
+    name: "DEX Mark To Market"
+  });
+
+  strategyService.recordExecution({
+    ownerAddress,
+    strategyId: created.id,
+    strategyName: created.name,
+    marketId: market.id,
+    signal: "long_entry",
+    action: "router_swap",
+    approvalCreatedAt: new Date("2026-04-22T12:00:00.000Z").toISOString(),
+    approvalNonce: "1",
+    status: "completed",
+    fromToken: quote.address,
+    toToken: base.address,
+    amountInAtomic: "100000000",
+    quotedOutAtomic: "100000000",
+    actualOutAtomic: "100000000",
+    executionPrice: 1,
+    routePreference: "dex"
+  });
+
+  const executionService = new StrategyExecutionService({
+    strategyService,
+    priceService: priceService as any,
+    store: new StateStore(join(root, "state.json")),
+    liquidityRouter: {
+      quote: async (input: Record<string, unknown>) => {
+        assert.equal(input.marketId, market.id);
+        assert.equal(input.fromToken, base.address);
+        assert.equal(input.routePreference, "dex");
+        assert.equal(input.amount, "100");
+        return {
+          mode: "async_rebalance_required",
+          requestedRoute: "dex",
+          executionPath: "dex",
+          expiry: new Date("2026-04-22T12:01:00.000Z").toISOString(),
+          routeable: true,
+          quotedOutAtomic: "105000000",
+          minOutAtomic: "104000000",
+          sourceBreakdown: {
+            localInventoryAtomic: "0",
+            l1DexAtomic: "105000000",
+            inventoryStatus: "low"
+          },
+          bridge: {
+            relayer: true,
+            opinit: true,
+            ready: true,
+            checkedAt: new Date("2026-04-22T12:00:30.000Z").toISOString(),
+            details: []
+          },
+          marketSymbol: market.symbol,
+          fromSymbol: base.symbol,
+          toSymbol: quote.symbol
+        };
+      }
+    } as any,
+    inventoryService: {
+      getSwapJob: () => null,
+      listJobs: () => ({ swaps: [], rebalances: [] })
+    } as any,
+    matchingService: {
+      placeOrder: () => {
+        throw new Error("should not place order for history valuation");
+      }
+    } as any,
+    vaultService: {
+      consumeStrategyApproval: async () => "0xfeed"
+    } as any,
+    markets: [market]
+  });
+
+  try {
+    const history = await executionService.listExecutionHistory(ownerAddress);
+    assert.equal(history.strategies.length, 1);
+    assert.equal(history.strategies[0]?.currentPrice, 1.05);
+    assert.equal(history.strategies[0]?.currentPnlQuote, 5);
+    assert.equal(history.strategies[0]?.currentPnlPct, 5);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("live inspection ignores wallet base inventory for exit decisions when the strategy never opened a position", async () => {
   const root = mkdtempSync(join(tmpdir(), "sinergy-strategy-exec-"));
   const ownerPk = "0x00000000000000000000000000000000000000000000000000000000000000c6";

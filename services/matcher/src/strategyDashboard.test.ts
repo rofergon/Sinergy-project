@@ -225,6 +225,40 @@ test("dashboard returns latest backtest preview and active auto execution state"
     assert.deepEqual(dashboard.cards[0]?.enabledSides, ["long"]);
     assert.deepEqual(dashboard.cards[0]?.indicators, []);
     assert.equal(dashboard.cards[0]?.autoExecution.status, "active");
+    assert.equal(dashboard.cards[0]?.latestBacktest?.equityPreviewBars, backtest.summary.equityCurve.length);
+    assert.deepEqual(dashboard.cards[0]?.latestBacktest?.equityPreview, backtest.summary.equityCurve);
+  } finally {
+    harness.cleanup();
+  }
+});
+
+test("dashboard backtest preview keeps only the last 100 equity points", async () => {
+  const candles = Array.from({ length: 120 }, (_, index) => {
+    const base = 9.5 + index * 0.15;
+    return {
+      ts: index + 1,
+      open: base,
+      high: base + 0.3,
+      low: base - 0.2,
+      close: base + 0.15,
+      volume: 10 + index
+    };
+  });
+  const harness = buildHarness({ candles });
+  try {
+    const strategyId = await createSavedStrategy(harness);
+    const backtest = harness.strategyService.runBacktest({
+      ownerAddress: harness.ownerAddress,
+      strategyId
+    });
+
+    const preview = harness.strategyService.getStrategyDashboard(harness.ownerAddress).cards[0]?.latestBacktest;
+    assert.ok(preview);
+    assert.ok(preview.equityPreview);
+    assert.equal(preview.equityPreviewBars, 100);
+    assert.equal(preview.equityPreview.length, 100);
+    assert.equal(preview.equityPreview[0]?.time, backtest.summary.equityCurve[20]?.time);
+    assert.equal(preview.equityPreview.at(-1)?.time, backtest.summary.equityCurve.at(-1)?.time);
   } finally {
     harness.cleanup();
   }

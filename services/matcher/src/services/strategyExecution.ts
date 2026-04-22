@@ -140,6 +140,7 @@ export class StrategyExecutionService {
   }) {
     const inspection = this.inspectApprovedStrategy(input);
     const { strategy, approval, market, signal, lastCandleTs, managedBasePositionAtomic } = inspection;
+    const autoExecutionState = this.deps.strategyService.getAutoExecutionState(strategy.id, input.ownerAddress);
     const balances = this.deps.store.get().balances;
     const baseBalanceAtomic = readAtomicBalance(balances, input.ownerAddress, market.baseToken.address);
     const quoteBalanceAtomic = readAtomicBalance(balances, input.ownerAddress, market.quoteToken.address);
@@ -159,6 +160,7 @@ export class StrategyExecutionService {
       managedBasePositionAtomic,
       baseBalanceAtomic,
       quoteBalanceAtomic,
+      initialCapitalQuote: autoExecutionState.initialCapitalQuote,
       routePreference: input.routePreference ?? "auto"
     });
 
@@ -265,50 +267,65 @@ export class StrategyExecutionService {
       grouped.set(record.strategyId, current);
     }
 
-    const strategies: StrategyExecutionStrategySummary[] = [...grouped.entries()].map(([strategyId, strategyRecords]) => {
-      const sorted = [...strategyRecords].sort((left, right) =>
-        left.createdAt.localeCompare(right.createdAt)
-      );
-      const executableRecords = sorted.filter((record) => record.action !== "no_action");
-      const market = this.resolveMarket(sorted[0]!.marketId);
-      const managedPosition = this.getManagedPositionFromRecords(sorted, market);
-      let hasPending = false;
+    return Promise.all(
+      [...grouped.entries()].map(async ([strategyId, strategyRecords]) => {
+        const sorted = [...strategyRecords].sort((left, right) =>
+          left.createdAt.localeCompare(right.createdAt)
+        );
+        const executableRecords = sorted.filter((record) => record.action !== "no_action");
+        const market = this.resolveMarket(sorted[0]!.marketId);
+        const managedPosition = this.getManagedPositionFromRecords(sorted, market);
+        let hasPending = false;
 
-      for (const record of sorted) {
-        if (record.status !== "completed" && record.status !== "failed" && record.status !== "no_action") {
-          hasPending = true;
+        for (const record of sorted) {
+          if (record.status !== "completed" && record.status !== "failed" && record.status !== "no_action") {
+            hasPending = true;
+          }
         }
-      }
 
-      const currentPrice = Number(this.deps.priceService.getReferencePrice(market.baseToken.symbol));
-      const currentPnlQuote =
-        Number.isFinite(currentPrice)
-          ? managedPosition.quoteCashFlow +
-            (Number(formatUnits(managedPosition.basePositionAtomic, market.baseToken.decimals)) * currentPrice)
-          : undefined;
+        const { currentPrice, currentPnlQuote } = await this.resolveCurrentPositionValuation({
+          ownerAddress,
+          market,
+          managedPosition
+        });
+        const autoExecutionState = this.deps.strategyService.getAutoExecutionState(strategyId, ownerAddress);
+        const openPositionCostBasis =
+          managedPosition.basePositionAtomic > 0n && managedPosition.quoteCashFlow < 0
+            ? Math.abs(managedPosition.quoteCashFlow)
+            : undefined;
+        const pnlPctBase =
+          openPositionCostBasis && openPositionCostBasis > 0
+            ? openPositionCostBasis
+            : autoExecutionState.initialCapitalQuote && autoExecutionState.initialCapitalQuote > 0
+              ? autoExecutionState.initialCapitalQuote
+              : undefined;
+        const currentPnlPct =
+          currentPnlQuote !== undefined && pnlPctBase !== undefined
+            ? Number(((currentPnlQuote / pnlPctBase) * 100).toFixed(4))
+            : undefined;
 
-      const summaryStatus: StrategyExecutionStrategySummary["status"] =
-        hasPending ? "pending" : managedPosition.basePositionAtomic > 0n ? "active" : "idle";
+        const summaryStatus: StrategyExecutionStrategySummary["status"] =
+          hasPending ? "pending" : managedPosition.basePositionAtomic > 0n ? "active" : "idle";
 
-      return {
-        strategyId,
-        strategyName: sorted[0]!.strategyName,
-        marketId: sorted[0]!.marketId,
-        marketSymbol: market.symbol,
-        startedAt: sorted[0]!.approvalCreatedAt,
-        lastTradeAt: executableRecords[executableRecords.length - 1]?.createdAt,
-        status: summaryStatus,
-        tradesCount: executableRecords.length,
-        currentPositionBase: formatUnits(managedPosition.basePositionAtomic, market.baseToken.decimals),
-        currentPnlQuote,
-        currentPrice
-      };
-    }).sort((left, right) => right.startedAt.localeCompare(left.startedAt));
-
-    return {
-      strategies,
+        return {
+          strategyId,
+          strategyName: sorted[0]!.strategyName,
+          marketId: sorted[0]!.marketId,
+          marketSymbol: market.symbol,
+          startedAt: sorted[0]!.approvalCreatedAt,
+          lastTradeAt: executableRecords[executableRecords.length - 1]?.createdAt,
+          status: summaryStatus,
+          tradesCount: executableRecords.length,
+          currentPositionBase: formatUnits(managedPosition.basePositionAtomic, market.baseToken.decimals),
+          currentPnlQuote,
+          currentPnlPct,
+          currentPrice
+        };
+      })
+    ).then((strategies) => ({
+      strategies: strategies.sort((left, right) => right.startedAt.localeCompare(left.startedAt)),
       trades: records.sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-    };
+    }));
   }
 
   private buildExecutionPlan(input: {
@@ -318,6 +335,7 @@ export class StrategyExecutionService {
     managedBasePositionAtomic: bigint;
     baseBalanceAtomic: bigint;
     quoteBalanceAtomic: bigint;
+    initialCapitalQuote?: number;
     routePreference: "auto" | "local" | "dex";
   }) {
     const referencePrice = Number(
@@ -354,6 +372,7 @@ export class StrategyExecutionService {
         input.strategy,
         input.market,
         input.quoteBalanceAtomic,
+        input.initialCapitalQuote,
         referencePrice
       );
 
@@ -405,6 +424,7 @@ export class StrategyExecutionService {
     strategy: StrategyDefinition,
     market: ResolvedMarket,
     quoteBalanceAtomic: bigint,
+    initialCapitalQuote: number | undefined,
     referencePrice: number
   ) {
     if (strategy.sizing.mode === "fixed_quote_notional") {
@@ -413,7 +433,9 @@ export class StrategyExecutionService {
     }
 
     const quoteBalance = Number(formatUnits(quoteBalanceAtomic, market.quoteToken.decimals));
-    const totalEquityQuote = quoteBalance;
+    const totalEquityQuote = initialCapitalQuote && initialCapitalQuote > 0
+      ? initialCapitalQuote
+      : quoteBalance;
     const desiredQuote = totalEquityQuote * (strategy.sizing.value / 100);
     const desiredAtomic = parseUnits(
       normalizeDecimalAmount(desiredQuote, market.quoteToken.decimals),
@@ -587,6 +609,50 @@ export class StrategyExecutionService {
     const baseIn = Number(formatUnits(input.amountInAtomic, input.market.baseToken.decimals));
     const quoteOut = Number(formatUnits(input.outAtomic, input.market.quoteToken.decimals));
     return baseIn > 0 ? quoteOut / baseIn : undefined;
+  }
+
+  private async resolveCurrentPositionValuation(input: {
+    ownerAddress: HexString;
+    market: ResolvedMarket;
+    managedPosition: StrategyManagedPosition;
+  }) {
+    const baseAmount = Number(
+      formatUnits(input.managedPosition.basePositionAtomic, input.market.baseToken.decimals)
+    );
+
+    if (input.managedPosition.basePositionAtomic > 0n && baseAmount > 0 && input.market.routeable) {
+      try {
+        const quote = await this.deps.liquidityRouter.quote({
+          userAddress: input.ownerAddress,
+          marketId: input.market.id,
+          fromToken: input.market.baseToken.address,
+          amount: formatUnits(input.managedPosition.basePositionAtomic, input.market.baseToken.decimals),
+          routePreference: "dex"
+        });
+
+        if (quote.routeable) {
+          const quoteOutAtomic = BigInt(quote.quotedOutAtomic);
+          const quoteOut = Number(formatUnits(quoteOutAtomic, input.market.quoteToken.decimals));
+          return {
+            currentPrice: baseAmount > 0 ? quoteOut / baseAmount : undefined,
+            currentPnlQuote: input.managedPosition.quoteCashFlow + quoteOut
+          };
+        }
+      } catch {
+        // Fall back to the chart/reference feed if the live pool quote is unavailable.
+      }
+    }
+
+    const referencePrice = Number(this.deps.priceService.getReferencePrice(input.market.baseToken.symbol));
+    return {
+      currentPrice: Number.isFinite(referencePrice) ? referencePrice : undefined,
+      currentPnlQuote:
+        Number.isFinite(referencePrice)
+          ? input.managedPosition.quoteCashFlow + (baseAmount * referencePrice)
+          : input.managedPosition.basePositionAtomic > 0n
+            ? undefined
+            : input.managedPosition.quoteCashFlow
+    };
   }
 
   private enrichExecutionRecord(ownerAddress: HexString, record: StrategyExecutionRecord): StrategyExecutionRecord {

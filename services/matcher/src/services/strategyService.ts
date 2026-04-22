@@ -74,6 +74,17 @@ function parseTimestamp(value?: string | null) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function parseOptionalPositiveNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return undefined;
+  }
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return undefined;
+  }
+  return parsed;
+}
+
 function normalizeBacktestSummary(summary: StrategyBacktestSummary): StrategyBacktestSummary {
   return {
     ...summary,
@@ -106,6 +117,8 @@ function defaultBacktestBarsForTimeframe(timeframe: StrategyTimeframe) {
       return 90;
   }
 }
+
+const STRATEGY_BACKTEST_PREVIEW_BARS = 100;
 
 export class StrategyService {
   private readonly db: DatabaseSync;
@@ -1125,6 +1138,15 @@ export class StrategyService {
       }
     }
 
+    const initialCapitalQuote = parseOptionalPositiveNumber(input.initialCapitalQuote);
+    if (input.initialCapitalQuote !== undefined && initialCapitalQuote === undefined) {
+      throw new StrategyToolError(
+        "initialCapitalQuote must be a positive number when provided.",
+        "invalid_auto_execution_initial_capital",
+        422
+      );
+    }
+
     let approval: StrategyApprovalRecord;
     try {
       approval = this.getExecutionApproval(strategy.id, input.ownerAddress);
@@ -1153,11 +1175,12 @@ export class StrategyService {
             status,
             mode,
             expires_at,
+            initial_capital_quote,
             last_error,
             created_at,
             updated_at
           )
-          VALUES (?, ?, ?, ?, ?, 'active', ?, ?, NULL, ?, ?)
+          VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, NULL, ?, ?)
           ON CONFLICT(strategy_id, owner_address) DO UPDATE SET
             strategy_hash = excluded.strategy_hash,
             approval_nonce = excluded.approval_nonce,
@@ -1165,6 +1188,7 @@ export class StrategyService {
             status = 'active',
             mode = excluded.mode,
             expires_at = excluded.expires_at,
+            initial_capital_quote = excluded.initial_capital_quote,
             last_error = NULL,
             updated_at = excluded.updated_at
         `
@@ -1177,6 +1201,7 @@ export class StrategyService {
         approval.deadline,
         input.mode,
         input.mode === "until_timestamp" ? input.expiresAt ?? null : null,
+        initialCapitalQuote ?? null,
         now,
         now
       );
@@ -1216,6 +1241,7 @@ export class StrategyService {
             status,
             mode,
             expires_at,
+            initial_capital_quote,
             last_checked_at,
             last_checked_candle_ts,
             last_executed_at,
@@ -1247,6 +1273,7 @@ export class StrategyService {
       : row.approval_deadline === null || row.approval_deadline === undefined
         ? undefined
         : String(row.approval_deadline);
+    const initialCapitalQuote = parseOptionalPositiveNumber(row.initial_capital_quote);
 
     let status = row.status as StrategyAutoExecutionState["status"];
     let lastError = (row.last_error ?? undefined) as string | undefined;
@@ -1281,6 +1308,7 @@ export class StrategyService {
       status,
       mode: (row.mode ?? undefined) as StrategyAutoExecutionMode | undefined,
       expiresAt,
+      initialCapitalQuote,
       activationCreatedAt: String(row.created_at),
       activationUpdatedAt: String(row.updated_at),
       approvalExpiresAt: approvalDeadline,
@@ -1466,6 +1494,7 @@ export class StrategyService {
     }
 
     const summary = normalizeBacktestSummary(JSON.parse(row.summary_json) as StrategyBacktestSummary);
+    const equityPreview = summary.equityCurve.slice(-STRATEGY_BACKTEST_PREVIEW_BARS);
     return {
       runId: summary.runId,
       createdAt: summary.createdAt,
@@ -1475,7 +1504,9 @@ export class StrategyService {
       netPnlPct: summary.netPnlPct,
       winRate: summary.winRate,
       maxDrawdownPct: summary.maxDrawdownPct,
-      profitFactor: summary.profitFactor
+      profitFactor: summary.profitFactor,
+      equityPreview,
+      equityPreviewBars: equityPreview.length
     };
   }
 
@@ -1829,6 +1860,7 @@ export class StrategyService {
         status TEXT NOT NULL,
         mode TEXT NOT NULL,
         expires_at TEXT,
+        initial_capital_quote REAL,
         last_checked_at TEXT,
         last_checked_candle_ts INTEGER,
         last_executed_at TEXT,
@@ -1844,6 +1876,12 @@ export class StrategyService {
       CREATE INDEX IF NOT EXISTS idx_strategy_auto_executions_status
       ON strategy_auto_executions(status, updated_at ASC);
     `);
+
+    try {
+      this.db.exec("ALTER TABLE strategy_auto_executions ADD COLUMN initial_capital_quote REAL");
+    } catch {
+      // Ignore when the column already exists.
+    }
   }
 
   private seedTemplates() {
