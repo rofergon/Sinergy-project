@@ -18,6 +18,7 @@ export type DeploymentNetwork = {
   tendermintRpc: string;
   restUrl: string;
   explorerUrl?: string;
+  explorerTxUrlTemplate?: string;
   nativeCurrency?: DeploymentNativeCurrency;
 };
 
