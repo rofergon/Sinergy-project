@@ -107,7 +107,10 @@ export function StrategyStudio({
                 <div className="strategy-studio-backtest-summary-head">
                   <div>
                     <span className="strategy-studio-backtest-summary-kicker">Backtest stats</span>
-                    <h3>Estadisticas del backtesting</h3>
+                    <h3>Backtesting snapshot</h3>
+                    <p className="strategy-studio-backtest-summary-copy">
+                      Core validation metrics in a tighter layout so the chart and review stay connected.
+                    </p>
                   </div>
                   <div className="strategy-studio-backtest-summary-meta">
                     <span>{strategyBacktest.summary.timeframe}</span>
