@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import logoNameUrl from "/Sinergy_logo_name.png";
-// logoMarkUrl for future dark-mode logo: import logoMarkUrl from "/Sinergy_logo.png";
+import logoDarkUrl from "/SinergyDarkmode.png";
+import logoLightUrl from "/Sinergylightmode.png";
+import { useTheme } from "../ThemeContext";
 
 type Props = {
   onConnect: () => void;
@@ -165,6 +166,7 @@ function LockZkIcon() {
 export function LandingPage({ onConnect }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [visible, setVisible] = useState(false);
+  const { theme } = useTheme();
 
   useParticles(canvasRef);
 
@@ -215,7 +217,7 @@ export function LandingPage({ onConnect }: Props) {
           <div className="landing-nav-logo">
             <img
               className="landing-nav-mark"
-              src={logoNameUrl}
+              src={theme === "dark" ? logoDarkUrl : logoLightUrl}
               alt="Sinergy"
             />
           </div>
