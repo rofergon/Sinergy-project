@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatUnits } from "viem";
 import { fetchStrategyExecutionHistory } from "../lib/api";
+import { buildExplorerTxUrl } from "../initia";
 import type { MarketSnapshot, StrategyExecutionRecord, StrategyExecutionStrategySummary } from "../types";
 
 type Props = {
@@ -159,11 +160,36 @@ function formatLegSummary(markets: MarketSnapshot[], trade: StrategyExecutionRec
   return `${amountIn} ${fromSymbol} -> ${amountOut} ${toSymbol}`;
 }
 
+function shortenHash(hash?: string) {
+  if (!hash) return "--";
+  return hash.length > 18 ? `${hash.slice(0, 10)}...${hash.slice(-6)}` : hash;
+}
+
+function TxHashLink({ txHash }: { txHash?: string }) {
+  const href = buildExplorerTxUrl(txHash);
+  if (!txHash || !href) {
+    return <small className="strategy-history-txhash">--</small>;
+  }
+
+  return (
+    <a
+      className="strategy-history-txhash strategy-history-txlink"
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      title={txHash}
+    >
+      {shortenHash(txHash)}
+    </a>
+  );
+}
+
 export function StrategyExecutionHistoryPage({ address, markets }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [strategies, setStrategies] = useState<StrategyExecutionStrategySummary[]>([]);
   const [trades, setTrades] = useState<StrategyExecutionRecord[]>([]);
+  const [expandedLogs, setExpandedLogs] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -217,6 +243,13 @@ export function StrategyExecutionHistoryPage({ address, markets }: Props) {
   const realTradeCount = useMemo(() => trades.filter(isRealExecution).length, [trades]);
   const monitorEventCount = useMemo(() => trades.filter(isMonitorEvent).length, [trades]);
 
+  function toggleLogs(strategyId: string) {
+    setExpandedLogs((current) => ({
+      ...current,
+      [strategyId]: !current[strategyId]
+    }));
+  }
+
   return (
     <div className="strategy-history-page">
       <div className="portfolio-hero">
@@ -265,6 +298,8 @@ export function StrategyExecutionHistoryPage({ address, markets }: Props) {
                 const tradeRows = buildExecutionTradeRows(executionRows);
                 const monitorRows = strategyRecords.filter(isMonitorEvent);
                 const lastRealTradeAt = tradeRows[0]?.exit?.createdAt ?? tradeRows[0]?.entry?.createdAt;
+                const logsOpen = Boolean(expandedLogs[strategy.strategyId]);
+                const logCount = executionRows.length + monitorRows.length;
 
                 return (
                   <div key={strategy.strategyId} className="strategy-history-strategy-card">
@@ -350,11 +385,7 @@ export function StrategyExecutionHistoryPage({ address, markets }: Props) {
                                     <>
                                       <strong>{new Date(tradeRow.exit.createdAt).toLocaleString()}</strong>
                                       <small>{formatLegSummary(markets, tradeRow.exit)}</small>
-                                      <small className="strategy-history-txhash">
-                                        {tradeRow.exit.l1TxHash
-                                          ? `${tradeRow.exit.l1TxHash.slice(0, 10)}...${tradeRow.exit.l1TxHash.slice(-6)}`
-                                          : "--"}
-                                      </small>
+                                      <TxHashLink txHash={tradeRow.exit.l1TxHash} />
                                     </>
                                   ) : (
                                     <small>Position still open</small>
@@ -372,83 +403,109 @@ export function StrategyExecutionHistoryPage({ address, markets }: Props) {
                       )}
                     </div>
 
-                    <div className="strategy-history-trades-table">
-                      <div className="portfolio-section-head">
-                        <h2>Execution legs</h2>
-                        <span>{executionRows.length} rows</span>
+                    <div className="strategy-history-log-toggle-bar">
+                      <div className="strategy-history-log-toggle-copy">
+                        <strong>Logs</strong>
+                        <span>
+                          {logCount === 0
+                            ? "No log rows recorded for this strategy."
+                            : `${logCount} total rows available on demand.`}
+                        </span>
                       </div>
-                      {executionRows.length === 0 ? (
-                        <div className="portfolio-empty">No execution legs were recorded for this strategy.</div>
-                      ) : (
-                        <>
-                          <div className="orders-table-header">
-                            <span>Time</span>
-                            <span>Signal</span>
-                            <span>Action</span>
-                            <span>In</span>
-                            <span>Out</span>
-                            <span>Price</span>
-                            <span>Status</span>
-                          </div>
-                          {executionRows.map((trade) => (
-                            <div className="order-row" key={trade.id}>
-                              <span>{new Date(trade.createdAt).toLocaleString()}</span>
-                              <span>{trade.signal.replace(/_/g, " ")}</span>
-                              <span>{trade.action.replace(/_/g, " ")}</span>
-                              <span>
-                                {atomicToDisplay(markets, trade, trade.amountInAtomic, trade.fromToken)}{" "}
-                                {resolveTokenSymbol(markets, trade.marketId, trade.fromToken)}
-                              </span>
-                              <span>
-                                {atomicToDisplay(markets, trade, trade.actualOutAtomic ?? trade.quotedOutAtomic, trade.toToken)}{" "}
-                                {resolveTokenSymbol(markets, trade.marketId, trade.toToken)}
-                              </span>
-                              <span>{fmtNumber(trade.executionPrice, 6)}</span>
-                              <span className={`order-status ${tradeStatusClass(trade.status)}`}>
-                                {trade.status}
-                              </span>
-                            </div>
-                          ))}
-                        </>
-                      )}
+                      <button
+                        type="button"
+                        className="strategy-history-log-toggle"
+                        onClick={() => toggleLogs(strategy.strategyId)}
+                        aria-expanded={logsOpen}
+                      >
+                        {logsOpen ? "Hide logs" : "View logs"}
+                      </button>
                     </div>
 
-                    <div className="strategy-history-trades-table">
-                      <div className="portfolio-section-head">
-                        <h2>Monitor log</h2>
-                        <span>{monitorRows.length} events</span>
-                      </div>
-                      {monitorRows.length === 0 ? (
-                        <div className="portfolio-empty">No monitoring-only events were recorded for this strategy.</div>
-                      ) : (
-                        <>
-                          <div className="orders-table-header">
-                            <span>Time</span>
-                            <span>Signal</span>
-                            <span>Decision</span>
-                            <span>Reason</span>
-                            <span>Status</span>
-                            <span>Action</span>
-                            <span></span>
-                            <span></span>
+                    {logsOpen ? (
+                      <div className="strategy-history-log-panels">
+                        <div className="strategy-history-trades-table">
+                          <div className="portfolio-section-head">
+                            <h2>Execution legs</h2>
+                            <span>{executionRows.length} rows</span>
                           </div>
-                          {monitorRows.map((trade) => (
-                            <div className="order-row" key={trade.id}>
-                              <span>{new Date(trade.createdAt).toLocaleString()}</span>
-                              <span>{trade.signal.replace(/_/g, " ")}</span>
-                              <span>{trade.action.replace(/_/g, " ")}</span>
-                              <span>{trade.reason ?? "--"}</span>
-                              <span className={`order-status ${tradeStatusClass(trade.status)}`}>
-                                {trade.status}
-                              </span>
-                              <span>Monitor</span>
-                              <span>--</span>
-                              <span>--</span>
-                            </div>
-                          ))}
-                        </>
-                      )}
-                    </div>
+                          {executionRows.length === 0 ? (
+                            <div className="portfolio-empty">No execution legs were recorded for this strategy.</div>
+                          ) : (
+                            <>
+                              <div className="orders-table-header">
+                                <span>Time</span>
+                                <span>Signal</span>
+                                <span>Action</span>
+                                <span>In</span>
+                                <span>Out</span>
+                                <span>Price</span>
+                                <span>Status</span>
+                              </div>
+                              {executionRows.map((trade) => (
+                                <div className="order-row" key={trade.id}>
+                                  <span>{new Date(trade.createdAt).toLocaleString()}</span>
+                                  <span>{trade.signal.replace(/_/g, " ")}</span>
+                                  <span className="strategy-history-action-cell">
+                                    <strong>{trade.action.replace(/_/g, " ")}</strong>
+                                    <TxHashLink txHash={trade.l1TxHash} />
+                                  </span>
+                                  <span>
+                                    {atomicToDisplay(markets, trade, trade.amountInAtomic, trade.fromToken)}{" "}
+                                    {resolveTokenSymbol(markets, trade.marketId, trade.fromToken)}
+                                  </span>
+                                  <span>
+                                    {atomicToDisplay(markets, trade, trade.actualOutAtomic ?? trade.quotedOutAtomic, trade.toToken)}{" "}
+                                    {resolveTokenSymbol(markets, trade.marketId, trade.toToken)}
+                                  </span>
+                                  <span>{fmtNumber(trade.executionPrice, 6)}</span>
+                                  <span className={`order-status ${tradeStatusClass(trade.status)}`}>
+                                    {trade.status}
+                                  </span>
+                                </div>
+                              ))}
+                            </>
+                          )}
+                        </div>
+
+                        <div className="strategy-history-trades-table">
+                          <div className="portfolio-section-head">
+                            <h2>Monitor log</h2>
+                            <span>{monitorRows.length} events</span>
+                          </div>
+                          {monitorRows.length === 0 ? (
+                            <div className="portfolio-empty">No monitoring-only events were recorded for this strategy.</div>
+                          ) : (
+                            <>
+                              <div className="orders-table-header">
+                                <span>Time</span>
+                                <span>Signal</span>
+                                <span>Decision</span>
+                                <span>Reason</span>
+                                <span>Status</span>
+                                <span>Action</span>
+                                <span></span>
+                                <span></span>
+                              </div>
+                              {monitorRows.map((trade) => (
+                                <div className="order-row" key={trade.id}>
+                                  <span>{new Date(trade.createdAt).toLocaleString()}</span>
+                                  <span>{trade.signal.replace(/_/g, " ")}</span>
+                                  <span>{trade.action.replace(/_/g, " ")}</span>
+                                  <span>{trade.reason ?? "--"}</span>
+                                  <span className={`order-status ${tradeStatusClass(trade.status)}`}>
+                                    {trade.status}
+                                  </span>
+                                  <span>Monitor</span>
+                                  <span>--</span>
+                                  <span>--</span>
+                                </div>
+                              ))}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}
