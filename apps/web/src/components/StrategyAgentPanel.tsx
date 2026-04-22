@@ -961,341 +961,399 @@ export function StrategyAgentPanel({
 
   return (
     <div className="strategy-agent-panel">
-      <div className="strategy-agent-head">
-        <div>
-          <span className="panel-title">Agent Workspace</span>
-          <p>
-            Describe the strategy goal in natural language. The agent will plan or execute against the
-            same backend tools used by the manual builder.
+      {/* ── HEADER: Compact status bar ── */}
+      <div className="sap-head-bar">
+        <div className="sap-head-left">
+          <span className="panel-title sap-title">Agent Workspace</span>
+          <p className="sap-subtitle">
+            Describe a strategy goal and the agent will build, validate, and backtest it.
           </p>
         </div>
-        <div className="strategy-agent-runtime">
-          <span className={`strategy-agent-badge ${runtimeBadge === "Offline" ? "offline" : ""}`}>
+        <div className="sap-head-chips">
+          {selectedMarket && (
+            <span className="sap-chip sap-chip-market">
+              <span className="sap-chip-dot" />
+              {selectedMarket.symbol}
+            </span>
+          )}
+          <span className="sap-chip">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8"/><path d="M12 7v5l3 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+            {selectedTimeframe}
+          </span>
+          <span className="sap-chip">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 7H4a2 2 0 00-2 2v9a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z" stroke="currentColor" strokeWidth="1.8"/></svg>
+            {session ? shortId(session.sessionId) : "New"}
+          </span>
+          <span className={`sap-chip sap-chip-badge ${runtimeBadge === "Offline" ? "offline" : ""}`}>
+            <span className={`sap-badge-led ${runtimeBadge === "Offline" ? "led-off" : "led-on"}`} />
             {runtimeBadge}
           </span>
-          <small>{runtime?.model.modelName ?? "Loads on first message"}</small>
         </div>
       </div>
 
-      <div className="strategy-agent-context">
-        <span>Market</span>
-        <strong>{selectedMarket?.symbol ?? "Select a market"}</strong>
-        <span>Tools</span>
-        <strong>{runtime?.tools.length ?? "--"}</strong>
-        <span>Session</span>
-        <strong>{session ? shortId(session.sessionId) : "New"}</strong>
-        <span>Chart TF</span>
-        <strong>{selectedTimeframe}</strong>
-        <span>Strategy</span>
-        <strong>{session?.strategy?.name ?? shortId(session?.strategyId)}</strong>
-        <span>Onchain</span>
-        <strong>{approval ? "Authorized" : "Pending"}</strong>
-      </div>
+      {/* Strategy/Onchain band */}
+      {session?.strategyId && (
+        <div className="sap-strategy-band">
+          <span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 2h6l2 4H7L9 2z" stroke="currentColor" strokeWidth="1.5"/><rect x="3" y="6" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="1.5"/></svg>
+            {session.strategy?.name ?? shortId(session.strategyId)}
+          </span>
+          <span className={`sap-onchain-badge ${approval ? "authorized" : ""}`}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="11" width="16" height="11" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M8 11V7a4 4 0 018 0v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+            {approval ? "Authorized" : "Pending signature"}
+          </span>
+        </div>
+      )}
+
 
       <div className={`strategy-agent-workspace ${historyRailOpen ? "sessions-open" : "sessions-closed"}`}>
         <div className="strategy-agent-main">
-            <div className="strategy-agent-main-toolbar">
-              <div className="strategy-agent-main-copy">
-                <strong>Conversation</strong>
-                <small>
+          {/* ── TOOLBAR ── */}
+          <div className="sap-toolbar">
+            <div className="sap-toolbar-info">
+              <strong>Conversation</strong>
+              <small>
                 {session
-                  ? `${session.turnCount} turns in memory • session ${shortId(session.sessionId)}`
+                  ? `${session.turnCount} turns · session ${shortId(session.sessionId)}`
                   : "Start a fresh run or reopen one from the sessions rail."}
               </small>
-              {session?.strategyId && (
-                <small>
-                  {approval
-                    ? `Onchain approval active until ${new Date(Number(approval.deadline) * 1000).toLocaleString()}`
-                    : "This strategy still needs a user signature before the agent can execute it onchain."}
-                </small>
-              )}
-              </div>
-            <div className="strategy-agent-chips">
+            </div>
+            <div className="sap-toolbar-actions">
               {session?.strategyId && (
                 <button
                   type="button"
-                  className="strategy-agent-review-btn"
+                  className="sap-action-btn"
                   onClick={() => void authorizeOnchainExecution()}
                   disabled={approvalBusy || executionBusy || busy !== null}
                 >
-                  {approvalBusy
-                    ? "Authorizing..."
-                    : approval
-                      ? "Refresh Onchain Approval"
-                      : "Authorize Onchain Execution"}
+                  {approvalBusy ? "Signing…" : approval ? "↻ Refresh Approval" : "✍ Authorize"}
                 </button>
               )}
               {session?.strategyId && approval && (
                 <button
                   type="button"
-                  className="strategy-agent-review-btn"
+                  className="sap-action-btn sap-action-primary"
                   onClick={() => void runAuthorizedExecution()}
                   disabled={executionBusy || approvalBusy || busy !== null}
                 >
-                  {executionBusy ? "Executing..." : "Execute Approved Strategy"}
+                  {executionBusy ? "Executing…" : "▶ Execute"}
                 </button>
               )}
               <button
+                id="sap-sessions-toggle"
                 type="button"
-                className="strategy-agent-rail-toggle"
+                className="sap-sessions-btn"
                 onClick={() => setHistoryRailOpen((current) => !current)}
                 aria-expanded={historyRailOpen}
-                aria-label={historyRailOpen ? "Hide sessions panel" : "Show sessions panel"}
               >
-                <span className="strategy-agent-rail-icon" aria-hidden="true">
-                  <span />
-                  <span />
-                  <span />
-                </span>
-                <span>{historyRailOpen ? "Hide Sessions" : "Show Sessions"}</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+                </svg>
+                {historyRailOpen ? "Hide" : "Sessions"}
               </button>
             </div>
           </div>
 
+          {/* ── CHAT THREAD ── */}
           <div className="strategy-agent-thread" ref={threadRef}>
             {messages.length === 0 ? (
-              null
+              <div className="sap-empty-state">
+                <div className="sap-empty-icon">
+                  <svg width="32" height="32" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+                    <rect width="32" height="32" rx="16" fill="rgba(240,185,11,0.1)" />
+                    <path d="M10 22l3-3h9a2 2 0 002-2V9a2 2 0 00-2-2H10a2 2 0 00-2 2v11a2 2 0 002 2z" stroke="#f0b90b" strokeWidth="1.5" strokeLinejoin="round" fill="none"/>
+                    <circle cx="13" cy="14.5" r="1" fill="#f0b90b"/>
+                    <circle cx="16" cy="14.5" r="1" fill="#f0b90b"/>
+                    <circle cx="19" cy="14.5" r="1" fill="#f0b90b"/>
+                  </svg>
+                </div>
+                <p className="sap-empty-desc">
+                  Describe a strategy and the agent will build, validate, and backtest it for you.
+                </p>
+                <div className="sap-empty-chips">
+                  {[
+                    "Create an EMA crossover strategy, validate it, and run a backtest",
+                    "RSI oversold bounce with recommended stop loss",
+                    "Bollinger Band breakout strategy for this market",
+                  ].map((s) => (
+                    <button key={s} type="button" className="sap-suggestion-chip" onClick={() => setPrompt(s)}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
             ) : (
-              messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={`strategy-agent-message ${message.role === "assistant" ? "assistant" : "user"}`}
-                >
-                  <div className="strategy-agent-message-head">
-                    <strong>{message.role === "assistant" ? "Agent" : "You"}</strong>
-                    {message.mode && <span>{message.mode === "plan" ? "Plan" : "Run"}</span>}
-                  </div>
-                  {message.liveThinking && (
-                    <div className="strategy-agent-trace">
-                      <button
-                        type="button"
-                        className={`strategy-agent-thinking-card ${collapsedThinkingIds[message.id] ? "collapsed" : ""}`}
-                        onClick={() =>
-                          setCollapsedThinkingIds((current) => ({
-                            ...current,
-                            [message.id]: !current[message.id]
-                          }))
-                        }
-                        aria-expanded={!collapsedThinkingIds[message.id]}
-                      >
-                        <span className="strategy-agent-thinking-title">Thinking</span>
-                        <small className="strategy-agent-thinking-body">
-                          {collapsedThinkingIds[message.id]
-                            ? summarizeThinking(message.liveThinking)
-                            : message.liveThinking}
-                        </small>
-                      </button>
-                    </div>
-                  )}
-                  <p>{message.text}</p>
+              messages.map((message) => {
+                const isUser = message.role === "user";
+                const displayText =
+                  isUser && message.text.includes("\nUser execution preferences:")
+                    ? message.text.split("\nUser execution preferences:")[0].trim()
+                    : message.text;
 
-                  {message.liveWorkflowSteps && message.liveWorkflowSteps.length > 0 && (
-                    <div className="strategy-agent-trace">
-                      {message.liveWorkflowSteps.map((step) => (
-                        <div key={step.key} className={`strategy-agent-step-card status-${step.status}`}>
-                          <div className="strategy-agent-step-head">
-                            <strong>{step.title}</strong>
-                            <span>{step.status}</span>
-                          </div>
-                          <small>{step.summary}</small>
-                          {step.reasoningSummary && (
-                            <p className="strategy-agent-step-reasoning">{summarizeThinking(step.reasoningSummary, 220)}</p>
+                return (
+                  <div key={message.id} className={`sam-row ${isUser ? "sam-row-user" : "sam-row-agent"}`}>
+                    {!isUser && (
+                      <div className="sam-avatar sam-avatar-agent" aria-hidden="true">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                          <rect x="4" y="8" width="16" height="12" rx="3" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                          <circle cx="9" cy="14" r="1.5" fill="currentColor"/>
+                          <circle cx="15" cy="14" r="1.5" fill="currentColor"/>
+                          <path d="M9 4h6M12 4v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                        </svg>
+                      </div>
+                    )}
+
+                    <div className="sam-bubble">
+                      <div className="sam-meta-top">
+                        <span className="sam-role-label">{isUser ? "You" : "Agent"}</span>
+                        {message.mode && (
+                          <span className={`sam-mode-tag sam-mode-${message.mode}`}>
+                            {message.mode === "plan" ? "📋 Plan" : "▶ Run"}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Thinking */}
+                      {message.liveThinking && (
+                        <div className="sam-thinking">
+                          <button
+                            type="button"
+                            className="sam-thinking-toggle"
+                            onClick={() =>
+                              setCollapsedThinkingIds((current) => ({
+                                ...current,
+                                [message.id]: !current[message.id],
+                              }))
+                            }
+                            aria-expanded={!collapsedThinkingIds[message.id]}
+                          >
+                            <span className="sam-thinking-icon">💭</span>
+                            <span className="sam-thinking-label">Thinking</span>
+                            <span className={`sam-thinking-chevron ${collapsedThinkingIds[message.id] ? "" : "open"}`}>▾</span>
+                          </button>
+                          {!collapsedThinkingIds[message.id] && (
+                            <div className="sam-thinking-body">{message.liveThinking}</div>
                           )}
                         </div>
-                      ))}
-                    </div>
-                  )}
+                      )}
 
-                  {message.plannedTools && message.plannedTools.length > 0 && (
-                    <div className="strategy-agent-list">
-                      {message.plannedTools.map((item) => (
-                        <div key={`${message.id}-${item.tool}`}>
-                          <strong>{item.tool}</strong>
-                          <small>{item.why}</small>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {message.usedTools && message.usedTools.length > 0 && (
-                    <div className="strategy-agent-chips">
-                      {message.usedTools.map((tool) => (
-                        <span key={`${message.id}-${tool}`}>{tool}</span>
-                      ))}
-                    </div>
-                  )}
-
-                  {message.trace && message.trace.length > 0 && (
-                    <div className="strategy-agent-trace">
-                      {message.trace.map((entry) => {
-                        const card = toWorkflowStepCard(entry);
-                        return (
-                          <div
-                            key={`${message.id}-${entry.step}`}
-                            className={`strategy-agent-step-card status-${card.status}`}
-                          >
-                            <div className="strategy-agent-step-head">
-                              <strong>{card.title}</strong>
-                              <span>{card.status}</span>
+                      {/* Live workflow timeline */}
+                      {message.liveWorkflowSteps && message.liveWorkflowSteps.length > 0 && (
+                        <div className="sam-timeline">
+                          {message.liveWorkflowSteps.map((step, idx) => (
+                            <div key={step.key} className={`sam-tl-step status-${step.status}`}>
+                              <div className="sam-tl-left">
+                                <div className="sam-tl-dot">
+                                  {step.status === "completed" && <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                                  {step.status === "error" && <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M3 3l4 4M7 3l-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>}
+                                  {step.status === "running" && <div className="sam-tl-pulse" />}
+                                </div>
+                                {idx < (message.liveWorkflowSteps?.length ?? 0) - 1 && <div className="sam-tl-line" />}
+                              </div>
+                              <div className="sam-tl-content">
+                                <div className="sam-tl-head">
+                                  <strong>{step.title}</strong>
+                                  <span className={`sam-tl-badge badge-${step.status}`}>{step.status}</span>
+                                </div>
+                                <small>{step.summary}</small>
+                                {step.reasoningSummary && <p className="sam-tl-reasoning">{summarizeThinking(step.reasoningSummary, 220)}</p>}
+                              </div>
                             </div>
-                            <small>{card.summary}</small>
-                            {card.reasoningSummary && (
-                              <p className="strategy-agent-step-reasoning">{card.reasoningSummary}</p>
-                            )}
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Final trace */}
+                      {message.trace && message.trace.length > 0 && (
+                        <div className="sam-timeline">
+                          {message.trace.map((entry, idx) => {
+                            const card = toWorkflowStepCard(entry);
+                            return (
+                              <div key={`${message.id}-${entry.step}`} className={`sam-tl-step status-${card.status}`}>
+                                <div className="sam-tl-left">
+                                  <div className="sam-tl-dot">
+                                    {card.status === "completed" && <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                                    {card.status === "error" && <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M3 3l4 4M7 3l-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>}
+                                  </div>
+                                  {idx < (message.trace?.length ?? 0) - 1 && <div className="sam-tl-line" />}
+                                </div>
+                                <div className="sam-tl-content">
+                                  <div className="sam-tl-head">
+                                    <strong>{card.title}</strong>
+                                    <span className={`sam-tl-badge badge-${card.status}`}>{card.status}</span>
+                                  </div>
+                                  <small>{card.summary}</small>
+                                  {card.reasoningSummary && <p className="sam-tl-reasoning">{card.reasoningSummary}</p>}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Planned tools */}
+                      {message.plannedTools && message.plannedTools.length > 0 && (
+                        <div className="sam-planned-tools">
+                          <div className="sam-planned-tools-head">📋 Planned Steps</div>
+                          {message.plannedTools.map((item) => (
+                            <div key={`${message.id}-${item.tool}`} className="sam-planned-tool-row">
+                              <span className="sam-planned-tool-name">{humanizeToolName(item.tool)}</span>
+                              <small className="sam-planned-tool-why">{item.why}</small>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {displayText && <p className="sam-text">{displayText}</p>}
+
+                      {/* Used tools */}
+                      {message.usedTools && message.usedTools.length > 0 && (
+                        <div className="sam-tools-chips">
+                          {message.usedTools.map((tool) => (
+                            <span key={`${message.id}-${tool}`} className="sam-tool-chip">{humanizeToolName(tool)}</span>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Warnings */}
+                      {message.warnings && message.warnings.length > 0 && (
+                        <div className="sam-warnings">
+                          {message.warnings.map((warning) => (
+                            <div key={`${message.id}-${warning}`} className="sam-warning-item">
+                              <small>⚠ {warning}</small>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Backtest mini-card */}
+                      {message.bundle && (() => {
+                        const { summary } = message.bundle;
+                        const netPnl = typeof summary.netPnl === "number" ? summary.netPnl : null;
+                        const positive = netPnl !== null && netPnl >= 0;
+                        const winRate = typeof summary.winRate === "number" ? summary.winRate : null;
+                        const totalTrades = (summary as { tradeCount?: number }).tradeCount ?? (summary as { totalTrades?: number }).totalTrades;
+                        const maxDd = typeof summary.maxDrawdownPct === "number" ? summary.maxDrawdownPct : null;
+                        const pf = typeof summary.profitFactor === "number" ? summary.profitFactor : null;
+                        return (
+                          <div className={`sam-backtest-card ${positive ? "bc-positive" : "bc-negative"}`}>
+                            <div className="sam-bc-header">
+                              <span className="sam-bc-title">📊 Backtest Results</span>
+                              {netPnl !== null && (
+                                <span className={`sam-bc-pnl ${positive ? "bc-pnl-pos" : "bc-pnl-neg"}`}>
+                                  {positive ? "+" : ""}{netPnl.toFixed(2)} USDC
+                                </span>
+                              )}
+                            </div>
+                            <div className="sam-bc-metrics">
+                              <div className="sam-bc-metric"><span>Win Rate</span><strong>{winRate !== null ? `${winRate}%` : "--"}</strong></div>
+                              <div className="sam-bc-metric"><span>Trades</span><strong>{typeof totalTrades === "number" ? totalTrades : "--"}</strong></div>
+                              <div className="sam-bc-metric"><span>Max DD</span><strong className={maxDd !== null && maxDd > 20 ? "bc-warn" : ""}>{maxDd !== null ? `${maxDd.toFixed(1)}%` : "--"}</strong></div>
+                              {pf !== null && <div className="sam-bc-metric"><span>PF</span><strong className={pf >= 1.5 ? "bc-good" : ""}>{pf.toFixed(2)}</strong></div>}
+                            </div>
+                            <button type="button" className="sam-bc-open-btn" onClick={() => onReviewStrategy(message.strategyId!, message.bundle ?? null, message.bundle?.summary.runId)}>
+                              Review in Strategy Builder →
+                            </button>
                           </div>
                         );
-                      })}
-                    </div>
-                  )}
+                      })()}
 
-                  {message.warnings && message.warnings.length > 0 && (
-                    <div className="strategy-agent-warnings">
-                      {message.warnings.map((warning) => (
-                        <small key={`${message.id}-${warning}`}>{warning}</small>
-                      ))}
+                      {/* Review btn (no bundle) */}
+                      {message.strategyId && !message.bundle && (
+                        <button type="button" className="sam-review-btn" onClick={() => onReviewStrategy(message.strategyId!, message.bundle ?? null, message.bundle?.summary.runId)}>
+                          Open in Builder →
+                        </button>
+                      )}
                     </div>
-                  )}
 
-                  {message.strategyId && (
-                    <button
-                      type="button"
-                      className="strategy-agent-review-btn"
-                      onClick={() =>
-                        onReviewStrategy(
-                          message.strategyId!,
-                          message.bundle ?? null,
-                          message.bundle?.summary.runId
-                        )
-                      }
-                    >
-                      Review In Builder
-                    </button>
-                  )}
-                </div>
-              ))
+                    {isUser && (
+                      <div className="sam-avatar sam-avatar-user" aria-hidden="true">Tú</div>
+                    )}
+                  </div>
+                );
+              })
             )}
-
           </div>
 
+          {/* ── COMPOSE AREA ── */}
           <div className="strategy-agent-compose">
-            {messages.length === 0 && (
-              <div className="strategy-agent-suggestion" aria-live="polite">
-                {emptyConversationSuggestion}
-              </div>
-            )}
-            <textarea
-              ref={promptTextareaRef}
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              rows={1}
-              placeholder="Describe the strategy you want to build, validate, improve, or continue..."
-            />
+
+            {/* Clarifier drawer */}
             {clarifierOpen && clarificationRequired && (
-              <div className="strategy-agent-trace">
-                <div>
-                  <strong>Agent needs two quick preferences before running</strong>
-                  <small>Choose allowed sides and how stop loss should be handled.</small>
+              <div className="sap-clarifier">
+                <div className="sap-clarifier-head">
+                  <strong>⚙ Quick preferences</strong>
+                  <small>Choose trading direction and stop-loss style before running.</small>
                 </div>
-                <div className="strategy-agent-chips">
-                  <button
-                    type="button"
-                    className={clarification.sidePreference === "both" ? "strategy-agent-review-btn" : ""}
-                    onClick={() => setClarification((current) => ({ ...current, sidePreference: "both" }))}
-                  >
-                    Long + Short
-                  </button>
-                  <button
-                    type="button"
-                    className={clarification.sidePreference === "long_only" ? "strategy-agent-review-btn" : ""}
-                    onClick={() => setClarification((current) => ({ ...current, sidePreference: "long_only" }))}
-                  >
-                    Long only
-                  </button>
-                  <button
-                    type="button"
-                    className={clarification.sidePreference === "short_only" ? "strategy-agent-review-btn" : ""}
-                    onClick={() => setClarification((current) => ({ ...current, sidePreference: "short_only" }))}
-                  >
-                    Short only
-                  </button>
+                <div className="sap-clarifier-section">
+                  <span className="sap-clarifier-label">Direction</span>
+                  <div className="sap-clarifier-pills">
+                    {([{key: "both", label: "Long + Short"}, {key: "long_only", label: "Long only"}, {key: "short_only", label: "Short only"}] as const).map(({key, label}) => (
+                      <button key={key} type="button" className={`sap-clarifier-pill ${clarification.sidePreference === key ? "selected" : ""}`} onClick={() => setClarification((c) => ({...c, sidePreference: key}))}>
+                        {clarification.sidePreference === key && <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="strategy-agent-chips">
-                  <button
-                    type="button"
-                    className={clarification.stopLossMode === "recommended" ? "strategy-agent-review-btn" : ""}
-                    onClick={() => setClarification((current) => ({ ...current, stopLossMode: "recommended" }))}
-                  >
-                    Recommended SL
-                  </button>
-                  <button
-                    type="button"
-                    className={clarification.stopLossMode === "none" ? "strategy-agent-review-btn" : ""}
-                    onClick={() => setClarification((current) => ({ ...current, stopLossMode: "none" }))}
-                  >
-                    No SL
-                  </button>
-                  <button
-                    type="button"
-                    className={clarification.stopLossMode === "custom" ? "strategy-agent-review-btn" : ""}
-                    onClick={() => setClarification((current) => ({ ...current, stopLossMode: "custom" }))}
-                  >
-                    Custom SL
-                  </button>
+                <div className="sap-clarifier-section">
+                  <span className="sap-clarifier-label">Stop Loss</span>
+                  <div className="sap-clarifier-pills">
+                    {([{key: "recommended", label: "Recommended"}, {key: "none", label: "No SL"}, {key: "custom", label: "Custom %"}] as const).map(({key, label}) => (
+                      <button key={key} type="button" className={`sap-clarifier-pill ${clarification.stopLossMode === key ? "selected" : ""}`} onClick={() => setClarification((c) => ({...c, stopLossMode: key}))}>
+                        {clarification.stopLossMode === key && <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {clarification.stopLossMode === "custom" && (
+                    <input type="number" className="sap-clarifier-input" min="0.1" step="0.1" value={clarification.customStopLossPct} onChange={(e) => setClarification((c) => ({...c, customStopLossPct: e.target.value}))} placeholder="Stop loss % e.g. 2.5" />
+                  )}
                 </div>
-                {clarification.stopLossMode === "custom" && (
-                  <input
-                    type="number"
-                    min="0.1"
-                    step="0.1"
-                    value={clarification.customStopLossPct}
-                    onChange={(event) =>
-                      setClarification((current) => ({
-                        ...current,
-                        customStopLossPct: event.target.value
-                      }))
-                    }
-                    placeholder="Stop loss %"
-                  />
-                )}
               </div>
             )}
-            <div className="strategy-agent-actions">
-              <label className="strategy-agent-plan-toggle">
-                <input
-                  type="checkbox"
-                  checked={planModeEnabled}
-                  onChange={(event) => setPlanModeEnabled(event.target.checked)}
-                  disabled={busy !== null}
-                />
-                <span>Plan mode</span>
-              </label>
+
+            {/* Input row */}
+            <div className="sap-input-row">
+              <textarea
+                ref={promptTextareaRef}
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                    void submit(planModeEnabled ? "plan" : "run");
+                  }
+                }}
+                rows={1}
+                placeholder="Describe the strategy you want to build, validate, improve, or continue..."
+              />
               <button
+                id="sap-send-btn"
                 type="button"
-                onClick={startNewSession}
-                disabled={busy !== null}
-              >
-                New Session
-              </button>
-              <button
-                type="button"
-                className="strategy-primary-btn strategy-agent-submit-btn"
+                className={`sap-send-btn ${busy !== null ? "busy" : ""}`}
                 onClick={() => void submit(planModeEnabled ? "plan" : "run")}
-                disabled={
-                  busy !== null ||
-                  !prompt.trim() ||
-                  (clarifierOpen &&
-                    clarificationRequired &&
-                    clarification.stopLossMode === "custom" &&
-                    !clarification.customStopLossPct.trim())
-                }
+                disabled={busy !== null || !prompt.trim() || (clarifierOpen && clarificationRequired && clarification.stopLossMode === "custom" && !clarification.customStopLossPct.trim())}
+                aria-label="Send message"
               >
-                {busy === "plan"
-                  ? "Planning..."
-                  : busy === "run"
-                    ? "Running..."
-                    : planModeEnabled
-                      ? "Plan"
-                      : "Send"}
+                {busy !== null ? <span className="sap-send-spinner" aria-hidden="true" /> : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M12 19V5M5 12l7-7 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
+              </button>
+            </div>
+
+            {/* Bottom bar */}
+            <div className="sap-compose-footer">
+              <label className="sap-plan-toggle">
+                <input type="checkbox" checked={planModeEnabled} onChange={(event) => setPlanModeEnabled(event.target.checked)} disabled={busy !== null} />
+                <span className={`sap-plan-pill ${planModeEnabled ? "active" : ""}`}>
+                  {planModeEnabled ? "📋 Plan mode" : "▶ Run mode"}
+                </span>
+              </label>
+              <span className="sap-compose-hint">⌘↵ to send</span>
+              <button type="button" className="sap-new-session-btn" onClick={startNewSession} disabled={busy !== null}>
+                + New Session
               </button>
             </div>
           </div>
@@ -1317,23 +1375,17 @@ export function StrategyAgentPanel({
               <strong>Session Workspace</strong>
               <small>
                 {session
-                  ? `${session.turnCount} turns in memory • updated ${formatTimestamp(session.updatedAt)}`
-                  : "Pick a previous session from the right rail or start a fresh one for this market."}
+                  ? `${session.turnCount} turns · updated ${formatTimestamp(session.updatedAt)}`
+                  : "Pick a previous session or start a fresh one."}
               </small>
             </div>
             <div className="strategy-agent-session-actions">
               {session?.strategyId && (
-                <button
-                  type="button"
-                  onClick={() => onReviewStrategy(session.strategyId!, null, session.runId)}
-                  disabled={busy !== null}
-                >
+                <button type="button" onClick={() => onReviewStrategy(session.strategyId!, null, session.runId)} disabled={busy !== null}>
                   Open Strategy In Builder
                 </button>
               )}
-              <button type="button" onClick={startNewSession} disabled={busy !== null}>
-                New Session
-              </button>
+              <button type="button" onClick={startNewSession} disabled={busy !== null}>New Session</button>
             </div>
           </div>
 
@@ -1345,11 +1397,9 @@ export function StrategyAgentPanel({
               </div>
               <div className="strategy-agent-history-head-actions">
                 <button type="button" onClick={() => void refreshHistory()} disabled={historyBusy || busy !== null}>
-                  {historyBusy ? "Refreshing..." : "Refresh"}
+                  {historyBusy ? "Refreshing…" : "Refresh"}
                 </button>
-                <button type="button" onClick={() => setHistoryRailOpen(false)} disabled={busy !== null}>
-                  Close
-                </button>
+                <button type="button" onClick={() => setHistoryRailOpen(false)} disabled={busy !== null}>Close</button>
               </div>
             </div>
 
@@ -1358,32 +1408,23 @@ export function StrategyAgentPanel({
             ) : (
               <div className="strategy-agent-history-list">
                 {history.map((item) => (
-                  <div
-                    key={item.sessionId}
-                    className={`strategy-agent-history-card ${item.sessionId === session?.sessionId ? "active" : ""}`}
-                  >
-                    <div className="strategy-agent-history-copy">
-                      <strong>{summarizeSession(item)}</strong>
-                      <small>{formatTimestamp(item.updatedAt)}</small>
-                      <p>{item.lastAssistantMessage ?? item.lastUserMessage ?? "Session without messages yet."}</p>
-                      <div className="strategy-agent-chips">
-                        <span>{item.turnCount} turns</span>
-                        {item.strategy?.status && <span>{item.strategy.status}</span>}
-                        {item.strategy?.timeframe && <span>{item.strategy.timeframe}</span>}
+                  <div key={item.sessionId} className={`strategy-agent-history-card ${item.sessionId === session?.sessionId ? "active" : ""}`}>
+                    <div className="sah-card-top">
+                      <strong className="sah-card-name">{summarizeSession(item)}</strong>
+                      <div className="sah-card-chips">
+                        <span className="sah-chip">{item.turnCount} turns</span>
+                        {item.strategy?.status && <span className="sah-chip">{item.strategy.status}</span>}
+                        {item.strategy?.timeframe && <span className="sah-chip">{item.strategy.timeframe}</span>}
                       </div>
                     </div>
-                    <div className="strategy-agent-history-actions">
-                      <button type="button" onClick={() => void loadSession(item.sessionId)} disabled={busy !== null}>
-                        Open Session
-                      </button>
+                    <small className="sah-card-time">{formatTimestamp(item.updatedAt)}</small>
+                    {(item.lastAssistantMessage ?? item.lastUserMessage) && (
+                      <p className="sah-card-preview">{item.lastAssistantMessage ?? item.lastUserMessage}</p>
+                    )}
+                    <div className="sah-card-actions">
+                      <button type="button" className="sah-action-btn" onClick={() => void loadSession(item.sessionId)} disabled={busy !== null}>Open Session</button>
                       {item.strategyId && (
-                        <button
-                          type="button"
-                          onClick={() => onReviewStrategy(item.strategyId!, null, item.runId)}
-                          disabled={busy !== null}
-                        >
-                          Open Strategy
-                        </button>
+                        <button type="button" className="sah-action-btn sah-action-strategy" onClick={() => onReviewStrategy(item.strategyId!, null, item.runId)} disabled={busy !== null}>View Strategy</button>
                       )}
                     </div>
                   </div>
