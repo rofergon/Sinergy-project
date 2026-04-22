@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { Hex } from "viem";
-import logoNameUrl from "/Sinergy_logo_name.png";
-// logoMarkUrl available for future use (e.g. favicon, mobile nav):
-// import logoMarkUrl from "/Sinergy_logo.png";
+import logoDarkUrl from "/SinergyDarkmode.png";
+import logoLightUrl from "/Sinergylightmode.png";
+import { useTheme } from "../ThemeContext";
 import { ThemeToggle } from "../ThemeToggle";
 
 type MarketSnapshot = {
@@ -57,6 +57,7 @@ export function Navbar({
 }: Props) {
   const [ddOpen, setDdOpen] = useState(false);
   const ddRef = useRef<HTMLDivElement>(null);
+  const { theme } = useTheme();
   const selected = markets.find((m) => m.id === selectedMarketId);
   const connectedLabel = formatInitiaUsername(username) ?? shorten(initiaAddress);
 
@@ -76,7 +77,7 @@ export function Navbar({
       <div className="nav-logo">
         <img
           className="nav-logo-full"
-          src={logoNameUrl}
+          src={theme === "dark" ? logoDarkUrl : logoLightUrl}
           alt="Sinergy DEX"
         />
       </div>
