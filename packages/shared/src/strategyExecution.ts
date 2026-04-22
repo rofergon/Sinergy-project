@@ -1,5 +1,11 @@
 import { keccak256, stringToHex } from "viem";
-import type { HexString, StrategyIndicatorKind, StrategyTimeframe, StrategyStatus } from "./strategy";
+import type {
+  HexString,
+  StrategyEquityPoint,
+  StrategyIndicatorKind,
+  StrategyStatus,
+  StrategyTimeframe
+} from "./strategy";
 
 export const STRATEGY_EXECUTION_DOMAIN_NAME = "SinergyStrategyExecutor";
 export const STRATEGY_EXECUTION_DOMAIN_VERSION = "1";
@@ -104,6 +110,7 @@ export type StrategyExecutionStrategySummary = {
   tradesCount: number;
   currentPositionBase: string;
   currentPnlQuote?: number;
+  currentPnlPct?: number;
   currentPrice?: number;
 };
 
@@ -120,6 +127,8 @@ export type StrategyLastBacktestPreview = {
   winRate: number;
   maxDrawdownPct: number;
   profitFactor: number;
+  equityPreview?: StrategyEquityPoint[];
+  equityPreviewBars?: number;
 };
 
 export type StrategyAutoExecutionState = {
@@ -128,6 +137,7 @@ export type StrategyAutoExecutionState = {
   status: StrategyAutoExecutionStatus;
   mode?: StrategyAutoExecutionMode;
   expiresAt?: string;
+  initialCapitalQuote?: number;
   activationCreatedAt?: string;
   activationUpdatedAt?: string;
   approvalExpiresAt?: string;
@@ -161,6 +171,7 @@ export type ActivateStrategyAutoExecutionInput = {
   strategyId: string;
   mode: StrategyAutoExecutionMode;
   expiresAt?: string;
+  initialCapitalQuote?: number;
 };
 
 export type DeactivateStrategyAutoExecutionInput = {
