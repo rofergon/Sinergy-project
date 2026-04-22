@@ -9,6 +9,7 @@ import { Navbar } from "./components/Navbar";
 import { TickerStrip } from "./components/TickerStrip";
 import { PortfolioView } from "./components/PortfolioView";
 import { BridgeLanding } from "./components/BridgeLanding";
+import type { TxPopupData } from "./components/TransactionPopup";
 import { LandingPage } from "./components/LandingPage";
 import { StrategyDashboardPage } from "./components/StrategyDashboardPage";
 import { StrategyExecutionHistoryPage } from "./components/StrategyExecutionHistoryPage";
@@ -254,6 +255,7 @@ function Dashboard() {
           onOpenWallet={openWallet}
           onOpenBridge={handleBridgeIn}
           onGoTrade={() => setActiveView("agent")}
+          showTx={showTx}
         />
       ) : activeView === "portfolio" ? (
         <PortfolioView
