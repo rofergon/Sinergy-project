@@ -15,13 +15,9 @@ function getInitialTheme(): Theme {
   if (typeof window !== "undefined") {
     const stored = localStorage.getItem(THEME_STORAGE_KEY) as Theme | null;
     if (stored) return stored;
-    
-    // Check system preference
-    if (window.matchMedia("(prefers-color-scheme: light)").matches) {
-      return "light";
-    }
   }
-  return "dark";
+  // Default to light mode; dark mode will be available via toggle
+  return "light";
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {

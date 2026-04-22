@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import logoUrl from "../../../../docs/logo.png";
+import logoNameUrl from "/Sinergy_logo_name.png";
+// logoMarkUrl for future dark-mode logo: import logoMarkUrl from "/Sinergy_logo.png";
 
 type Props = {
   onConnect: () => void;
@@ -212,8 +213,11 @@ export function LandingPage({ onConnect }: Props) {
         {/* Minimal landing header */}
         <nav className="landing-navbar">
           <div className="landing-nav-logo">
-            <img className="landing-nav-mark" src={logoUrl} alt="Sinergy logo" />
-            <span>Sinergy</span>
+            <img
+              className="landing-nav-mark"
+              src={logoNameUrl}
+              alt="Sinergy"
+            />
           </div>
           <div className="landing-nav-right">
             <span className="landing-nav-testnet">Testnet</span>

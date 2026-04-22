@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { Hex } from "viem";
-import logoUrl from "../../../../docs/logo.png";
+import logoNameUrl from "/Sinergy_logo_name.png";
+// logoMarkUrl available for future use (e.g. favicon, mobile nav):
+// import logoMarkUrl from "/Sinergy_logo.png";
 import { ThemeToggle } from "../ThemeToggle";
 
 type MarketSnapshot = {
@@ -72,11 +74,11 @@ export function Navbar({
   return (
     <nav className="dex-navbar">
       <div className="nav-logo">
-        <img className="nav-logo-mark" src={logoUrl} alt="Sinergy logo" />
-        <span>
-          Sinergy
-          <span style={{ color: "var(--text-tertiary)", fontWeight: 500 }}> DEX</span>
-        </span>
+        <img
+          className="nav-logo-full"
+          src={logoNameUrl}
+          alt="Sinergy DEX"
+        />
       </div>
 
       <div className="nav-market-selector" ref={ddRef} onClick={() => setDdOpen(!ddOpen)}>
