@@ -10,7 +10,8 @@
     "wsUrl": "ws://192.168.1.14:8546",
     "tendermintRpc": "http://192.168.1.14:26657",
     "restUrl": "http://192.168.1.14:1317",
-    "explorerUrl": "http://192.168.1.14:8545",
+    "explorerUrl": "https://scan.testnet.initia.xyz",
+    "explorerTxUrlTemplate": "https://scan.testnet.initia.xyz/initiation-2/txs/{txHash}",
     "nativeCurrency": {
       "name": "Gas",
       "symbol": "GAS",
