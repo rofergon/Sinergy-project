@@ -25,6 +25,7 @@ type Props = {
   overlay?: StrategyChartOverlay | null;
   onVisibleBarsChange?: (viewport: ChartViewport | null) => void;
   variant?: "full" | "compact";
+  initialVisibleBars?: number;
 };
 
 type Candle = {
@@ -138,7 +139,8 @@ export function TradingViewChart({
   onTimeframeChange,
   overlay,
   onVisibleBarsChange,
-  variant = "full"
+  variant = "full",
+  initialVisibleBars
 }: Props) {
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -495,6 +497,18 @@ export function TradingViewChart({
         visibleRangeRef.current = pendingRangeRef.current;
         pendingRangeRef.current = null;
         shouldFitContentRef.current = false;
+      } else if (
+        shouldFitContentRef.current &&
+        initialVisibleBars &&
+        chartCandles.length > initialVisibleBars
+      ) {
+        const focusedRange = {
+          from: Math.max(chartCandles.length - initialVisibleBars, 0),
+          to: chartCandles.length - 1
+        };
+        chart.timeScale().setVisibleLogicalRange(focusedRange);
+        visibleRangeRef.current = focusedRange;
+        shouldFitContentRef.current = false;
       } else if (shouldFitContentRef.current) {
         chart.timeScale().fitContent();
         shouldFitContentRef.current = false;
@@ -531,7 +545,7 @@ export function TradingViewChart({
 
     ro.observe(containerRef.current);
     cleanupRef.current = () => ro.disconnect();
-  }, [activeOverlay, candles, chartType, emitVisibleBars, hiddenIndicatorIds, isCompact, loadCandles, market, theme, timeframe]);
+  }, [activeOverlay, candles, chartType, emitVisibleBars, hiddenIndicatorIds, initialVisibleBars, isCompact, loadCandles, market, theme, timeframe]);
 
   useEffect(() => {
     buildChart();
