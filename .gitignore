@@ -33,3 +33,4 @@ services/matcher/data/*.sqlite-wal
 services/matcher/.env
 services/matcher/dist
 apps/web/dist
+apps/video/
