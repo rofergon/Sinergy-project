@@ -19,6 +19,27 @@ const deployments = {
 export const deployment = deployments[deploymentEnv];
 export const SINERGY_EVM_CHAIN = createSinergyChain(deployment);
 
+export function buildExplorerTxUrl(txHash?: string) {
+  if (!txHash) return undefined;
+
+  const normalizedHash = txHash.trim();
+  if (!normalizedHash) return undefined;
+
+  const template = deployment.network.explorerTxUrlTemplate?.trim();
+  if (template) {
+    return template.replace("{txHash}", encodeURIComponent(normalizedHash));
+  }
+
+  const explorerBase = deployment.network.explorerUrl?.trim().replace(/\/+$/, "");
+  if (!explorerBase) return undefined;
+
+  if (explorerBase.includes("scan.testnet.initia.xyz")) {
+    return `${explorerBase}/${encodeURIComponent(deployment.network.l1ChainId)}/txs/${encodeURIComponent(normalizedHash)}`;
+  }
+
+  return `${explorerBase}/tx/${encodeURIComponent(normalizedHash)}`;
+}
+
 function runtimeHost(subdomain?: string) {
   if (typeof window === "undefined") {
     return "127.0.0.1";
