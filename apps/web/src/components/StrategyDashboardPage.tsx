@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSignTypedData } from "wagmi";
-import type { HexString, StrategyChartOverlay, StrategyIndicatorKind } from "@sinergy/shared";
+import type { HexString, StrategyChartOverlay, StrategyEquityPoint, StrategyIndicatorKind } from "@sinergy/shared";
 import {
   activateStrategyAutoExecution,
+  fetchBacktestChartOverlay,
   createStrategyExecutionIntent,
   deactivateStrategyAutoExecution,
   fetchStrategyDashboard,
@@ -32,6 +33,50 @@ function formatMetric(value?: number, digits = 2) {
     return "--";
   }
   return value.toFixed(digits);
+}
+
+function formatCapital(value?: number) {
+  if (value === undefined || value === null || !Number.isFinite(value)) {
+    return "--";
+  }
+  return value.toFixed(2);
+}
+
+function formatPercent(value?: number, digits = 2) {
+  if (value === undefined || value === null || !Number.isFinite(value)) {
+    return "--";
+  }
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${value.toFixed(digits)}%`;
+}
+
+function buildSparklineGeometry(points: StrategyEquityPoint[]) {
+  if (points.length === 0) {
+    return null;
+  }
+
+  const min = Math.min(...points.map((point) => point.equity));
+  const max = Math.max(...points.map((point) => point.equity));
+  const range = max - min || 1;
+  const coordinates = points.map((point, index) => {
+    const x = (index / Math.max(points.length - 1, 1)) * 100;
+    const y = 100 - ((point.equity - min) / range) * 100;
+    return { x, y };
+  });
+  const line = coordinates.map(({ x, y }) => `${x},${y}`).join(" ");
+  const area = [
+    `M 0 100`,
+    ...coordinates.map(({ x, y }) => `L ${x} ${y}`),
+    "L 100 100 Z"
+  ].join(" ");
+
+  return {
+    area,
+    line,
+    start: coordinates[0],
+    end: coordinates[coordinates.length - 1],
+    trendUp: points[points.length - 1]!.equity >= points[0]!.equity
+  };
 }
 
 function liveStrategyStatusLabel(status?: StrategyExecutionStrategySummary["status"]) {
@@ -90,6 +135,57 @@ function indicatorBadgeLabel(indicator: StrategyIndicatorKind) {
     case "bollinger":
       return "Bollinger";
   }
+}
+
+function renderBacktestPreview(card: StrategyDashboardCard) {
+  const latestBacktest = card.latestBacktest;
+  const equityPreview = latestBacktest?.equityPreview ?? [];
+  if (!latestBacktest || equityPreview.length === 0) {
+    return null;
+  }
+
+  const sparkline = buildSparklineGeometry(equityPreview);
+  if (!sparkline) {
+    return null;
+  }
+
+  return (
+    <div className={`strategy-dashboard-backtest-chart ${sparkline.trendUp ? "is-positive" : "is-negative"}`}>
+      <div className="strategy-dashboard-backtest-chart-meta">
+        <span>Backtest preview</span>
+        <strong>Last {latestBacktest.equityPreviewBars ?? equityPreview.length} candles</strong>
+      </div>
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+        <path className="strategy-dashboard-backtest-chart-area" d={sparkline.area} />
+        <polyline className="strategy-dashboard-backtest-chart-line" points={sparkline.line} />
+        <circle className="strategy-dashboard-backtest-chart-dot start" cx={sparkline.start.x} cy={sparkline.start.y} r="2.4" />
+        <circle className="strategy-dashboard-backtest-chart-dot end" cx={sparkline.end.x} cy={sparkline.end.y} r="3.2" />
+      </svg>
+    </div>
+  );
+}
+
+function renderBacktestTradingViewPreview(
+  card: StrategyDashboardCard,
+  market: MarketSnapshot | undefined,
+  overlay: StrategyChartOverlay | null | undefined
+) {
+  if (!card.latestBacktest || !market || !overlay) {
+    return null;
+  }
+
+  return (
+    <div className="strategy-dashboard-backtest-tv-shell">
+      <TradingViewChart
+        market={market}
+        timeframe={card.timeframe}
+        onTimeframeChange={() => {}}
+        overlay={overlay}
+        variant="compact"
+        initialVisibleBars={100}
+      />
+    </div>
+  );
 }
 
 function renderStrategyBadgeItems(card: StrategyDashboardCard) {
@@ -312,7 +408,9 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
   const [configStrategyId, setConfigStrategyId] = useState<string | null>(null);
   const [activationMode, setActivationMode] = useState<"until_disabled" | "until_timestamp">("until_disabled");
   const [activationExpiry, setActivationExpiry] = useState("");
+  const [activationInitialCapital, setActivationInitialCapital] = useState("");
   const [previewOverlays, setPreviewOverlays] = useState<Record<string, StrategyChartOverlay | null>>({});
+  const [backtestOverlays, setBacktestOverlays] = useState<Record<string, StrategyChartOverlay | null>>({});
   const [previewExecutions, setPreviewExecutions] = useState<Record<string, StrategyExecutionRecord[]>>({});
   const [previewExecutionSummaries, setPreviewExecutionSummaries] = useState<Record<string, StrategyExecutionStrategySummary>>({});
   const { signTypedDataAsync } = useSignTypedData();
@@ -419,6 +517,41 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
       cancelled = true;
     };
   }, [address, previewCards]);
+
+  useEffect(() => {
+    const cardsWithBacktest = inactiveCards.filter((card) => card.latestBacktest?.runId);
+    if (!address || cardsWithBacktest.length === 0) {
+      setBacktestOverlays({});
+      return;
+    }
+
+    const ownerAddress = address;
+    let cancelled = false;
+
+    async function loadBacktestOverlays() {
+      const nextEntries = await Promise.all(
+        cardsWithBacktest.map(async (card) => {
+          try {
+            const overlay = await fetchBacktestChartOverlay(ownerAddress, card.latestBacktest!.runId);
+            return [card.strategyId, overlay] as const;
+          } catch {
+            return [card.strategyId, null] as const;
+          }
+        })
+      );
+
+      if (cancelled) {
+        return;
+      }
+
+      setBacktestOverlays(Object.fromEntries(nextEntries));
+    }
+
+    void loadBacktestOverlays();
+    return () => {
+      cancelled = true;
+    };
+  }, [address, inactiveCards]);
 
   useEffect(() => {
     if (!address || previewCards.length === 0) {
@@ -584,17 +717,25 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
       const validForSeconds = activationMode === "until_timestamp" && expiresAt
         ? Math.max(60, Math.floor((Date.parse(expiresAt) - Date.now()) / 1000))
         : tenYearsInSeconds();
+      const initialCapitalQuote =
+        activationInitialCapital.trim().length > 0 ? Number(activationInitialCapital) : undefined;
+
+      if (initialCapitalQuote !== undefined && (!Number.isFinite(initialCapitalQuote) || initialCapitalQuote <= 0)) {
+        throw new Error("Initial capital must be a positive number.");
+      }
 
       await ensureApproval(card.strategyId, validForSeconds);
       await activateStrategyAutoExecution({
         ownerAddress: address,
         strategyId: card.strategyId,
         mode: activationMode,
-        expiresAt
+        expiresAt,
+        initialCapitalQuote
       });
       setConfigStrategyId(null);
       setActivationExpiry("");
       setActivationMode("until_disabled");
+      setActivationInitialCapital("");
       await loadDashboard({ silent: true });
     } catch (activateError) {
       setError(activateError instanceof Error ? activateError.message : String(activateError));
@@ -645,6 +786,15 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
     const market = cardMarkets.get(card.marketId.toLowerCase());
     const configOpen = configStrategyId === card.strategyId;
     const liveSupported = isLiveMarketSupported(market);
+    const backtestOverlay = backtestOverlays[card.strategyId];
+    const cardNotes = [
+      card.status !== "saved"
+        ? "This strategy is still a draft. The dashboard will try to save it before running or enabling auto-trading."
+        : null,
+      !liveSupported
+        ? "Live trading is available only on router-enabled markets with routed Initia testnet liquidity."
+        : null
+    ].filter((note): note is string => note !== null);
 
     return (
       <article
@@ -670,17 +820,21 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
           <span>{new Date(card.updatedAt).toLocaleDateString()}</span>
         </div>
 
-        {card.status !== "saved" && (
-          <div className="strategy-dashboard-inline-note">
-            This strategy is still a draft. The dashboard will try to save it before running or enabling auto-trading.
-          </div>
-        )}
-
-        {!liveSupported && (
-          <div className="strategy-dashboard-inline-note">
-            Live trading is available only on router-enabled markets with routed Initia testnet liquidity.
-          </div>
-        )}
+        <div className="strategy-dashboard-card-note-stack" aria-hidden={cardNotes.length === 0}>
+          {Array.from({ length: 2 }, (_, index) => {
+            const note = cardNotes[index];
+            return note ? (
+              <div key={`${card.strategyId}-note-${index}`} className="strategy-dashboard-inline-note">
+                {note}
+              </div>
+            ) : (
+              <div
+                key={`${card.strategyId}-note-${index}`}
+                className="strategy-dashboard-inline-note strategy-dashboard-inline-note-placeholder"
+              />
+            );
+          })}
+        </div>
 
         {card.autoExecution.status === "active" && (
           <div className="strategy-dashboard-live-strip">
@@ -690,6 +844,9 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
                 ? `Last check ${new Date(card.autoExecution.lastCheckedAt).toLocaleTimeString()}`
                 : "Waiting for first check"}
             </strong>
+            {card.autoExecution.initialCapitalQuote ? (
+              <strong>Initial capital {formatCapital(card.autoExecution.initialCapitalQuote)}</strong>
+            ) : null}
           </div>
         )}
 
@@ -706,42 +863,49 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
           </div>
 
           {card.latestBacktest ? (
-            <div className="strategy-dashboard-stats">
-              <div>
-                <span>PnL</span>
-                <strong className={card.latestBacktest.netPnl >= 0 ? "order-side buy" : "order-side sell"}>
-                  {formatMetric(card.latestBacktest.netPnl, 2)}
-                </strong>
+            <>
+              {renderBacktestTradingViewPreview(card, market, backtestOverlay) ?? renderBacktestPreview(card)}
+              <div className="strategy-dashboard-stats">
+                <div>
+                  <span>PnL</span>
+                  <strong className={card.latestBacktest.netPnl >= 0 ? "order-side buy" : "order-side sell"}>
+                    {formatMetric(card.latestBacktest.netPnl, 2)}
+                  </strong>
+                </div>
+                <div>
+                  <span>PnL %</span>
+                  <strong>{formatMetric(card.latestBacktest.netPnlPct, 2)}</strong>
+                </div>
+                <div>
+                  <span>Trades</span>
+                  <strong>{card.latestBacktest.tradeCount}</strong>
+                </div>
+                <div>
+                  <span>Win rate</span>
+                  <strong>{formatMetric(card.latestBacktest.winRate, 2)}</strong>
+                </div>
+                <div>
+                  <span>PF</span>
+                  <strong>{formatMetric(card.latestBacktest.profitFactor, 2)}</strong>
+                </div>
+                <div>
+                  <span>Drawdown</span>
+                  <strong>{formatMetric(card.latestBacktest.maxDrawdownPct, 2)}</strong>
+                </div>
               </div>
-              <div>
-                <span>PnL %</span>
-                <strong>{formatMetric(card.latestBacktest.netPnlPct, 2)}</strong>
-              </div>
-              <div>
-                <span>Trades</span>
-                <strong>{card.latestBacktest.tradeCount}</strong>
-              </div>
-              <div>
-                <span>Win rate</span>
-                <strong>{formatMetric(card.latestBacktest.winRate, 2)}</strong>
-              </div>
-              <div>
-                <span>PF</span>
-                <strong>{formatMetric(card.latestBacktest.profitFactor, 2)}</strong>
-              </div>
-              <div>
-                <span>Drawdown</span>
-                <strong>{formatMetric(card.latestBacktest.maxDrawdownPct, 2)}</strong>
-              </div>
-            </div>
+            </>
           ) : (
             <div className="portfolio-empty">No backtest has been run for this strategy yet.</div>
           )}
         </div>
 
-        {card.autoExecution.lastError && (
-          <div className="strategy-dashboard-inline-error">{card.autoExecution.lastError}</div>
-        )}
+        <div className="strategy-dashboard-inline-error-slot">
+          {card.autoExecution.lastError ? (
+            <div className="strategy-dashboard-inline-error">{card.autoExecution.lastError}</div>
+          ) : (
+            <div className="strategy-dashboard-inline-error strategy-dashboard-inline-error-placeholder" />
+          )}
+        </div>
 
         <div className="strategy-dashboard-card-actions">
           <button
@@ -767,7 +931,27 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
               type="button"
               className="strategy-agent-review-btn"
               disabled={togglingId === card.strategyId || deletingId === card.strategyId || !liveSupported}
-              onClick={() => setConfigStrategyId(configOpen ? null : card.strategyId)}
+              onClick={() => {
+                if (configOpen) {
+                  setConfigStrategyId(null);
+                  setActivationInitialCapital("");
+                  return;
+                }
+                setConfigStrategyId(card.strategyId);
+                setActivationMode(card.autoExecution.mode ?? "until_disabled");
+                setActivationExpiry(
+                  card.autoExecution.expiresAt
+                    ? new Date(new Date(card.autoExecution.expiresAt).getTime() - new Date().getTimezoneOffset() * 60_000)
+                        .toISOString()
+                        .slice(0, 16)
+                    : ""
+                );
+                setActivationInitialCapital(
+                  card.autoExecution.initialCapitalQuote
+                    ? String(card.autoExecution.initialCapitalQuote)
+                    : ""
+                );
+              }}
             >
               {card.autoExecution.status === "needs_reactivation" ? "Reactivate Auto" : "Enable Auto"}
             </button>
@@ -807,6 +991,21 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
                 />
               </label>
             )}
+            <label>
+              <span>Initial capital</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                inputMode="decimal"
+                placeholder="Optional"
+                value={activationInitialCapital}
+                onChange={(event) => setActivationInitialCapital(event.target.value)}
+              />
+            </label>
+            <div className="strategy-dashboard-inline-note">
+              If the strategy uses percent-of-equity sizing, this value becomes the capital base for live entries.
+            </div>
             <div className="strategy-dashboard-card-actions">
               <button
                 type="button"
@@ -819,7 +1018,10 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
               <button
                 type="button"
                 className="strategy-studio-secondary-link"
-                onClick={() => setConfigStrategyId(null)}
+                onClick={() => {
+                  setConfigStrategyId(null);
+                  setActivationInitialCapital("");
+                }}
               >
                 Cancel
               </button>
@@ -907,9 +1109,9 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
           {liveSummary ? (
             <div className="strategy-preview-stats">
               <div>
-                <span>PnL now</span>
-                <strong className={liveSummary.currentPnlQuote !== undefined && liveSummary.currentPnlQuote < 0 ? "order-side sell" : "order-side buy"}>
-                  {formatMetric(liveSummary.currentPnlQuote, 2)}
+                <span>PnL %</span>
+                <strong className={liveSummary.currentPnlPct !== undefined && liveSummary.currentPnlPct < 0 ? "order-side sell" : "order-side buy"}>
+                  {formatPercent(liveSummary.currentPnlPct, 2)}
                 </strong>
               </div>
               <div>
