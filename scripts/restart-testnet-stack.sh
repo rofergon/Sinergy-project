@@ -58,6 +58,16 @@ is_port_listening() {
   ss -ltn "( sport = :$port )" | grep -q ":$port"
 }
 
+service_state() {
+  local unit="$1"
+
+  if systemctl --user is-active --quiet "$unit"; then
+    echo active
+  else
+    echo inactive
+  fi
+}
+
 stop_rollup() {
   if systemctl --user is-active --quiet minitiad.service; then
     log "stopping rollup service"
@@ -286,10 +296,10 @@ start_all() {
 
 print_status() {
   log "service summary"
-  printf '  rollup:   %s\n' "$(systemctl --user is-active minitiad.service 2>/dev/null || echo inactive)"
-  printf '  executor: %s\n' "$(systemctl --user is-active opinitd.executor.service 2>/dev/null || echo inactive)"
+  printf '  rollup:   %s\n' "$(service_state minitiad.service)"
+  printf '  executor: %s\n' "$(service_state opinitd.executor.service)"
   printf '  relayer:  %s\n' "$(docker ps --format '{{.Names}}' | grep -qx 'weave-relayer' && echo active || echo inactive)"
-  printf '  matcher:  %s\n' "$(systemctl --user is-active sinergy-matcher.service 2>/dev/null || echo inactive) / $(is_http_ready "$MATCHER_HEALTH_URL" && echo ready || echo unavailable)"
+  printf '  matcher:  %s\n' "$(service_state sinergy-matcher.service) / $(is_http_ready "$MATCHER_HEALTH_URL" && echo ready || echo unavailable)"
   printf '  agent:    %s\n' "$(is_http_ready "$STRATEGY_AGENT_URL" && echo ready || echo unavailable)"
   printf '  web:      %s\n' "$(is_http_ready "$WEB_URL" && echo ready || echo unavailable)"
   printf '  bridge:   %s\n' "$(is_http_ready "$BRIDGE_URL" && echo ready || echo unavailable)"

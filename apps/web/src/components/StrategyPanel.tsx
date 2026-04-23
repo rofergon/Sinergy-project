@@ -1193,8 +1193,9 @@ export function StrategyPanel({
               <div className="se-section-head">
                 <div className="se-section-copy">
                   <strong>Active indicators</strong>
-                  <small>Parameters for the indicators used in the rules</small>
+                  <small>Shared indicator inputs. Changing one here updates every rule that uses the same signal.</small>
                 </div>
+                <span className="se-section-count">{activeIndicators.length} active</span>
               </div>
 
               {activeIndicators.length === 0 ? (
@@ -1210,8 +1211,10 @@ export function StrategyPanel({
                     return (
                       <div className="se-indicator-card" key={entry.key}>
                         <div className="se-indicator-card-head">
-                          <span className="se-indicator-dot" />
-                          <strong>{entry.label}</strong>
+                          <div className="se-indicator-title">
+                            <span className="se-indicator-dot" />
+                            <strong title={entry.label}>{entry.label}</strong>
+                          </div>
                           <span className="se-indicator-type-badge">{entry.output}</span>
                         </div>
                         <div className="se-indicator-params">
@@ -1262,12 +1265,15 @@ export function StrategyPanel({
               <div className="se-section-head">
                 <div className="se-section-copy">
                   <strong>Risk management</strong>
-                  <small>Automatic exits and execution costs</small>
+                  <small>Automatic exits, trade duration, and cost assumptions for backtests.</small>
                 </div>
               </div>
               <div className="se-risk-groups">
                 <div className="se-risk-subgroup exits">
-                  <span className="se-risk-kicker">Exits</span>
+                  <div className="se-risk-subgroup-head">
+                    <span className="se-risk-kicker">Exits</span>
+                    <small>Percent values are measured from entry price.</small>
+                  </div>
                   <div className="se-risk-grid">
                     <label className="se-risk-field">
                       <span>Stop Loss %</span>
@@ -1283,6 +1289,7 @@ export function StrategyPanel({
                           })
                         }
                       />
+                      <small>Closes when loss reaches this threshold.</small>
                     </label>
                     <label className="se-risk-field">
                       <span>Take Profit %</span>
@@ -1298,6 +1305,7 @@ export function StrategyPanel({
                           })
                         }
                       />
+                      <small>Locks profit once price reaches this gain.</small>
                     </label>
                     <label className="se-risk-field">
                       <span>Trailing Stop %</span>
@@ -1313,12 +1321,16 @@ export function StrategyPanel({
                           })
                         }
                       />
+                      <small>Follows favorable moves, then exits on pullback.</small>
                     </label>
                   </div>
                 </div>
 
                 <div className="se-risk-subgroup simulation">
-                  <span className="se-risk-kicker">Simulation</span>
+                  <div className="se-risk-subgroup-head">
+                    <span className="se-risk-kicker">Simulation</span>
+                    <small>Used only for validation and backtest calculations.</small>
+                  </div>
                   <div className="se-risk-grid-2">
                     <label className="se-risk-field">
                       <span>Max Bars</span>
@@ -1334,6 +1346,7 @@ export function StrategyPanel({
                           })
                         }
                       />
+                      <small>Maximum candles a trade can stay open.</small>
                     </label>
                     <label className="se-risk-field">
                       <span>Starting Equity</span>
@@ -1350,6 +1363,7 @@ export function StrategyPanel({
                           })
                         }
                       />
+                      <small>Base capital for simulated performance.</small>
                     </label>
                     <label className="se-risk-field">
                       <span>Fees (bps)</span>
@@ -1364,6 +1378,7 @@ export function StrategyPanel({
                           })
                         }
                       />
+                      <small>Exchange fee per trade. 100 bps equals 1%.</small>
                     </label>
                     <label className="se-risk-field">
                       <span>Slippage (bps)</span>
@@ -1378,6 +1393,7 @@ export function StrategyPanel({
                           })
                         }
                       />
+                      <small>Estimated price impact per execution.</small>
                     </label>
                   </div>
                 </div>
@@ -1394,7 +1410,15 @@ export function StrategyPanel({
               >
                 <div className="se-section-copy">
                   <strong>Trading rules</strong>
-                  <small>Entry and exit conditions by side</small>
+                  <small>
+                    {rulesExpanded
+                      ? "Entry and exit conditions by side."
+                      : `${draft.entryRules.long.length + draft.entryRules.short.length} entry blocks, ${draft.exitRules.long.length + draft.exitRules.short.length} exit blocks.`}
+                  </small>
+                </div>
+                <div className="se-rules-summary" aria-hidden="true">
+                  <span>{draft.enabledSides.map((s) => formatSideLabel(s)).join(" + ")}</span>
+                  <span>{rulesExpanded ? "Hide rules" : "Edit rules"}</span>
                 </div>
                 <span className={`se-toggle-arrow ${rulesExpanded ? "open" : ""}`} aria-hidden="true">
                   ▾
