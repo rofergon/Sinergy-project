@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSignTypedData } from "wagmi";
 import type { HexString, StrategyChartOverlay, StrategyEquityPoint, StrategyIndicatorKind } from "@sinergy/shared";
 import {
@@ -413,6 +413,7 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
   const [backtestOverlays, setBacktestOverlays] = useState<Record<string, StrategyChartOverlay | null>>({});
   const [previewExecutions, setPreviewExecutions] = useState<Record<string, StrategyExecutionRecord[]>>({});
   const [previewExecutionSummaries, setPreviewExecutionSummaries] = useState<Record<string, StrategyExecutionStrategySummary>>({});
+  const autoConfigRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const { signTypedDataAsync } = useSignTypedData();
 
   async function loadDashboard(options?: { silent?: boolean }) {
@@ -608,6 +609,17 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
       cancelled = true;
     };
   }, [address, previewCards]);
+
+  useEffect(() => {
+    if (!configStrategyId) {
+      return;
+    }
+
+    autoConfigRefs.current[configStrategyId]?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest"
+    });
+  }, [configStrategyId]);
 
   async function ensureSavedStrategy(card: StrategyDashboardCard) {
     if (!address) {
@@ -820,22 +832,6 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
           <span>{new Date(card.updatedAt).toLocaleDateString()}</span>
         </div>
 
-        <div className="strategy-dashboard-card-note-stack" aria-hidden={cardNotes.length === 0}>
-          {Array.from({ length: 2 }, (_, index) => {
-            const note = cardNotes[index];
-            return note ? (
-              <div key={`${card.strategyId}-note-${index}`} className="strategy-dashboard-inline-note">
-                {note}
-              </div>
-            ) : (
-              <div
-                key={`${card.strategyId}-note-${index}`}
-                className="strategy-dashboard-inline-note strategy-dashboard-inline-note-placeholder"
-              />
-            );
-          })}
-        </div>
-
         {card.autoExecution.status === "active" && (
           <div className="strategy-dashboard-live-strip">
             <span>Monitoring signals</span>
@@ -899,6 +895,22 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
           )}
         </div>
 
+        <div className="strategy-dashboard-card-note-stack" aria-hidden={cardNotes.length === 0}>
+          {Array.from({ length: 2 }, (_, index) => {
+            const note = cardNotes[index];
+            return note ? (
+              <div key={`${card.strategyId}-note-${index}`} className="strategy-dashboard-inline-note">
+                {note}
+              </div>
+            ) : (
+              <div
+                key={`${card.strategyId}-note-${index}`}
+                className="strategy-dashboard-inline-note strategy-dashboard-inline-note-placeholder"
+              />
+            );
+          })}
+        </div>
+
         <div className="strategy-dashboard-inline-error-slot">
           {card.autoExecution.lastError ? (
             <div className="strategy-dashboard-inline-error">{card.autoExecution.lastError}</div>
@@ -953,7 +965,11 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
                 );
               }}
             >
-              {card.autoExecution.status === "needs_reactivation" ? "Reactivate Auto" : "Enable Auto"}
+              {configOpen
+                ? "Close Config"
+                : card.autoExecution.status === "needs_reactivation"
+                  ? "Reactivate Auto"
+                  : "Enable Auto"}
             </button>
           )}
 
@@ -968,7 +984,12 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
         </div>
 
         {configOpen && liveSupported && (
-          <div className="strategy-dashboard-auto-config">
+          <div
+            className="strategy-dashboard-auto-config"
+            ref={(element) => {
+              autoConfigRefs.current[card.strategyId] = element;
+            }}
+          >
             <label>
               <span>Duration</span>
               <select
