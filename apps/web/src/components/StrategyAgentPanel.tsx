@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useInterwovenKit } from "@initia/interwovenkit-react";
 import { useSignTypedData } from "wagmi";
 import type {
   HexString,
@@ -28,6 +29,9 @@ import type {
   StrategyBacktestBundle
 } from "../types";
 import { fetchBacktestBundle } from "../lib/api";
+import { depositToSinergyRollup } from "../lib/bridgeDeposit";
+import { DEFAULT_SINERGY_BRIDGE_ASSET, resolveRollupRestUrl } from "../initia";
+import type { TxPopupData } from "./TransactionPopup";
 
 type Props = {
   address?: HexString;
@@ -37,9 +41,10 @@ type Props = {
   onBacktestResult: (result: StrategyBacktestBundle | null) => void;
   onTimeframeChange: (timeframe: StrategyTimeframe) => void;
   onReviewStrategy: (strategyId: string, bundle: StrategyBacktestBundle | null, runId?: string) => void;
-  onOpenBridge?: () => void;
   onStrategyStarted?: () => void;
   onConnect?: () => void;
+  initiaAddress?: string;
+  showTx?: (data: TxPopupData) => void;
 };
 
 type AgentMessage = {
@@ -356,16 +361,18 @@ function shouldAskStrategyClarification(goal: string) {
 
 export function StrategyAgentPanel({
   address,
+  initiaAddress,
   selectedMarket,
   selectedTimeframe,
   viewport,
   onBacktestResult,
   onTimeframeChange,
   onReviewStrategy,
-  onOpenBridge,
   onStrategyStarted,
-  onConnect
+  onConnect,
+  showTx
 }: Props) {
+  const { requestTxBlock } = useInterwovenKit();
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState<"plan" | "run" | null>(null);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
@@ -981,13 +988,13 @@ export function StrategyAgentPanel({
   }
 
   async function runStrategyAfterBridge(strategyId: string) {
-    if (!address) {
+    if (!address || !initiaAddress) {
       onConnect?.();
       return;
     }
 
     setExecutionBusy(true);
-    setStatus("Opening Initia bridge so you can fund this strategy...");
+    setStatus("Funding this strategy through the local OPinit deposit flow...");
 
     try {
       if (!approval || approval.strategyId !== strategyId) {
@@ -1021,8 +1028,36 @@ export function StrategyAgentPanel({
         setApproval(record);
       }
 
-      onOpenBridge?.();
-      setStatus("Bridge popup opened. Starting the strategy with available bridged capital...");
+      const bridgeAsset = DEFAULT_SINERGY_BRIDGE_ASSET;
+      if (!bridgeAsset) {
+        throw new Error("No bridge-backed asset is configured for this deployment.");
+      }
+
+      const bridgeAmount = "1";
+      setStatus(`Depositing ${bridgeAmount} ${bridgeAsset.sourceSymbol} to Sinergy through OPinit...`);
+      const deposit = await depositToSinergyRollup({
+        requestTxBlock,
+        initiaAddress,
+        amount: bridgeAmount,
+        bridgeAsset,
+        restUrl: resolveRollupRestUrl(),
+        onSubmitted: () => {
+          setStatus("Deposit submitted. Waiting for Sinergy balance before starting the strategy...");
+        }
+      });
+      const successMsg = deposit.creditedBalance !== null
+        ? `${bridgeAmount} ${bridgeAsset.sourceSymbol} arrived on Sinergy${deposit.sequence ? ` (deposit #${deposit.sequence})` : ""}.`
+        : `Deposit submitted${deposit.sequence ? ` as #${deposit.sequence}` : ""}; Sinergy balance may need a short moment to refresh.`;
+      showTx?.({
+        type: "bridge-success",
+        title: "Bridge Complete!",
+        message: successMsg,
+        amount: `${bridgeAmount} ${bridgeAsset.sourceSymbol}`,
+        operation: "Strategy Funding",
+        txHash: deposit.result.transactionHash,
+        duration: 10000
+      });
+      setStatus("Bridge funding submitted. Starting the strategy with available bridged capital...");
 
       await executeApprovedStrategy({
         ownerAddress: address,
