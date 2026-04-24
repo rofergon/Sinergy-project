@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { MsgInitiateTokenDeposit, MsgInitiateTokenDepositResponse } from "@initia/opinit.proto/opinit/ophost/v1/tx";
 import { useInterwovenKit } from "@initia/interwovenkit-react";
 import type { Address } from "viem";
 import { formatUnits, parseUnits } from "viem";
 import { api } from "../lib/api";
+import { depositToSinergyRollup } from "../lib/bridgeDeposit";
 import {
   DEFAULT_SINERGY_BRIDGE_ASSET,
   formatInitiaIdentity,
@@ -92,15 +92,6 @@ function formatMarketOnlyLabel(preview: BridgeClaimPreview | null) {
   const redeemableAtomic = BigInt(preview.redeemableAtomic);
   const marketOnlyAtomic = walletAtomic > redeemableAtomic ? walletAtomic - redeemableAtomic : 0n;
   return `${formatUnits(marketOnlyAtomic, preview.tokenDecimals)} ${preview.tokenSymbol}`;
-}
-
-async function queryRollupBalance(address: string, denom: string, restUrl: string) {
-  const response = await fetch(
-    `${restUrl}/cosmos/bank/v1beta1/balances/${address}/by_denom?denom=${encodeURIComponent(denom)}`
-  );
-  if (!response.ok) return 0n;
-  const payload = (await response.json()) as { balance?: { amount?: string } };
-  return BigInt(payload.balance?.amount ?? "0");
 }
 
 /** Spinner SVG */
@@ -193,16 +184,6 @@ export function BridgeLanding({
     [selectedBridgeAssetSymbol]
   );
 
-  async function waitForBridgeCredit(address: string, expectedIncrease: bigint, destinationDenom: string) {
-    const startingBalance = await queryRollupBalance(address, destinationDenom, rollupRestUrl);
-    for (let attempt = 0; attempt < 15; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 3_000));
-      const currentBalance = await queryRollupBalance(address, destinationDenom, rollupRestUrl);
-      if (currentBalance >= startingBalance + expectedIncrease) return currentBalance;
-    }
-    return null;
-  }
-
   async function handleBridgeToSinergy() {
     if (!initiaAddress) { onConnect(); return; }
     try {
@@ -212,41 +193,26 @@ export function BridgeLanding({
       setBridgeStatus("Preparing deposit to Sinergy…");
       const bridgeAsset = selectedBridgeAsset;
       if (!bridgeAsset) throw new Error("No bridge-backed asset is configured for this deployment.");
-      const amountAtomic = parseUnits(amount, bridgeAsset.sourceDecimals);
-      if (amountAtomic <= 0n) throw new Error(`Enter a positive ${bridgeAsset.sourceSymbol} amount.`);
-      const result = await requestTxBlock({
-        chainId: bridgeAsset.sourceChainId,
-        gas: 250_000,
-        messages: [{
-          typeUrl: "/opinit.ophost.v1.MsgInitiateTokenDeposit",
-          value: MsgInitiateTokenDeposit.fromPartial({
-            sender: initiaAddress,
-            bridgeId: SINERGY_BRIDGE_ID,
-            to: initiaAddress,
-            amount: { denom: bridgeAsset.sourceDenom, amount: amountAtomic.toString() },
-            data: new Uint8Array(0),
-          }),
-        }],
+      const deposit = await depositToSinergyRollup({
+        requestTxBlock,
+        initiaAddress,
+        amount,
+        bridgeAsset,
+        restUrl: rollupRestUrl,
+        onSubmitted: (result) => {
+          setTxHash(result.transactionHash);
+          setBridgeStatus("Deposit submitted. Waiting for Sinergy balance…");
+        },
       });
-      if (result.code !== 0) throw new Error(result.rawLog || "Bridge transaction failed.");
-      setTxHash(result.transactionHash);
-      const response = result.msgResponses.find(
-        (item) => item.typeUrl === "/opinit.ophost.v1.MsgInitiateTokenDepositResponse"
-      );
-      const sequence = response
-        ? MsgInitiateTokenDepositResponse.decode(response.value).sequence.toString()
-        : null;
-      setBridgeStatus("Deposit submitted. Waiting for Sinergy balance…");
-      const creditedBalance = await waitForBridgeCredit(initiaAddress, amountAtomic, bridgeAsset.destinationDenom);
-      if (creditedBalance !== null) {
-        const successMsg = `${amount} ${bridgeAsset.sourceSymbol} arrived on Sinergy${sequence ? ` (deposit #${sequence})` : ""}.`;
+      if (deposit.creditedBalance !== null) {
+        const successMsg = `${amount} ${bridgeAsset.sourceSymbol} arrived on Sinergy${deposit.sequence ? ` (deposit #${deposit.sequence})` : ""}.`;
         setBridgeStatusType("success");
         setBridgeStatus(`Bridge complete! ${successMsg}`);
-        showTx?.({ type: "bridge-success", title: "Bridge Complete!", message: successMsg, amount: `${amount} ${bridgeAsset.sourceSymbol}`, operation: "Bridge Deposit", txHash: result.transactionHash, duration: 10000 });
+        showTx?.({ type: "bridge-success", title: "Bridge Complete!", message: successMsg, amount: `${amount} ${bridgeAsset.sourceSymbol}`, operation: "Bridge Deposit", txHash: deposit.result.transactionHash, duration: 10000 });
         return;
       }
       setBridgeStatusType("success");
-      setBridgeStatus(`Deposit submitted${sequence ? ` as #${sequence}` : ""}. ${bridgeAsset.sourceSymbol} can take a short moment to appear on Sinergy.`);
+      setBridgeStatus(`Deposit submitted${deposit.sequence ? ` as #${deposit.sequence}` : ""}. ${bridgeAsset.sourceSymbol} can take a short moment to appear on Sinergy.`);
     } catch (error) {
       setBridgeStatusType("error");
       setBridgeStatus(error instanceof Error ? error.message : String(error));
