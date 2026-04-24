@@ -2,6 +2,20 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createStrategyToolRuntime } from "./strategyToolRuntime.js";
 
+test("agent-facing LangChain tools and catalog exclude destructive strategy deletion", () => {
+  const runtime = createStrategyToolRuntime({
+    transport: (async () => ({})) as any
+  });
+
+  const tools = runtime.createTrackedLangChainTools({
+    ownerAddress: "0x00000000000000000000000000000000000000c3",
+    trace: []
+  });
+
+  assert.equal(tools.some((entry) => entry.name === "delete_strategy"), false);
+  assert.equal(runtime.getCatalog().some((entry) => entry.name === "delete_strategy"), false);
+});
+
 test("tracked LangChain tools inject context, append trace entries, and persist artifacts to state", async () => {
   const calls: Array<{ tool: string; input: Record<string, unknown> }> = [];
   const runtime = createStrategyToolRuntime({
