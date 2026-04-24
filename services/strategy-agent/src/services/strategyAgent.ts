@@ -37,6 +37,7 @@ import {
   type StrategyToolRuntime
 } from "./strategyToolRuntime.js";
 import { attemptValidationRepair } from "./validationRepairLoop.js";
+import { filterAgentToolCatalog } from "./agentToolPolicy.js";
 
 type BasicFastPathConfig = {
   kind: "ema" | "template";
@@ -1867,7 +1868,7 @@ export class StrategyAgentService {
         toolcallRetries: this.options.toolcallRetries,
         forceFallbackJson: this.options.forceFallbackJson
       },
-      tools: toolCatalog?.result?.tools ?? this.toolRuntime.getCatalog()
+      tools: filterAgentToolCatalog(toolCatalog?.result?.tools ?? this.toolRuntime.getCatalog())
     };
   }
 
