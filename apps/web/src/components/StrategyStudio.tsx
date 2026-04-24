@@ -6,9 +6,11 @@ import { BacktestSummaryGrid } from "./BacktestResults";
 import { TradingViewChart } from "./TradingViewChart";
 import { StrategyPanel } from "./StrategyPanel";
 import { StrategyAgentPanel } from "./StrategyAgentPanel";
+import type { TxPopupData } from "./TransactionPopup";
 
 type Props = {
   address?: `0x${string}`;
+  initiaAddress?: string;
   markets: MarketSnapshot[];
   selectedMarketId?: `0x${string}`;
   timeframe: StrategyTimeframe;
@@ -21,13 +23,14 @@ type Props = {
     runId?: string;
     token: number;
   } | null;
-  onOpenBridge?: () => void;
   onStrategyStarted?: () => void;
   onConnect?: () => void;
+  showTx?: (data: TxPopupData) => void;
 };
 
 export function StrategyStudio({
   address,
+  initiaAddress,
   markets,
   selectedMarketId,
   timeframe,
@@ -36,9 +39,9 @@ export function StrategyStudio({
   strategyBacktest,
   onBacktestResult,
   reviewRequest,
-  onOpenBridge,
   onStrategyStarted,
   onConnect,
+  showTx,
 }: Props) {
   const [focusStrategyId, setFocusStrategyId] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
@@ -94,7 +97,14 @@ export function StrategyStudio({
               className="strategy-studio-secondary-link"
               onClick={() => setManualBuilderOpen((current) => !current)}
             >
-              {manualBuilderOpen ? "Back to agent" : "Edit strategy"}
+              {manualBuilderOpen ? (
+                <>
+                  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+                  Back to agent
+                </>
+              ) : (
+                "Edit strategy"
+              )}
             </button>
           </div>
         </div>
@@ -137,15 +147,16 @@ export function StrategyStudio({
               >
                 <StrategyAgentPanel
                   address={address}
+                  initiaAddress={initiaAddress}
                   selectedMarket={selectedMarket}
                   selectedTimeframe={timeframe}
                   viewport={viewport}
                   onBacktestResult={onBacktestResult}
                   onTimeframeChange={onTimeframeChange}
                   onReviewStrategy={reviewStrategy}
-                  onOpenBridge={onOpenBridge}
                   onStrategyStarted={onStrategyStarted}
                   onConnect={onConnect}
+                  showTx={showTx}
                 />
               </div>
 
@@ -160,13 +171,6 @@ export function StrategyStudio({
                       Edit the key parameters of your strategy: indicators, risk, and rules.
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    className="strategy-studio-secondary-link"
-                    onClick={() => setManualBuilderOpen(false)}
-                  >
-                    Back to agent
-                  </button>
                 </div>
                 <StrategyPanel
                   address={address}
