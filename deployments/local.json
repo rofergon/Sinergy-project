@@ -20,6 +20,9 @@
   "operator": {
     "matcherAddress": "0x6eC8AcC95Da5f752eCeAB1c214C1b62080023283"
   },
+  "opinit": {
+    "bridgeId": "1735"
+  },
   "contracts": {
     "vault": "0x3fF37bE2C8B8179cBfd97CB1e75fEd91e5e38B19",
     "market": "0xe1d9c4EcC2ba58274733C61Fb25919F0eA902575",
