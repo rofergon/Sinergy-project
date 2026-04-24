@@ -118,7 +118,8 @@ const initiaDexClient = new InitiaDexClient({
 });
 const bridgeHealthService = new BridgeHealthService({
   relayerHealthUrl: env.RELAYER_HEALTH_URL,
-  opinitHealthUrl: env.OPINIT_HEALTH_URL
+  opinitHealthUrl: env.OPINIT_HEALTH_URL,
+  requireRelayer: env.BRIDGE_REQUIRE_RELAYER
 });
 const bridgeClaimService = new BridgeClaimService({
   store,
