@@ -21,6 +21,9 @@ type Props = {
     runId?: string;
     token: number;
   } | null;
+  onOpenBridge?: () => void;
+  onStrategyStarted?: () => void;
+  onConnect?: () => void;
 };
 
 export function StrategyStudio({
@@ -33,6 +36,9 @@ export function StrategyStudio({
   strategyBacktest,
   onBacktestResult,
   reviewRequest,
+  onOpenBridge,
+  onStrategyStarted,
+  onConnect,
 }: Props) {
   const [focusStrategyId, setFocusStrategyId] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
@@ -163,6 +169,9 @@ export function StrategyStudio({
                 onBacktestResult={onBacktestResult}
                 onTimeframeChange={onTimeframeChange}
                 onReviewStrategy={reviewStrategy}
+                onOpenBridge={onOpenBridge}
+                onStrategyStarted={onStrategyStarted}
+                onConnect={onConnect}
               />
             )}
           </div>
