@@ -107,7 +107,16 @@ function runtimeWsUrl(port: number, subdomain?: string) {
 }
 
 export const SINERGY_ROLLUP_CHAIN_ID = deployment.network.rollupChainId;
-export const SINERGY_BRIDGE_ID = BigInt(import.meta.env.VITE_SINERGY_BRIDGE_ID ?? "1735");
+function resolveSinergyBridgeId() {
+  const bridgeId = deployment.opinit?.bridgeId;
+  if (bridgeId === undefined || bridgeId === null || String(bridgeId).trim() === "") {
+    throw new Error("Missing deployment.opinit.bridgeId for the Sinergy OPinit bridge.");
+  }
+
+  return BigInt(bridgeId);
+}
+
+export const SINERGY_BRIDGE_ID = resolveSinergyBridgeId();
 export const SINERGY_BRIDGE_ASSETS = deployment.tokens
   .filter((token) => token.bridge)
   .map((token) => ({
