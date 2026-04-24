@@ -39,6 +39,9 @@ export type DeploymentToken = {
 
 export type SinergyDeployment = {
   network: DeploymentNetwork;
+  opinit?: {
+    bridgeId: string | number;
+  };
   contracts: {
     vault: `0x${string}`;
     market: `0x${string}`;
