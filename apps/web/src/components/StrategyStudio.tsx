@@ -130,8 +130,29 @@ export function StrategyStudio({
           </div>
 
           <div className="strategy-studio-workspace-col">
-            {manualBuilderOpen ? (
-              <div className="strategy-studio-secondary-panel">
+            <div className="strategy-studio-workspace-stack">
+              <div
+                className={`strategy-studio-pane strategy-studio-agent-pane ${manualBuilderOpen ? "inactive" : "active"}`}
+                aria-hidden={manualBuilderOpen}
+              >
+                <StrategyAgentPanel
+                  address={address}
+                  selectedMarket={selectedMarket}
+                  selectedTimeframe={timeframe}
+                  viewport={viewport}
+                  onBacktestResult={onBacktestResult}
+                  onTimeframeChange={onTimeframeChange}
+                  onReviewStrategy={reviewStrategy}
+                  onOpenBridge={onOpenBridge}
+                  onStrategyStarted={onStrategyStarted}
+                  onConnect={onConnect}
+                />
+              </div>
+
+              <div
+                className={`strategy-studio-pane strategy-studio-builder-pane ${manualBuilderOpen ? "active" : "inactive"}`}
+                aria-hidden={!manualBuilderOpen}
+              >
                 <div className="strategy-studio-secondary-banner">
                   <div>
                     <strong>Strategy Editor</strong>
@@ -160,20 +181,7 @@ export function StrategyStudio({
                   refreshToken={refreshToken}
                 />
               </div>
-            ) : (
-              <StrategyAgentPanel
-                address={address}
-                selectedMarket={selectedMarket}
-                selectedTimeframe={timeframe}
-                viewport={viewport}
-                onBacktestResult={onBacktestResult}
-                onTimeframeChange={onTimeframeChange}
-                onReviewStrategy={reviewStrategy}
-                onOpenBridge={onOpenBridge}
-                onStrategyStarted={onStrategyStarted}
-                onConnect={onConnect}
-              />
-            )}
+            </div>
           </div>
         </div>
       </div>

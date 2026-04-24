@@ -515,6 +515,16 @@ export function StrategyAgentPanel({
         setSession(null);
         setHistory([]);
       }
+
+      if (persisted?.activeSessionId && !cancelled) {
+        try {
+          await loadSession(persisted.activeSessionId, { updateStatus: false });
+        } catch {
+          if (!cancelled) {
+            setStatus("Could not restore the previous agent session.");
+          }
+        }
+      }
     }
 
     void loadWorkspace();
