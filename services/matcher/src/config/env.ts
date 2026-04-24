@@ -32,6 +32,10 @@ const envSchema = z.object({
   RELAYER_HEALTH_URL: z.string().optional(),
   OPINIT_HEALTH_URL: z.string().optional(),
   OPINIT_BRIDGE_ID: z.string().optional(),
+  BRIDGE_REQUIRE_RELAYER: z
+    .enum(["true", "false", "1", "0"])
+    .default("true")
+    .transform((value) => value === "true" || value === "1"),
   BRIDGED_INIT_DENOM: z
     .string()
     .default("l2/7835b9ce5f65720a12cd653306cfe00afb93dcf1b73e69eb5eeddc568fc455cf"),
