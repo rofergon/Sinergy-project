@@ -1,11 +1,11 @@
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { StrategyToolName, StrategyDefinition } from "@sinergy/shared";
-import { strategyToolDefinitions } from "@sinergy/shared";
 import type { AgentArtifacts, AgentExecutionMetrics, AgentSessionSnapshot, AgentToolTraceEntry } from "../types.js";
 import { buildFallbackPlannerPrompt } from "../prompts.js";
 import { createEmptyMetrics, hasSemanticStall, summarizeToolProgress, summarizeTraceEntryForPrompt, type AgentDecision } from "./runtimePolicy.js";
 import { attemptValidationRepair } from "./validationRepairLoop.js";
 import { mergeToolContext } from "./toolInputContext.js";
+import { getAgentToolCatalog, isAgentToolAllowed } from "./agentToolPolicy.js";
 
 function extractJsonObject(text: string) {
   const start = text.indexOf("{");
@@ -80,10 +80,7 @@ export async function runFallbackJsonLoop(options: {
 }) {
   const warnings: string[] = [];
   const metrics = options.metrics ?? createEmptyMetrics();
-  const toolsCatalog = strategyToolDefinitions.map((definition) => ({
-    name: definition.name,
-    description: definition.description
-  }));
+  const toolsCatalog = getAgentToolCatalog();
   let finalMessage = "";
   let artifacts: AgentArtifacts = {};
   let activeStrategyId = options.strategyId ?? options.session?.strategyId;
@@ -139,7 +136,14 @@ export async function runFallbackJsonLoop(options: {
       break;
     }
 
-    if (!strategyToolDefinitions.find((entry) => entry.name === decision.next_tool)) {
+    if (!isAgentToolAllowed(decision.next_tool)) {
+      console.log(`[FALLBACK] Step ${index + 1} blocked tool: ${decision.next_tool}`);
+      warnings.push(`Fallback planner proposed blocked tool ${decision.next_tool}.`);
+      metrics.toolMisuseCount += 1;
+      continue;
+    }
+
+    if (!toolsCatalog.find((entry) => entry.name === decision.next_tool)) {
       console.log(`[FALLBACK] Step ${index + 1} unknown tool: ${decision.next_tool}`);
       warnings.push("Fallback planner proposed an unknown tool.");
       metrics.toolMisuseCount += 1;
@@ -149,7 +153,8 @@ export async function runFallbackJsonLoop(options: {
     const toolInput = mergeToolContext(decision.next_tool, decision.input ?? {}, {
       ownerAddress: options.ownerAddress,
       marketId: options.marketId,
-      strategyId: activeStrategyId
+      strategyId: activeStrategyId,
+      runId: activeRunId
     });
     console.log(`[FALLBACK] Step ${index + 1} invoking ${decision.next_tool} with input:`, JSON.stringify(toolInput).slice(0, 300));
     const repeatKey = `${decision.next_tool}:${JSON.stringify(toolInput)}`;
