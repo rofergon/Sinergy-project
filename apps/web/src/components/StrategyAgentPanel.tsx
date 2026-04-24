@@ -37,6 +37,9 @@ type Props = {
   onBacktestResult: (result: StrategyBacktestBundle | null) => void;
   onTimeframeChange: (timeframe: StrategyTimeframe) => void;
   onReviewStrategy: (strategyId: string, bundle: StrategyBacktestBundle | null, runId?: string) => void;
+  onOpenBridge?: () => void;
+  onStrategyStarted?: () => void;
+  onConnect?: () => void;
 };
 
 type AgentMessage = {
@@ -358,7 +361,10 @@ export function StrategyAgentPanel({
   viewport,
   onBacktestResult,
   onTimeframeChange,
-  onReviewStrategy
+  onReviewStrategy,
+  onOpenBridge,
+  onStrategyStarted,
+  onConnect
 }: Props) {
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState<"plan" | "run" | null>(null);
@@ -373,6 +379,7 @@ export function StrategyAgentPanel({
   const [approvalBusy, setApprovalBusy] = useState(false);
   const [executionBusy, setExecutionBusy] = useState(false);
   const [approval, setApproval] = useState<StrategyApprovalRecord | null>(null);
+  const [changeRequestByMessage, setChangeRequestByMessage] = useState<Record<string, string>>({});
   const [clarifierOpen, setClarifierOpen] = useState(false);
   const [clarifierMode, setClarifierMode] = useState<"plan" | "run" | null>(null);
   const [clarifierGoal, setClarifierGoal] = useState("");
@@ -888,7 +895,7 @@ export function StrategyAgentPanel({
 
   async function authorizeOnchainExecution() {
     if (!address || !session?.strategyId) {
-      return;
+      throw new Error("Connect wallet and create a strategy before authorizing execution.");
     }
 
     setApprovalBusy(true);
@@ -963,11 +970,221 @@ export function StrategyAgentPanel({
     }
   }
 
+  async function runStrategyAfterBridge(strategyId: string) {
+    if (!address) {
+      onConnect?.();
+      return;
+    }
+
+    setExecutionBusy(true);
+    setStatus("Opening Initia bridge so you can fund this strategy...");
+
+    try {
+      if (!approval || approval.strategyId !== strategyId) {
+        setStatus("Preparing execution approval before bridge funding...");
+        const intent = await createStrategyExecutionIntent({
+          ownerAddress: address,
+          strategyId
+        });
+
+        const signature = await signTypedDataAsync({
+          domain: intent.domain,
+          types: intent.types,
+          primaryType: intent.primaryType,
+          message: {
+            owner: intent.message.owner,
+            strategyIdHash: intent.message.strategyIdHash,
+            strategyHash: intent.message.strategyHash,
+            marketId: intent.message.marketId,
+            maxSlippageBps: BigInt(intent.message.maxSlippageBps),
+            nonce: BigInt(intent.message.nonce),
+            deadline: BigInt(intent.message.deadline)
+          }
+        });
+
+        const record = await saveStrategyExecutionApproval({
+          ownerAddress: address,
+          strategyId,
+          message: intent.message,
+          signature
+        });
+        setApproval(record);
+      }
+
+      onOpenBridge?.();
+      setStatus("Bridge popup opened. Starting the strategy with available bridged capital...");
+
+      await executeApprovedStrategy({
+        ownerAddress: address,
+        strategyId
+      });
+
+      setApproval(null);
+      setStatus("Strategy run started. Opening live strategy monitoring...");
+      onStrategyStarted?.();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setExecutionBusy(false);
+    }
+  }
+
+  function requestAgentChange(messageId: string, strategyId: string) {
+    const changeRequest = changeRequestByMessage[messageId]?.trim();
+    if (!changeRequest) {
+      setStatus("Tell the agent what you want to change first.");
+      return;
+    }
+
+    setPrompt(`Modify strategy ${shortId(strategyId)}: ${changeRequest}`);
+    setChangeRequestByMessage((current) => ({
+      ...current,
+      [messageId]: ""
+    }));
+    setStatus("Change request loaded. Send it when ready.");
+    promptTextareaRef.current?.focus();
+  }
+
+  function renderStrategyNextActions(message: AgentMessage) {
+    if (message.role !== "assistant" || !message.strategyId) {
+      return null;
+    }
+
+    const changeValue = changeRequestByMessage[message.id] ?? "";
+
+    return (
+      <div className="sam-next-actions">
+        <div className="sam-next-actions-head">
+          <strong>What do you want to do with this strategy?</strong>
+          <small>Review it manually, ask the agent for a change, or fund and start the run.</small>
+        </div>
+        <div className="sam-next-action-grid">
+          <button
+            type="button"
+            className="sam-next-action-btn"
+            onClick={() => onReviewStrategy(message.strategyId!, message.bundle ?? null, message.bundle?.summary.runId)}
+          >
+            <span className="sam-next-action-icon" aria-hidden="true">✎</span>
+            <span>
+              <strong>Manual Edit</strong>
+              <small>Open Strategy Builder</small>
+            </span>
+          </button>
+          <button
+            type="button"
+            className="sam-next-action-btn sam-next-action-run"
+            onClick={() => void runStrategyAfterBridge(message.strategyId!)}
+            disabled={executionBusy || approvalBusy || busy !== null}
+          >
+            <span className="sam-next-action-icon" aria-hidden="true">▶</span>
+            <span>
+              <strong>{executionBusy ? "Starting..." : "Run Strategy"}</strong>
+              <small>Bridge testnet INIT to Sinergy-2</small>
+            </span>
+          </button>
+        </div>
+        <div className="sam-change-request">
+          <input
+            type="text"
+            value={changeValue}
+            onChange={(event) =>
+              setChangeRequestByMessage((current) => ({
+                ...current,
+                [message.id]: event.target.value
+              }))
+            }
+            placeholder="Tell the agent what to change..."
+          />
+          <button
+            type="button"
+            onClick={() => requestAgentChange(message.id, message.strategyId!)}
+            disabled={busy !== null || !changeValue.trim()}
+          >
+            Ask Agent
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!address) {
     return (
       <div className="strategy-agent-panel">
-        <div className="strategy-empty-state">
-          Connect wallet to start a strategy conversation with the agent.
+        <div className="sap-head-bar">
+          <div className="sap-head-left">
+            <span className="panel-title sap-title">Agent Workspace</span>
+            <p className="sap-subtitle">
+              Explore the strategy agent first. Connect your wallet when you are ready to build,
+              backtest, and save a real session.
+            </p>
+          </div>
+          <div className="sap-head-chips">
+            {selectedMarket && (
+              <span className="sap-chip sap-chip-market">
+                <span className="sap-chip-dot" />
+                {selectedMarket.symbol}
+              </span>
+            )}
+            <span className="sap-chip">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8"/><path d="M12 7v5l3 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+              {selectedTimeframe}
+            </span>
+            <span className="sap-chip sap-chip-badge offline">
+              <span className="sap-badge-led led-off" />
+              Wallet required
+            </span>
+          </div>
+        </div>
+
+        <div className="strategy-agent-workspace strategy-agent-preview">
+          <div className="strategy-agent-main">
+            <div className="sap-toolbar">
+              <div className="sap-toolbar-info">
+                <strong>Conversation</strong>
+                <small>A wallet unlocks live market context, saved sessions, and execution approvals.</small>
+              </div>
+              <div className="sap-toolbar-actions">
+                <button type="button" className="sap-action-btn sap-action-primary" onClick={onConnect}>
+                  Connect Wallet
+                </button>
+              </div>
+            </div>
+
+            <div className="strategy-agent-thread strategy-agent-preview-thread">
+              <div className="sam-row">
+                <div className="sam-avatar sam-avatar-agent" aria-hidden="true">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 3l2.1 4.25L18.8 8l-3.4 3.3.8 4.7L12 13.8 7.8 16l.8-4.7L5.2 8l4.7-.75L12 3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+                  </svg>
+                </div>
+                <div className="sam-bubble strategy-agent-preview-bubble">
+                  <div className="sam-meta-top">
+                    <span className="sam-role-label">Agent</span>
+                    <span className="sam-mode-tag sam-mode-plan">Preview</span>
+                  </div>
+                  <p className="sam-text">
+                    Hi, I can help you turn a trading idea into a validated strategy. To start a
+                    real run, connect your wallet so I can create a private session, read the
+                    selected market, and save the backtest to your address.
+                  </p>
+                  <div className="strategy-agent-preview-prompts" aria-label="Example prompts">
+                    <span>Try: build a conservative BTC breakout strategy</span>
+                    <span>Try: backtest an ETH mean reversion setup</span>
+                    <span>Try: protect downside with a clear stop loss</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="strategy-agent-compose strategy-agent-preview-compose">
+              <div className="strategy-agent-locked-input">
+                <span>Connect your wallet to message the agent</span>
+                <button type="button" className="sap-action-btn sap-action-primary" onClick={onConnect}>
+                  Connect
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -1265,19 +1482,11 @@ export function StrategyAgentPanel({
                               <div className="sam-bc-metric"><span>Max DD</span><strong className={maxDd !== null && maxDd > 20 ? "bc-warn" : ""}>{maxDd !== null ? `${maxDd.toFixed(1)}%` : "--"}</strong></div>
                               {pf !== null && <div className="sam-bc-metric"><span>PF</span><strong className={pf >= 1.5 ? "bc-good" : ""}>{pf.toFixed(2)}</strong></div>}
                             </div>
-                            <button type="button" className="sam-bc-open-btn" onClick={() => onReviewStrategy(message.strategyId!, message.bundle ?? null, message.bundle?.summary.runId)}>
-                              Review in Strategy Builder →
-                            </button>
                           </div>
                         );
                       })()}
 
-                      {/* Review btn (no bundle) */}
-                      {message.strategyId && !message.bundle && (
-                        <button type="button" className="sam-review-btn" onClick={() => onReviewStrategy(message.strategyId!, message.bundle ?? null, message.bundle?.summary.runId)}>
-                          Open in Builder →
-                        </button>
-                      )}
+                      {renderStrategyNextActions(message)}
                     </div>
 
                     {isUser && (
