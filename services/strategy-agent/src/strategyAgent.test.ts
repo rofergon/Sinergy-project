@@ -97,6 +97,105 @@ test("fallback loop aborts repeated stalled tool calls", async () => {
   assert.equal(trace.length, 2);
 });
 
+test("fallback loop hides blocked tools from the planner catalog", async () => {
+  let capturedPrompt = "";
+
+  await runFallbackJsonLoop({
+    model: {
+      invoke: async () => ({ content: '{"type":"final","message":"Done"}' })
+    } as any,
+    goal: "Create a safe strategy",
+    ownerAddress: "0x00000000000000000000000000000000000000c3",
+    maxSteps: 1,
+    trace: [],
+    invokeText: async (prompt) => {
+      capturedPrompt = prompt;
+      return '{"type":"final","message":"Done"}';
+    },
+    invokeTool: async () => {
+      throw new Error("No tool should be called.");
+    }
+  });
+
+  assert.doesNotMatch(capturedPrompt, /delete_strategy/);
+});
+
+test("fallback loop rejects blocked strategy deletion without invoking transport", async () => {
+  let plannerCalls = 0;
+  let transportCalls = 0;
+
+  const result = await runFallbackJsonLoop({
+    model: {
+      invoke: async () => ({ content: '{"type":"final","message":"Done"}' })
+    } as any,
+    goal: "Delete a strategy",
+    ownerAddress: "0x00000000000000000000000000000000000000c3",
+    maxSteps: 2,
+    trace: [],
+    invokeText: async () => {
+      plannerCalls += 1;
+      return plannerCalls === 1
+        ? '{"type":"tool","goal_state":"delete","tool":"delete_strategy","input":{"strategyId":"11111111-1111-4111-8111-111111111111"},"reason":"User asked to delete","expected_artifact":"deleted strategy","stop_condition":"strategy deleted"}'
+        : '{"type":"final","message":"Done"}';
+    },
+    invokeTool: async () => {
+      transportCalls += 1;
+      return {};
+    }
+  });
+
+  assert.equal(transportCalls, 0);
+  assert.match(result.warnings.join("\n"), /blocked tool delete_strategy/);
+  assert.equal(result.metrics.toolMisuseCount, 1);
+});
+
+test("fallback loop injects active runId into backtest follow-up tools", async () => {
+  const trace: any[] = [];
+  const calls: Array<{ tool: string; input: Record<string, unknown> }> = [];
+  const runId = "22222222-2222-4222-8222-222222222222";
+
+  await runFallbackJsonLoop({
+    model: {
+      invoke: async () => ({ content: '{"type":"final","message":"Done"}' })
+    } as any,
+    goal: "Summarize latest backtest",
+    ownerAddress: "0x00000000000000000000000000000000000000c3",
+    session: {
+      sessionId: "session-1",
+      ownerAddress: "0x00000000000000000000000000000000000000c3",
+      runId,
+      createdAt: "2026-04-24T00:00:00.000Z",
+      updatedAt: "2026-04-24T00:00:00.000Z",
+      turnCount: 0,
+      recentTurns: []
+    },
+    maxSteps: 2,
+    trace,
+    invokeText: async () =>
+      calls.length === 0
+        ? '{"type":"tool","goal_state":"read summary","tool":"get_backtest_summary","input":{},"reason":"Need latest summary","expected_artifact":"summary","stop_condition":"summary loaded"}'
+        : '{"type":"final","message":"Done"}',
+    invokeTool: async (tool, input) => {
+      calls.push({ tool, input });
+      return {
+        summary: {
+          runId,
+          tradeCount: 4
+        }
+      };
+    }
+  });
+
+  assert.deepEqual(calls[0], {
+    tool: "get_backtest_summary",
+    input: {
+      ownerAddress: "0x00000000000000000000000000000000000000c3",
+      runId
+    }
+  });
+  assert.equal(trace[0]?.input?.runId, runId);
+});
+
 test("creation fast path compiles engine-backed source before drafting", async () => {
   const tempDir = mkdtempSync(join(tmpdir(), "strategy-agent-test-"));
   const service = new StrategyAgentService({
