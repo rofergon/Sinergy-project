@@ -23,7 +23,7 @@ type Props = {
     runId?: string;
     token: number;
   } | null;
-  onStrategyStarted?: () => void;
+  onStrategyStarted?: (strategyId: string) => void;
   onConnect?: () => void;
   showTx?: (data: TxPopupData) => void;
 };

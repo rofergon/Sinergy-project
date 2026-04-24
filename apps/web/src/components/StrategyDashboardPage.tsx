@@ -25,6 +25,7 @@ import { TradingViewChart } from "./TradingViewChart";
 type Props = {
   address?: HexString;
   markets: MarketSnapshot[];
+  highlightedStrategyId?: string | null;
   onOpenStrategy: (strategyId: string, runId?: string) => void;
 };
 
@@ -431,10 +432,11 @@ function liveTradeOverlay(
   };
 }
 
-export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Props) {
+export function StrategyDashboardPage({ address, markets, highlightedStrategyId, onOpenStrategy }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [cards, setCards] = useState<StrategyDashboardCard[]>([]);
+  const [visibleHighlightId, setVisibleHighlightId] = useState<string | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -447,6 +449,7 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
   const [previewExecutions, setPreviewExecutions] = useState<Record<string, StrategyExecutionRecord[]>>({});
   const [previewExecutionSummaries, setPreviewExecutionSummaries] = useState<Record<string, StrategyExecutionStrategySummary>>({});
   const autoConfigRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const strategyCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const { signTypedDataAsync } = useSignTypedData();
 
   async function loadDashboard(options?: { silent?: boolean }) {
@@ -654,6 +657,40 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
     });
   }, [configStrategyId]);
 
+  useEffect(() => {
+    if (!highlightedStrategyId) {
+      return;
+    }
+
+    setVisibleHighlightId(highlightedStrategyId);
+    const scrollTimer = window.setTimeout(() => {
+      strategyCardRefs.current[highlightedStrategyId]?.scrollIntoView({
+        behavior: "smooth",
+        block: "center"
+      });
+    }, 80);
+
+    const timer = window.setTimeout(() => {
+      setVisibleHighlightId((current) => (current === highlightedStrategyId ? null : current));
+    }, 3_000);
+
+    return () => {
+      window.clearTimeout(scrollTimer);
+      window.clearTimeout(timer);
+    };
+  }, [highlightedStrategyId]);
+
+  useEffect(() => {
+    if (!visibleHighlightId) {
+      return;
+    }
+
+    strategyCardRefs.current[visibleHighlightId]?.scrollIntoView({
+      behavior: "smooth",
+      block: "center"
+    });
+  }, [cards, visibleHighlightId]);
+
   async function ensureSavedStrategy(card: StrategyDashboardCard) {
     if (!address) {
       throw new Error("Connect wallet to manage strategies.");
@@ -847,6 +884,9 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
       <article
         className={`strategy-dashboard-card strategy-dashboard-library-card ${options?.spotlight ? "spotlight" : ""}`}
         key={card.strategyId}
+        ref={(element) => {
+          strategyCardRefs.current[card.strategyId] = element;
+        }}
       >
         <div className="strategy-dashboard-card-head">
           <div>
@@ -1075,7 +1115,10 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
     return (
       <article
         key={card.strategyId}
-        className="strategy-preview-tile"
+        className={`strategy-preview-tile ${visibleHighlightId === card.strategyId ? "spotlight" : ""}`}
+        ref={(element) => {
+          strategyCardRefs.current[card.strategyId] = element;
+        }}
         style={{ animationDelay: `${index * 90}ms` }}
       >
         <div className="strategy-preview-tile-head">
@@ -1251,7 +1294,9 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
           {cards.length === 0 ? (
             <div className="portfolio-empty">No strategies available for this wallet yet.</div>
           ) : (
-            inactiveCards.map((card) => renderStrategyCard(card))
+            inactiveCards.map((card) =>
+              renderStrategyCard(card, { spotlight: visibleHighlightId === card.strategyId })
+            )
           )}
         </div>
       </section>

@@ -71,6 +71,7 @@ function Dashboard() {
     runId?: string;
     token: number;
   } | null>(null);
+  const [highlightedStrategyId, setHighlightedStrategyId] = useState<string | null>(null);
   const { popup, showTx, closeTx } = useTransactionPopup();
 
   const userAddress = address as Address | undefined;
@@ -271,6 +272,7 @@ function Dashboard() {
         <StrategyDashboardPage
           address={userAddress}
           markets={marketSnapshots}
+          highlightedStrategyId={highlightedStrategyId}
           onOpenStrategy={(strategyId, runId) => {
             setStrategyReviewRequest({
               strategyId,
@@ -292,7 +294,10 @@ function Dashboard() {
           strategyBacktest={strategyBacktest}
           onBacktestResult={setStrategyBacktest}
           reviewRequest={strategyReviewRequest}
-          onStrategyStarted={() => setActiveView("strategies")}
+          onStrategyStarted={(strategyId) => {
+            setHighlightedStrategyId(strategyId);
+            setActiveView("strategies");
+          }}
           onConnect={handleConnect}
           showTx={showTx}
         />

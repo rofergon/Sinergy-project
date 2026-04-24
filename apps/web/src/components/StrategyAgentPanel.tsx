@@ -12,6 +12,7 @@ import type {
 import {
   agentApi,
   agentApiStream,
+  activateStrategyAutoExecution,
   createStrategyExecutionIntent,
   executeApprovedStrategy,
   fetchStrategyExecutionApproval,
@@ -42,7 +43,7 @@ type Props = {
   onBacktestResult: (result: StrategyBacktestBundle | null) => void;
   onTimeframeChange: (timeframe: StrategyTimeframe) => void;
   onReviewStrategy: (strategyId: string, bundle: StrategyBacktestBundle | null, runId?: string) => void;
-  onStrategyStarted?: () => void;
+  onStrategyStarted?: (strategyId: string) => void;
   onConnect?: () => void;
   initiaAddress?: string;
   showTx?: (data: TxPopupData) => void;
@@ -123,6 +124,10 @@ function buildMessageId() {
 function shortId(value?: string) {
   if (!value) return "--";
   return value.length <= 14 ? value : `${value.slice(0, 8)}...${value.slice(-4)}`;
+}
+
+function tenYearsInSeconds() {
+  return 60 * 60 * 24 * 365 * 10;
 }
 
 function readPersistedAgentState(storageKey: string): PersistedAgentState | null {
@@ -1033,11 +1038,18 @@ export function StrategyAgentPanel({
     try {
       await ensureStrategySavedForExecution(strategyId);
 
-      if (!approval || approval.strategyId !== strategyId) {
+      const approvalValidForSeconds = tenYearsInSeconds();
+      const approvalRemainingSeconds =
+        approval?.strategyId === strategyId
+          ? Math.floor((Number(approval.deadline) * 1000 - Date.now()) / 1000)
+          : 0;
+
+      if (approvalRemainingSeconds < approvalValidForSeconds - 60) {
         setStatus("Preparing execution approval before bridge funding...");
         const intent = await createStrategyExecutionIntent({
           ownerAddress: address,
-          strategyId
+          strategyId,
+          validForSeconds: approvalValidForSeconds
         });
 
         const signature = await signTypedDataAsync({
@@ -1093,7 +1105,15 @@ export function StrategyAgentPanel({
         txHash: deposit.result.transactionHash,
         duration: 10000
       });
-      setStatus("Bridge funding submitted. Starting the strategy with available bridged capital...");
+      setStatus("Bridge funding submitted. Activating automatic strategy execution...");
+
+      await activateStrategyAutoExecution({
+        ownerAddress: address,
+        strategyId,
+        mode: "until_disabled"
+      });
+
+      setStatus("Automatic strategy execution is active. Running the first check now...");
 
       await executeApprovedStrategy({
         ownerAddress: address,
@@ -1101,8 +1121,8 @@ export function StrategyAgentPanel({
       });
 
       setApproval(null);
-      setStatus("Strategy run started. Opening live strategy monitoring...");
-      onStrategyStarted?.();
+      setStatus("Strategy is active. Opening live strategy monitoring...");
+      onStrategyStarted?.(strategyId);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     } finally {
