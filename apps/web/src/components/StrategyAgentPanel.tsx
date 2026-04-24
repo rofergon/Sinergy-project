@@ -15,7 +15,8 @@ import {
   createStrategyExecutionIntent,
   executeApprovedStrategy,
   fetchStrategyExecutionApproval,
-  saveStrategyExecutionApproval
+  saveStrategyExecutionApproval,
+  strategyTool
 } from "../lib/api";
 import type {
   ChartViewport,
@@ -910,6 +911,37 @@ export function StrategyAgentPanel({
     onBacktestResult(null);
   }
 
+  async function ensureStrategySavedForExecution(strategyId: string) {
+    if (!address) {
+      throw new Error("Connect wallet to save the strategy before execution.");
+    }
+
+    setStatus("Saving strategy before live execution...");
+    const result = await strategyTool<{
+      strategy: { status: string; id: string; name: string };
+      validation: {
+        ok: boolean;
+        issues: Array<{ message: string }>;
+      };
+    }>("save_strategy", {
+      ownerAddress: address,
+      strategyId
+    });
+
+    if (!result.validation.ok) {
+      const issueText = result.validation.issues.map((issue) => issue.message).join("; ");
+      throw new Error(
+        issueText
+          ? `The strategy could not be saved for execution: ${issueText}`
+          : "The strategy could not be saved for execution."
+      );
+    }
+
+    if (result.strategy.status !== "saved") {
+      throw new Error("The strategy is still not saved, so it cannot be used for live execution yet.");
+    }
+  }
+
   async function authorizeOnchainExecution() {
     if (!address || !session?.strategyId) {
       throw new Error("Connect wallet and create a strategy before authorizing execution.");
@@ -919,6 +951,8 @@ export function StrategyAgentPanel({
     setStatus("Preparing onchain authorization...");
 
     try {
+      await ensureStrategySavedForExecution(session.strategyId);
+
       const intent = await createStrategyExecutionIntent({
         ownerAddress: address,
         strategyId: session.strategyId
@@ -997,6 +1031,8 @@ export function StrategyAgentPanel({
     setStatus("Funding this strategy through the local OPinit deposit flow...");
 
     try {
+      await ensureStrategySavedForExecution(strategyId);
+
       if (!approval || approval.strategyId !== strategyId) {
         setStatus("Preparing execution approval before bridge funding...");
         const intent = await createStrategyExecutionIntent({
