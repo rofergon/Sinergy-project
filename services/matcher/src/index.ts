@@ -537,6 +537,16 @@ app.get("/strategy/execution/:strategyId", async (request, reply) => {
     };
   } catch (error) {
     const payload = toStrategyToolErrorPayload(error, "strategy_execution_get");
+    if (
+      payload.body.error.code === "strategy_approval_not_found" ||
+      payload.body.error.code === "stale_strategy_approval" ||
+      payload.body.error.code === "expired_strategy_approval"
+    ) {
+      return {
+        ok: true,
+        result: null
+      };
+    }
     reply.code(payload.statusCode);
     return payload.body;
   }

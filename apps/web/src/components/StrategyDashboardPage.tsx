@@ -691,8 +691,10 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
 
     try {
       const approval = await fetchStrategyExecutionApproval(address, strategyId);
-      const remainingSeconds = Math.floor((Number(approval.deadline) * 1000 - Date.now()) / 1000);
-      if (remainingSeconds >= Math.max(60, validForSeconds - 60)) {
+      const remainingSeconds = approval
+        ? Math.floor((Number(approval.deadline) * 1000 - Date.now()) / 1000)
+        : 0;
+      if (approval && remainingSeconds >= Math.max(60, validForSeconds - 60)) {
         return approval;
       }
     } catch {
