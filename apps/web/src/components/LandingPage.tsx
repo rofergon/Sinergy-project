@@ -231,10 +231,11 @@ export function LandingPage({ onConnect }: Props) {
 
         {/* Hero */}
         <section className="landing-hero">
-          <div className="landing-badge">
-            <span className="landing-badge-dot" />
-            Built on Initia — Interwoven Rollup
-          </div>
+          <img
+            className="landing-hero-logo"
+            src={theme === "dark" ? logoDarkUrl : logoLightUrl}
+            alt="Sinergy"
+          />
 
           <h1 className="landing-title">
             Trade privately.
