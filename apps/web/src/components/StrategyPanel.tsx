@@ -1156,35 +1156,41 @@ export function StrategyPanel({
                 <span className="se-header-icon">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
                 </span>
-                <input
-                  type="text"
-                  className="se-header-name-input"
-                  value={draft.name}
-                  onChange={(event) =>
-                    setDraft({ ...cloneStrategy(draft), name: event.target.value, updatedAt: new Date().toISOString() })
-                  }
-                  spellCheck={false}
-                />
-              </div>
-              <div className="se-header-chips">
-                <span className="se-chip">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: 4}}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                  {selectedMarket?.symbol ?? "--"}
-                </span>
-                <span className="se-chip">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: 4}}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                  {formatTimeframe(timeframe)}
-                </span>
-                <span className="se-chip">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: 4}}><path d="M7 16V4M7 4L3 8M7 4L11 8M17 8V20M17 20L21 16M17 20L13 16"/></svg>
-                  {draft.enabledSides.map((s) => formatSideLabel(s)).join(" + ")}
-                </span>
-                <span className={`se-chip ${draft.status === "saved" ? "se-chip-ok" : "se-chip-draft"}`}>
-                  {draft.status === "saved" ? "Saved" : "Draft"}
-                </span>
-                {isDirty && (
-                  <span className="se-chip se-chip-dirty">Unsaved Changes</span>
-                )}
+                <div className="se-header-title-stack">
+                  <input
+                    type="text"
+                    className="se-header-name-input"
+                    value={draft.name}
+                    onChange={(event) =>
+                      setDraft({ ...cloneStrategy(draft), name: event.target.value, updatedAt: new Date().toISOString() })
+                    }
+                    spellCheck={false}
+                    aria-label="Strategy name"
+                  />
+                  <div className="se-header-chips">
+                    <span className="se-chip">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: 4}}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                      {selectedMarket?.symbol ?? "--"}
+                    </span>
+                    <span className="se-chip">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: 4}}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                      {formatTimeframe(timeframe)}
+                    </span>
+                    <span className="se-chip">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: 4}}><path d="M7 16V4M7 4L3 8M7 4L11 8M17 8V20M17 20L21 16M17 20L13 16"/></svg>
+                      {draft.enabledSides.map((s) => formatSideLabel(s)).join(" + ")}
+                    </span>
+                    <span className={`se-chip ${draft.status === "saved" ? "se-chip-ok" : "se-chip-draft"}`}>
+                      {draft.status === "saved" ? "Saved" : "Draft"}
+                    </span>
+                    {isDirty && (
+                      <span className="se-chip se-chip-dirty">Unsaved Changes</span>
+                    )}
+                  </div>
+                </div>
+                <button type="button" className="se-header-collapse" aria-label="Collapse strategy summary">
+                  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+                </button>
               </div>
             </div>
 
