@@ -389,6 +389,18 @@ export function StrategyAgentPanel({
   const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const threadRef = useRef<HTMLDivElement | null>(null);
   const activeRunMessageIdRef = useRef<string | null>(null);
+
+  function scrollThreadToBottom(behavior: ScrollBehavior = "auto") {
+    const thread = threadRef.current;
+    if (!thread) return;
+
+    window.requestAnimationFrame(() => {
+      thread.scrollTo({
+        top: thread.scrollHeight,
+        behavior
+      });
+    });
+  }
   const emptyConversationSuggestion = buildEmptyConversationSuggestion();
   const { signTypedDataAsync } = useSignTypedData();
 
@@ -558,12 +570,7 @@ export function StrategyAgentPanel({
   }, [prompt]);
 
   useEffect(() => {
-    const thread = threadRef.current;
-    if (!thread) return;
-    thread.scrollTo({
-      top: thread.scrollHeight,
-      behavior: "smooth"
-    });
+    scrollThreadToBottom(busy === "run" ? "auto" : "smooth");
   }, [messages, status]);
 
   useEffect(() => {
@@ -574,7 +581,7 @@ export function StrategyAgentPanel({
     const scrollToBottom = () => {
       cancelAnimationFrame(frameId);
       frameId = window.requestAnimationFrame(() => {
-        thread.scrollTop = thread.scrollHeight;
+        scrollThreadToBottom();
       });
     };
 
@@ -639,6 +646,12 @@ export function StrategyAgentPanel({
       `- stop loss preference: ${stopLossLine}`
     ].join("\n");
 
+    if (clarifierOpen) {
+      setClarifierOpen(false);
+      setClarifierGoal("");
+      setClarifierMode(null);
+    }
+
     const userMessage: AgentMessage = {
       id: buildMessageId(),
       role: "user",
@@ -646,6 +659,7 @@ export function StrategyAgentPanel({
       mode
     };
     setMessages((current) => [...current, userMessage]);
+    setPrompt("");
     setBusy(mode);
     setStatus(mode === "plan" ? "Planning with agent..." : "Running agent workflow...");
 
@@ -1358,7 +1372,6 @@ export function StrategyAgentPanel({
             </div>
           </div>
 
-          {status && <div className="strategy-status-msg strategy-agent-status-msg">{status}</div>}
         </div>
 
         <button
