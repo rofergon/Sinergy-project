@@ -15,7 +15,7 @@ export class BridgeHealthService {
 
   async getStatus(): Promise<BridgeHealth> {
     const details: string[] = [];
-    const requireRelayer = this.deps.requireRelayer ?? false;
+    const requireRelayer = this.deps.requireRelayer ?? true;
     const relayerUrl = this.deps.relayerHealthUrl;
     const opinitUrl = this.deps.opinitHealthUrl ?? this.discoverOpinitHealthUrl();
 
