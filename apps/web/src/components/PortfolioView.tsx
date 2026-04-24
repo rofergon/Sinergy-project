@@ -1,8 +1,6 @@
 import { useState } from "react";
 import { formatUnits } from "viem";
 import type { TxPopupData } from "./TransactionPopup";
-import { VaultPanel } from "./VaultPanel";
-import { BalancesPanel } from "./BalancesPanel";
 
 type Token = {
   symbol: string;
@@ -59,18 +57,12 @@ function fmt(value: number, decimals = 4) {
 }
 
 export function PortfolioView({
-  connected,
   address,
-  initiaAddress,
-  vaultAddress,
-  zkVaultAddress,
   tokens,
   balances,
   orders,
   markets,
-  onAfterMutation,
   onCancelOrder,
-  showTx,
 }: Props) {
   const activeOrders = orders.filter((order) => order.status === "OPEN" || order.status === "PARTIAL");
   const pendingBuys = activeOrders.filter((order) => order.side === "BUY");
@@ -213,32 +205,6 @@ export function PortfolioView({
           </section>
         </div>
 
-        <div className="portfolio-side">
-          <section className="portfolio-section">
-            <div className="portfolio-section-head">
-              <h2>Vault</h2>
-              <span>{address ? "Connected" : "Not connected"}</span>
-            </div>
-            <VaultPanel
-              connected={connected}
-              address={address}
-              initiaAddress={initiaAddress}
-              vaultAddress={vaultAddress}
-              zkVaultAddress={zkVaultAddress}
-              tokens={tokens}
-              onAfterMutation={onAfterMutation}
-              showTx={showTx}
-            />
-          </section>
-
-          <section className="portfolio-section">
-            <div className="portfolio-section-head">
-              <h2>Asset balances</h2>
-              <span>Vault ledger</span>
-            </div>
-            <BalancesPanel tokens={tokens} balances={balances} />
-          </section>
-        </div>
       </div>
     </div>
   );
