@@ -4,13 +4,13 @@ import { Command, StateSchema } from "@langchain/langgraph";
 import {
   createHttpStrategyToolTransport,
   strategyDraftPayloadSchema,
-  strategyToolDefinitions,
   type StrategyToolInput,
   type StrategyToolName,
   type StrategyToolResult,
   type StrategyToolTransport
 } from "@sinergy/shared";
 import type { AgentToolTraceEntry } from "../types.js";
+import { getAgentToolCatalog, getAgentToolDefinitions } from "./agentToolPolicy.js";
 import { summarizeToolProgress } from "./runtimePolicy.js";
 import { mergeToolContext } from "./toolInputContext.js";
 
@@ -70,6 +70,9 @@ const langChainVisibleToolSchemas = {
   save_strategy: z.object({}),
   list_user_strategies: z.object({}),
   get_strategy: z.object({}),
+  delete_strategy: z.object({
+    strategyId: z.string().uuid()
+  }),
   clone_strategy_template: z.object({
     templateId: z.string().min(1)
   })
@@ -191,7 +194,7 @@ export function createStrategyToolRuntime(options: {
   };
 
   const createTrackedLangChainTools: StrategyToolRuntime["createTrackedLangChainTools"] = (toolOptions) =>
-    strategyToolDefinitions.map((definition) =>
+    getAgentToolDefinitions().map((definition) =>
       tool(
         async (rawInput, runtime) => {
           const step = toolOptions.trace.length + 1;
@@ -291,10 +294,7 @@ export function createStrategyToolRuntime(options: {
     invokeUntyped,
     createTrackedLangChainTools,
     getCatalog() {
-      return strategyToolDefinitions.map((definition) => ({
-        name: definition.name,
-        description: definition.description
-      }));
+      return getAgentToolCatalog();
     }
   };
 }
