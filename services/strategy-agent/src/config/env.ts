@@ -27,6 +27,7 @@ const envSchema = z.object({
   AGENT_MODEL_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
   AGENT_MAX_STEPS: z.coerce.number().int().positive().default(6),
   AGENT_TOOLCALL_RETRIES: z.coerce.number().int().nonnegative().default(2),
+  // Keep the native LangChain tool loop opt-in until it has broader production coverage.
   AGENT_FORCE_FALLBACK_JSON: z
     .string()
     .optional()
