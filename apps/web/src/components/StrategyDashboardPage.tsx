@@ -188,21 +188,54 @@ function renderBacktestTradingViewPreview(
   );
 }
 
-function renderStrategyBadgeItems(card: StrategyDashboardCard) {
+function PlayIcon() {
   return (
-    <>
-      <span className="strategy-preview-kicker strategy-preview-kicker-side">
-        {liveStrategySideLabel(card.enabledSides)}
-      </span>
-      {card.indicators.map((indicator) => (
-        <span
-          key={`${card.strategyId}-${indicator}`}
-          className="strategy-preview-kicker strategy-preview-kicker-indicator"
-        >
-          {indicatorBadgeLabel(indicator)}
-        </span>
-      ))}
-    </>
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M8 5v14l11-7z" />
+    </svg>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M7 7h10v10H7z" />
+    </svg>
+  );
+}
+
+function SettingsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.5-2-3.5-2.4 1a7.2 7.2 0 0 0-2.6-1.5L14 2.5h-4L9.6 5a7.2 7.2 0 0 0-2.6 1.5l-2.4-1-2 3.5 2 1.5a7.8 7.8 0 0 0 0 3l-2 1.5 2 3.5 2.4-1a7.2 7.2 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.2 7.2 0 0 0 2.6-1.5l2.4 1 2-3.5-2-1.5ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z" />
+    </svg>
+  );
+}
+
+function PauseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M8 5h3v14H8zM13 5h3v14h-3z" />
+    </svg>
+  );
+}
+
+function ExternalIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M14 4h6v6M20 4l-9 9" />
+      <path d="M20 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h5" />
+    </svg>
+  );
+}
+
+function DotsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <circle cx="5" cy="12" r="1.5" />
+      <circle cx="12" cy="12" r="1.5" />
+      <circle cx="19" cy="12" r="1.5" />
+    </svg>
   );
 }
 
@@ -810,83 +843,40 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
 
     return (
       <article
-        className={`strategy-dashboard-card ${options?.spotlight ? "spotlight" : ""}`}
+        className={`strategy-dashboard-card strategy-dashboard-library-card ${options?.spotlight ? "spotlight" : ""}`}
         key={card.strategyId}
       >
         <div className="strategy-dashboard-card-head">
           <div>
-            <div className="strategy-preview-kickers strategy-dashboard-kickers">
-              {renderStrategyBadgeItems(card)}
-            </div>
             <strong>{card.name}</strong>
-            <p>{market?.symbol ?? card.marketSymbol}</p>
+            <span className="strategy-dashboard-library-badge">
+              {card.status === "saved" ? "Ready" : "Draft"}
+            </span>
           </div>
-          <span className={`order-status ${statusClass(card)}`}>
-            {statusLabel(card)}
+          <span className={`strategy-dashboard-library-status ${statusClass(card)}`}>
+            <i />
+            {card.autoExecution.status === "active" ? "Live" : "Idle"}
           </span>
         </div>
 
-        <div className="strategy-dashboard-card-meta">
-          <span>{card.timeframe.toUpperCase()}</span>
-          <span>{card.status === "saved" ? "Saved" : "Draft"}</span>
-          <span>{new Date(card.updatedAt).toLocaleDateString()}</span>
-        </div>
-
-        {card.autoExecution.status === "active" && (
-          <div className="strategy-dashboard-live-strip">
-            <span>Monitoring signals</span>
-            <strong>
-              {card.autoExecution.lastCheckedAt
-                ? `Last check ${new Date(card.autoExecution.lastCheckedAt).toLocaleTimeString()}`
-                : "Waiting for first check"}
-            </strong>
-            {card.autoExecution.initialCapitalQuote ? (
-              <strong>Initial capital {formatCapital(card.autoExecution.initialCapitalQuote)}</strong>
-            ) : null}
-          </div>
-        )}
-
         <div className="strategy-dashboard-backtest">
-          <div className="strategy-dashboard-backtest-head">
-            <span>Latest backtest</span>
-            <button
-              type="button"
-              className="strategy-studio-secondary-link"
-              onClick={() => onOpenStrategy(card.strategyId, card.latestBacktest?.runId)}
-            >
-              Open in Studio
-            </button>
-          </div>
-
           {card.latestBacktest ? (
             <>
               {renderBacktestTradingViewPreview(card, market, backtestOverlay) ?? renderBacktestPreview(card)}
-              <div className="strategy-dashboard-stats">
+              <div className="strategy-dashboard-stats strategy-dashboard-library-stats">
                 <div>
                   <span>PnL</span>
-                  <strong className={card.latestBacktest.netPnl >= 0 ? "order-side buy" : "order-side sell"}>
-                    {formatMetric(card.latestBacktest.netPnl, 2)}
+                  <strong className={card.latestBacktest.netPnlPct >= 0 ? "order-side buy" : "order-side sell"}>
+                    {formatPercent(card.latestBacktest.netPnlPct, 2)}
                   </strong>
                 </div>
                 <div>
-                  <span>PnL %</span>
-                  <strong>{formatMetric(card.latestBacktest.netPnlPct, 2)}</strong>
+                  <span>Status</span>
+                  <strong>{card.autoExecution.status === "active" ? "Live" : "Idle"}</strong>
                 </div>
                 <div>
                   <span>Trades</span>
                   <strong>{card.latestBacktest.tradeCount}</strong>
-                </div>
-                <div>
-                  <span>Win rate</span>
-                  <strong>{formatMetric(card.latestBacktest.winRate, 2)}</strong>
-                </div>
-                <div>
-                  <span>PF</span>
-                  <strong>{formatMetric(card.latestBacktest.profitFactor, 2)}</strong>
-                </div>
-                <div>
-                  <span>Drawdown</span>
-                  <strong>{formatMetric(card.latestBacktest.maxDrawdownPct, 2)}</strong>
                 </div>
               </div>
             </>
@@ -919,29 +909,33 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
           )}
         </div>
 
-        <div className="strategy-dashboard-card-actions">
+        <div className="strategy-dashboard-card-actions strategy-dashboard-library-actions">
           <button
             type="button"
-            className="strategy-agent-review-btn"
+            className="strategy-dashboard-icon-btn"
             disabled={runningId === card.strategyId || deletingId === card.strategyId || !liveSupported}
             onClick={() => void handleRunNow(card)}
+            aria-label={runningId === card.strategyId ? "Running strategy" : "Run strategy now"}
+            title={runningId === card.strategyId ? "Running..." : "Run now"}
           >
-            {runningId === card.strategyId ? "Running..." : "Run now"}
+            <PlayIcon />
           </button>
 
           {card.autoExecution.status === "active" ? (
             <button
               type="button"
-              className="strategy-agent-review-btn"
+              className="strategy-dashboard-icon-btn"
               disabled={togglingId === card.strategyId || deletingId === card.strategyId}
               onClick={() => void handleDeactivate(card)}
+              aria-label={togglingId === card.strategyId ? "Stopping auto execution" : "Disable auto execution"}
+              title={togglingId === card.strategyId ? "Stopping..." : "Disable Auto"}
             >
-              {togglingId === card.strategyId ? "Stopping..." : "Disable Auto"}
+              <StopIcon />
             </button>
           ) : (
             <button
               type="button"
-              className="strategy-agent-review-btn"
+              className="strategy-dashboard-icon-btn"
               disabled={togglingId === card.strategyId || deletingId === card.strategyId || !liveSupported}
               onClick={() => {
                 if (configOpen) {
@@ -964,24 +958,36 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
                     : ""
                 );
               }}
-            >
-              {configOpen
+              aria-label={configOpen ? "Close auto execution config" : "Configure auto execution"}
+              title={configOpen
                 ? "Close Config"
                 : card.autoExecution.status === "needs_reactivation"
                   ? "Reactivate Auto"
                   : "Enable Auto"}
+            >
+              <StopIcon />
             </button>
           )}
 
           <button
             type="button"
-            className="strategy-danger-btn"
-            disabled={deletingId === card.strategyId || togglingId === card.strategyId || runningId === card.strategyId}
-            onClick={() => void handleDelete(card)}
+            className="strategy-dashboard-icon-btn"
+            onClick={() => onOpenStrategy(card.strategyId, card.latestBacktest?.runId)}
+            aria-label="Open strategy settings in Studio"
+            title="Open in Studio"
           >
-            {deletingId === card.strategyId ? "Deleting..." : "Delete"}
+            <SettingsIcon />
           </button>
         </div>
+
+        <button
+          type="button"
+          className="strategy-dashboard-library-delete"
+          disabled={deletingId === card.strategyId || togglingId === card.strategyId || runningId === card.strategyId}
+          onClick={() => void handleDelete(card)}
+        >
+          {deletingId === card.strategyId ? "Deleting..." : "Delete strategy"}
+        </button>
 
         {configOpen && liveSupported && (
           <div
@@ -1059,7 +1065,10 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
     const strategyTradeRows = buildExecutionTradeRows(strategyExecutionRows);
     const liveOverlay = liveTradeOverlay(card, previewOverlays[card.strategyId] ?? null, previewExecutions[card.strategyId] ?? []);
     const liveSummary = previewExecutionSummaries[card.strategyId];
-    const lastRealTradeAt = strategyTradeRows[0]?.exit?.createdAt ?? strategyTradeRows[0]?.entry?.createdAt;
+    const currentPnlPct = liveSummary?.currentPnlPct ?? card.latestBacktest?.netPnlPct;
+    const currentPrice = liveSummary?.currentPrice;
+    const latestCheck = card.autoExecution.lastCheckedAt;
+    const updatedLabel = latestCheck ? new Date(latestCheck).toLocaleTimeString() : "Waiting";
 
     return (
       <article
@@ -1068,22 +1077,57 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
         style={{ animationDelay: `${index * 90}ms` }}
       >
         <div className="strategy-preview-tile-head">
-          <div>
+          <div className="strategy-preview-title-block">
             <div className="strategy-preview-kickers">
               <span className="strategy-preview-kicker">Running</span>
-              {renderStrategyBadgeItems(card)}
+              <span className="strategy-preview-kicker strategy-preview-kicker-side">
+                {liveStrategySideLabel(card.enabledSides)}
+              </span>
+              {card.indicators.map((indicator) => (
+                <span
+                  key={`${card.strategyId}-${indicator}`}
+                  className="strategy-preview-kicker strategy-preview-kicker-indicator"
+                >
+                  {indicatorBadgeLabel(indicator)}
+                </span>
+              ))}
             </div>
             <h3>{card.name}</h3>
             <p>{market?.symbol ?? card.marketSymbol} · {card.timeframe}</p>
           </div>
-          <div className="strategy-preview-status">
-            <span className="strategy-preview-status-dot" />
-            <strong>Live</strong>
-            <small>
-              {card.autoExecution.lastCheckedAt
-                ? new Date(card.autoExecution.lastCheckedAt).toLocaleTimeString()
-                : "Waiting"}
-            </small>
+          <div className="strategy-preview-live-status">
+            <span><i /> Live</span>
+            <small>updated {updatedLabel}</small>
+          </div>
+        </div>
+
+        <div className="strategy-preview-stats">
+          <div>
+            <span>PnL %</span>
+            <strong className={currentPnlPct !== undefined && currentPnlPct < 0 ? "order-side sell" : "order-side buy"}>
+              {formatPercent(currentPnlPct, 2)}
+            </strong>
+            <small>Today</small>
+          </div>
+          <div>
+            <span>Status</span>
+            <strong>{liveStrategyStatusLabel(liveSummary?.status)}</strong>
+            <small>&nbsp;</small>
+          </div>
+          <div>
+            <span>Trades</span>
+            <strong>{strategyTradeRows.length}</strong>
+            <small>Today</small>
+          </div>
+          <div>
+            <span>Position size</span>
+            <strong>{liveSummary?.currentPositionBase || "--"}</strong>
+            <small>{market?.baseToken.symbol ?? "Base"}</small>
+          </div>
+          <div>
+            <span>Current price</span>
+            <strong>{formatMetric(currentPrice, 5)}</strong>
+            <small>{market?.quoteToken.symbol ?? "Quote"}</small>
           </div>
         </div>
 
@@ -1097,70 +1141,41 @@ export function StrategyDashboardPage({ address, markets, onOpenStrategy }: Prop
           />
         </div>
 
-        <div className="strategy-preview-backtest">
-          <div className="strategy-preview-backtest-head">
-            <span>Live execution snapshot</span>
-            <div className="strategy-preview-actions">
-              <button
-                type="button"
-                className="strategy-studio-secondary-link"
-                onClick={() => onOpenStrategy(card.strategyId, card.latestBacktest?.runId)}
-              >
-                Open
-              </button>
-              <button
-                type="button"
-                className="strategy-studio-secondary-link"
-                disabled={togglingId === card.strategyId || deletingId === card.strategyId}
-                onClick={() => void handleDeactivate(card)}
-              >
-                {togglingId === card.strategyId ? "Stopping..." : "Disable"}
-              </button>
-              <button
-                type="button"
-                className="strategy-danger-btn"
-                disabled={deletingId === card.strategyId || togglingId === card.strategyId}
-                onClick={() => void handleDelete(card)}
-              >
-                {deletingId === card.strategyId ? "Deleting..." : "Delete"}
-              </button>
-            </div>
-          </div>
-
-          {liveSummary ? (
-            <div className="strategy-preview-stats">
-              <div>
-                <span>PnL %</span>
-                <strong className={liveSummary.currentPnlPct !== undefined && liveSummary.currentPnlPct < 0 ? "order-side sell" : "order-side buy"}>
-                  {formatPercent(liveSummary.currentPnlPct, 2)}
-                </strong>
-              </div>
-              <div>
-                <span>Status</span>
-                <strong>{liveStrategyStatusLabel(liveSummary.status)}</strong>
-              </div>
-              <div>
-                <span>Trades</span>
-                <strong>{strategyTradeRows.length}</strong>
-              </div>
-              <div>
-                <span>Position</span>
-                <strong>{liveSummary.currentPositionBase || "--"}</strong>
-              </div>
-              <div>
-                <span>Current price</span>
-                <strong>{formatMetric(liveSummary.currentPrice, 2)}</strong>
-              </div>
-              <div>
-                <span>Last trade</span>
-                <strong>{lastRealTradeAt ? new Date(lastRealTradeAt).toLocaleTimeString() : "--"}</strong>
-              </div>
-            </div>
-          ) : (
-            <div className="strategy-preview-empty">
-              No live execution stats yet. This strategy is running, but it has not completed a tracked trade yet.
-            </div>
-          )}
+        <div className="strategy-preview-actions">
+          <button
+            type="button"
+            className="strategy-preview-action-btn strategy-preview-action-btn-primary"
+            onClick={() => onOpenStrategy(card.strategyId, card.latestBacktest?.runId)}
+          >
+            <ExternalIcon />
+            Open Strategy
+          </button>
+          <button
+            type="button"
+            className="strategy-preview-action-btn"
+            disabled={togglingId === card.strategyId || deletingId === card.strategyId}
+            onClick={() => void handleDeactivate(card)}
+          >
+            <PauseIcon />
+            {togglingId === card.strategyId ? "Pausing..." : "Pause"}
+          </button>
+          <button
+            type="button"
+            className="strategy-preview-action-btn"
+            disabled={deletingId === card.strategyId || togglingId === card.strategyId}
+            onClick={() => void handleDeactivate(card)}
+          >
+            <StopIcon />
+            {togglingId === card.strategyId ? "Disabling..." : "Disable"}
+          </button>
+          <button
+            type="button"
+            className="strategy-preview-action-btn"
+            onClick={() => onOpenStrategy(card.strategyId, card.latestBacktest?.runId)}
+          >
+            More
+            <DotsIcon />
+          </button>
         </div>
       </article>
     );
