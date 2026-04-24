@@ -11,6 +11,7 @@ DEPLOYMENT_FILE="${DEPLOYMENT_FILE:-$DEPLOYMENTS_DIR/${ENV_NAME}.json}"
 NETWORK_NAME="${NETWORK_NAME:-Sinergy Local}"
 ROLLUP_CHAIN_ID="${ROLLUP_CHAIN_ID:-${CHAIN_ID:-Sinergy-2}}"
 L1_CHAIN_ID="${L1_CHAIN_ID:-initiation-2}"
+OPINIT_BRIDGE_ID="${OPINIT_BRIDGE_ID:-1735}"
 TENDERMINT_RPC_URL="${TENDERMINT_RPC_URL:-${NODE_URL:-http://127.0.0.1:26657}}"
 JSON_RPC_URL="${JSON_RPC_URL:-${RPC_URL:-http://127.0.0.1:8545}}"
 WS_URL="${WS_URL:-ws://127.0.0.1:8546}"
@@ -183,6 +184,7 @@ jq -n \
   --arg networkName "$NETWORK_NAME" \
   --arg rollupChainId "$ROLLUP_CHAIN_ID" \
   --arg l1ChainId "$L1_CHAIN_ID" \
+  --arg opinitBridgeId "$OPINIT_BRIDGE_ID" \
   --arg gasDenom "$GAS_DENOM" \
   --arg rpcUrl "$JSON_RPC_URL" \
   --arg wsUrl "$WS_URL" \
@@ -229,6 +231,9 @@ jq -n \
     },
     operator: {
       matcherAddress: $matcherAddress
+    },
+    opinit: {
+      bridgeId: $opinitBridgeId
     },
     contracts: {
       vault: $vault,
