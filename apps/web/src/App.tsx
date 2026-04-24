@@ -63,7 +63,7 @@ function Dashboard() {
   const [orders, setOrders] = useState<any[]>([]);
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus | null>(null);
   const [error, setError] = useState("");
-  const [activeView, setActiveView] = useState<"strategies" | "agent" | "portfolio" | "history" | "bridge">("strategies");
+  const [activeView, setActiveView] = useState<"strategies" | "agent" | "portfolio" | "history" | "bridge">("agent");
   const [chartTimeframe, setChartTimeframe] = useState<StrategyTimeframe>("15m");
   const [strategyBacktest, setStrategyBacktest] = useState<StrategyBacktestBundle | null>(null);
   const [strategyReviewRequest, setStrategyReviewRequest] = useState<{
@@ -214,10 +214,6 @@ function Dashboard() {
     openConnect();
   };
 
-  if (!isConnected) {
-    return <LandingPage onConnect={handleConnect} />;
-  }
-
   return (
     <>
       <Navbar
@@ -239,12 +235,6 @@ function Dashboard() {
       {activeView === "agent" && <TickerStrip market={selectedMarket} />}
 
       {error && <div className="error-bar">{error}</div>}
-      {activeView === "agent" && bridgeStatus && !bridgeStatus.ready && (
-        <div className="bridge-banner">
-          <strong>Bridge degraded.</strong> Router-enabled markets will fall back to async routing or stay unavailable until relayer and OPinit recover.
-        </div>
-      )}
-
       {activeView === "bridge" ? (
         <BridgeLanding
           connected={isConnected}
@@ -301,6 +291,9 @@ function Dashboard() {
           strategyBacktest={strategyBacktest}
           onBacktestResult={setStrategyBacktest}
           reviewRequest={strategyReviewRequest}
+          onOpenBridge={handleBridgeIn}
+          onStrategyStarted={() => setActiveView("strategies")}
+          onConnect={handleConnect}
         />
       )}
 
@@ -310,5 +303,12 @@ function Dashboard() {
 }
 
 export default function App() {
+  const pathname = typeof window === "undefined" ? "/" : window.location.pathname.replace(/\/$/, "");
+  const { openConnect } = useInterwovenKit();
+
+  if (pathname === "/landing") {
+    return <LandingPage onConnect={openConnect} />;
+  }
+
   return <Dashboard />;
 }
