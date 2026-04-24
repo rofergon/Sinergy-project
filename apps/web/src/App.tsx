@@ -283,6 +283,7 @@ function Dashboard() {
       ) : (
         <StrategyStudio
           address={userAddress}
+          initiaAddress={initiaAddress}
           markets={marketSnapshots}
           selectedMarketId={selectedMarket?.id}
           timeframe={chartTimeframe}
@@ -291,9 +292,9 @@ function Dashboard() {
           strategyBacktest={strategyBacktest}
           onBacktestResult={setStrategyBacktest}
           reviewRequest={strategyReviewRequest}
-          onOpenBridge={handleBridgeIn}
           onStrategyStarted={() => setActiveView("strategies")}
           onConnect={handleConnect}
+          showTx={showTx}
         />
       )}
 
