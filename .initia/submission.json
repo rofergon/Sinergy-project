@@ -8,5 +8,5 @@
   "native_feature": "interwoven-bridge",
   "core_logic_path": "services/matcher/src/index.ts",
   "native_feature_frontend_path": "apps/web/src/components/BridgeLanding.tsx",
-  "demo_video_url": "https://www.youtube.com/watch?v=W8DB_e-DLI4"
+  "demo_video_url": "https://www.youtube.com/watch?v=5m8ptiQQSSY"
 }
