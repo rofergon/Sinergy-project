@@ -60,7 +60,7 @@ Once approved, strategies run from one control surface. Orders, matching, strate
 - **Manual approved execution** through `/strategy/execution/execute`.
 - **Automatic strategy execution** through an `AutoStrategyWorker` that monitors active strategies and runs new checks.
 - **Live strategy dashboard and execution history** with status, live overlays, trade rows, and PnL summaries.
-- **Private matcher and router** for internal fills and external liquidity routing.
+- **Private matcher and router** for internal fills and external liquidity routing sourced from Initia Layer 1.
 - **DarkVault settlement flow** with a minimal public footprint.
 - **MiniEVM rollup deployment** on `Sinergy-2`.
 - **OPinit bridge-oriented asset flow** for connected Initia assets.
