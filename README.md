@@ -115,11 +115,23 @@ Sinergy also natively surfaces Initia usernames for connected wallets. When a wa
 ## Live Testnet Snapshot
 
 - **Rollup**: `Sinergy-2`
+- **Rollup VM**: MiniEVM
 - **L1**: `initiation-2`
 - **Connected assets**: `cINIT`, `cUSDC`, `cETH`, `cBTC`, `cSOL`
 - **Router-enabled markets**: `cINIT/cUSDC`, `cETH/cUSDC`
 - **Dark-pool markets**: `cBTC/cUSDC`, `cSOL/cUSDC`, `tAAPL/cUSDC`, `tBOND/cUSDC`, `tNVDA/cUSDC`
 - **Runtime deployment file**: [deployments/testnet.json](deployments/testnet.json)
+
+## Roadmap
+
+Sinergy's next product layer expands the current private execution system into a marketplace for strategy ownership, monetization, and agent-native payments.
+
+- **x402 payments per agent message**: Because `Sinergy-2` is a MiniEVM rollup, Sinergy can explore x402-compatible payments using `eip155:<chainId>` network identifiers. The goal is to let users or agents pay per strategy generation, validation, backtest, or execution instruction without traditional accounts or subscriptions.
+- **Strategy marketplace**: Users will be able to create strategies with the Sinergy Agent, then publish them into a marketplace as protected strategy products.
+- **Strategy NFTs**: A validated strategy can be minted as a Strategy NFT, making the strategy unique, ownable, and verifiable while keeping the sensitive execution logic protected.
+- **Sell or rent strategies**: Strategy owners will be able to monetize their edge by selling access, renting time-limited usage rights, or collecting royalties when strategies are reused.
+- **Protected execution by default**: DarkVault will continue to protect strategy logic, execution coordination, and internal matching, so monetized strategies do not have to expose their full rules publicly.
+- **Trust and verification layer**: Marketplace listings are intended to include verified strategy metadata, encrypted logic, state commitments, private execution guarantees, off-chain matching, secure transactions, and proof-backed security.
 
 ---
 
