@@ -6,9 +6,63 @@ It transforms natural-language trading intents into validated, secure executions
 
 At its core, Sinergy is about making advanced trading feel simple without forcing users to expose their full intent on public rails. Instead of broadcasting strategy logic, order flow, and execution decisions to an open orderbook, Sinergy keeps sensitive trading coordination inside a private execution layer while still anchoring custody and settlement guarantees on `Sinergy-2`.
 
-## How It Works
+## Judge Quick Start
 
-![Sinergy agentic strategy flow](docs/AgentFlow.png)
+Sinergy's demo flow is best evaluated as a guided path from user intent to private execution:
+
+1. **Describe a strategy** in natural language.
+2. **Let the Sinergy Agent compile, validate, and backtest it** before capital is deployed.
+3. **Bridge assets from Initia L1 into `Sinergy-2`** through the DarkVault flow.
+4. **Run and monitor multiple private strategies** while only commitments, proofs, and settlement metadata are public.
+
+| What to review | Where |
+| --- | --- |
+| Main app | `apps/web` |
+| Bridge app | `apps/bridge` |
+| Strategy agent | `services/strategy-agent` |
+| Private matcher and router | `services/matcher` |
+| EVM contracts | `contracts/src` |
+| ZK withdrawal circuit | `circuits/withdrawal.circom` |
+| Testnet deployment | [`deployments/testnet.json`](deployments/testnet.json) |
+
+## Visual Demo Flow
+
+### 1. From Idea to Private Execution
+
+![Sinergy overview flow](apps/web/public/Slides/image.png)
+
+Users describe their trading idea in plain language. Sinergy turns that intent into a validated, backtested strategy that can be prepared for private execution inside DarkVault.
+
+### 2. From Initia L1 to Sinergy Rollup L2
+
+![Initia L1 to Sinergy L2 bridge flow](apps/web/public/Slides/image2.png)
+
+Assets enter from Initia L1 through a verified bridge flow. Public settlement and custody guarantees remain anchored on-chain, while execution and matching move into the `Sinergy-2` private environment.
+
+### 3. Agent Compilation, Validation, and Backtesting
+
+![Sinergy agent strategy generation and backtesting](apps/web/public/Slides/image3.png)
+
+The Sinergy Agent compiles a strategy draft, validates the rules and risk settings, and runs historical backtests before execution. The goal is to make advanced strategy creation feel conversational without exposing the trading plan to a public orderbook.
+
+### 4. Execution and Monitoring
+
+![Sinergy execution and monitoring flow](apps/web/public/Slides/image4.png)
+
+Once approved, strategies run from one control surface. Orders, matching, strategy logic, positions, and internal state stay private on L2; deposits, withdrawals, state roots, settlement metadata, and nullifiers remain publicly verifiable.
+
+## What Is Working Today
+
+- **Initia-native wallet UX** through `InterwovenKit`, including Initia username display when available.
+- **Natural-language strategy generation** through the Strategy Agent.
+- **Rule validation and historical backtesting** before execution.
+- **Private matcher and router** for internal fills and external liquidity routing.
+- **DarkVault settlement flow** with a minimal public footprint.
+- **MiniEVM rollup deployment** on `Sinergy-2`.
+- **OPinit bridge-oriented asset flow** for connected Initia assets.
+- **ZK withdrawal architecture** with a Circom withdrawal circuit and Groth16 verifier path.
+
+## How It Works
 
 1. **Natural Language Input**: Users connect their wallet via `InterwovenKit` and describe their trading strategy in plain language.
 2. **Contextual Awareness**: The agent input layer automatically builds the necessary prompt payload with real-time market and timeframe context.
@@ -56,7 +110,7 @@ Sinergy also natively surfaces Initia usernames for connected wallets. When a wa
 - **Connected assets**: `cINIT`, `cUSDC`, `cETH`, `cBTC`, `cSOL`
 - **Router-enabled markets**: `cINIT/cUSDC`, `cETH/cUSDC`
 - **Dark-pool markets**: `cBTC/cUSDC`, `cSOL/cUSDC`, `tAAPL/cUSDC`, `tBOND/cUSDC`, `tNVDA/cUSDC`
-- **Runtime deployment file**: [deployments/testnet.json](/Sinergy-project/deployments/testnet.json)
+- **Runtime deployment file**: [deployments/testnet.json](deployments/testnet.json)
 
 ---
 
@@ -87,7 +141,7 @@ What these commands do:
 - `public-nginx.sh start`: Serves the public app, bridge, API, RPC, and related endpoints.
 - `cloudflare-tunnel.sh quick`: Exposes the stack to the internet without opening router ports.
 
-
+```bash
 # Restart all services (stop + start)
 ./scripts/restart-testnet-stack.sh
 
@@ -99,6 +153,7 @@ What these commands do:
 
 # Check status
 ./scripts/restart-testnet-stack.sh status
+```
 
 ### Manual Setup & Source Build
 
@@ -228,11 +283,6 @@ Users can enable auto-sign from the **Dark Vault** panel. The current setup stri
 ## Documentation Reference
 
 Dive deeper into Sinergy's technical design:
-- **Architecture**: [docs/architecture.md](docs/architecture.md)
-- **Automatic Strategy Execution**: [docs/automatic-strategy-execution.md](docs/automatic-strategy-execution.md)
-- **Network Startup**: [docs/network-startup.md](docs/network-startup.md)
-- **Recent Price Patch**: [docs/price-patch-runbook.md](docs/price-patch-runbook.md)
-- **Testnet Runbook**: [docs/testnet-runbook.md](docs/testnet-runbook.md)
-- **InitiaDEX Routing**: [docs/initia-dex-liquidity-routing.md](docs/initia-dex-liquidity-routing.md)
-- **cUSDC Migration**: [docs/cusdc-migration.md](docs/cusdc-migration.md)
-- **Implementation Plan**: [docs/implementation-plan.md](docs/implementation-plan.md)
+- **Sinergy-2 Testnet Layer 2**: [docs/sinergy-2-testnet-layer2.md](docs/sinergy-2-testnet-layer2.md)
+- **DarkVault Privacy Model**: [docs/darkvault-privacy.md](docs/darkvault-privacy.md)
+- **Trading Agent Tooling**: [docs/trading-agent-tooling.md](docs/trading-agent-tooling.md)
