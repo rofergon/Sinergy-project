@@ -134,6 +134,7 @@ Origin expected by this machine: http://$upstream_host:$LOCAL_HTTP_PORT
 Configure public hostnames in Cloudflare to point to:
   app      -> http://$upstream_host:$LOCAL_HTTP_PORT
   bridge   -> http://$upstream_host:$LOCAL_HTTP_PORT
+  agent    -> http://$upstream_host:$LOCAL_HTTP_PORT
   api      -> http://$upstream_host:$LOCAL_HTTP_PORT
   rpc      -> http://$upstream_host:$LOCAL_HTTP_PORT
   ws       -> http://$upstream_host:$LOCAL_HTTP_PORT

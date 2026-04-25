@@ -61,6 +61,7 @@ resolve_hosts() {
 
   APP_HOST="${APP_HOST:-app.$root_domain}"
   BRIDGE_HOST="${BRIDGE_HOST:-bridge.$root_domain}"
+  AGENT_HOST="${AGENT_HOST:-agent.$root_domain}"
   API_HOST="${API_HOST:-api.$root_domain}"
   RPC_HOST="${RPC_HOST:-rpc.$root_domain}"
   WS_HOST="${WS_HOST:-ws.$root_domain}"
@@ -76,6 +77,7 @@ render_template() {
   sed \
     -e "s|__APP_HOST__|$APP_HOST|g" \
     -e "s|__BRIDGE_HOST__|$BRIDGE_HOST|g" \
+    -e "s|__AGENT_HOST__|$AGENT_HOST|g" \
     -e "s|__API_HOST__|$API_HOST|g" \
     -e "s|__RPC_HOST__|$RPC_HOST|g" \
     -e "s|__WS_HOST__|$WS_HOST|g" \
@@ -160,6 +162,7 @@ start_proxy() {
   printf '  local https port: %s\n' "$HTTPS_PORT"
   printf '  app:     http%s://%s\n' "$(cert_available && printf s || true)" "$APP_HOST"
   printf '  bridge:  http%s://%s\n' "$(cert_available && printf s || true)" "$BRIDGE_HOST"
+  printf '  agent:   http%s://%s\n' "$(cert_available && printf s || true)" "$AGENT_HOST"
   printf '  api:     http%s://%s\n' "$(cert_available && printf s || true)" "$API_HOST"
   printf '  rpc:     http%s://%s\n' "$(cert_available && printf s || true)" "$RPC_HOST"
   printf '  ws:      ws%s://%s\n' "$(cert_available && printf s || true)" "$WS_HOST"
@@ -178,6 +181,7 @@ print_status() {
   printf 'upstream:  %s\n' "$UPSTREAM_HOST"
   printf 'app:       %s\n' "$APP_HOST"
   printf 'bridge:    %s\n' "$BRIDGE_HOST"
+  printf 'agent:     %s\n' "$AGENT_HOST"
   printf 'api:       %s\n' "$API_HOST"
   printf 'rpc:       %s\n' "$RPC_HOST"
   printf 'ws:        %s\n' "$WS_HOST"
@@ -203,6 +207,7 @@ PUBLIC_ROOT_DOMAIN=$(resolve_public_root_domain)
 UPSTREAM_HOST=$UPSTREAM_HOST
 APP_HOST=$APP_HOST
 BRIDGE_HOST=$BRIDGE_HOST
+AGENT_HOST=$AGENT_HOST
 API_HOST=$API_HOST
 RPC_HOST=$RPC_HOST
 WS_HOST=$WS_HOST

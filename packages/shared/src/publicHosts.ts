@@ -1,6 +1,7 @@
 const PUBLIC_SUBDOMAIN_PREFIXES = new Set([
   "app",
   "bridge",
+  "agent",
   "api",
   "rpc",
   "ws",
