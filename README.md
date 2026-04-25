@@ -1,6 +1,6 @@
 # Sinergy
 
-Sinergy is an agent-powered private trading appchain built natively on Initia.
+Sinergy is an agent-powered private trading appchain built natively on Initia, designed for privacy-first trading with seamless automatic execution.
 
 It transforms natural-language trading intents into validated, secure executions. By combining an AI strategy agent, privacy-preserving infrastructure, and native Initia liquidity routing, Sinergy offers a seamless, next-generation DeFi experience tailored for the Initia ecosystem.
 
@@ -17,12 +17,12 @@ Sinergy's demo flow is best evaluated as a guided path from user intent to priva
 
 | What to review | Where |
 | --- | --- |
-| Main app | `apps/web` |
-| Bridge app | `apps/bridge` |
-| Strategy agent | `services/strategy-agent` |
-| Private matcher and router | `services/matcher` |
-| EVM contracts | `contracts/src` |
-| ZK withdrawal circuit | `circuits/withdrawal.circom` |
+| Main app | [`apps/web`](apps/web) |
+| Bridge app | [`apps/bridge`](apps/bridge) |
+| Strategy agent | [`services/strategy-agent`](services/strategy-agent) |
+| Private matcher and router | [`services/matcher`](services/matcher) |
+| EVM contracts | [`contracts/src`](contracts/src) |
+| ZK withdrawal circuit | [`circuits/withdrawal.circom`](circuits/withdrawal.circom) |
 | Testnet deployment | [`deployments/testnet.json`](deployments/testnet.json) |
 
 ## Visual Demo Flow
@@ -67,6 +67,15 @@ Once approved, strategies run from one control surface. Orders, matching, strate
 - **ZK withdrawal architecture** with a Circom withdrawal circuit and Groth16 verifier path.
 
 Current live execution support is intentionally scoped: automatic execution is enabled for router-backed markets such as `cINIT/cUSDC` and `cETH/cUSDC`, and live short execution is not enabled yet.
+
+### Automatic Strategy Execution Proof
+
+Recent `Sinergy-2` testnet transactions showing automatic strategy executions:
+
+- [`CE4475F9DA21C56CCC982E0ACCFED043A1140C6DB9CDF11FA5A1857CBB7EDCD3`](https://scan.testnet.initia.xyz/initiation-2/txs/CE4475F9DA21C56CCC982E0ACCFED043A1140C6DB9CDF11FA5A1857CBB7EDCD3)
+- [`33B3B8E53ED648A481AA35EC5A216C3A9EA5737A72DC1007B0EB4501E7E05934`](https://scan.testnet.initia.xyz/initiation-2/txs/33B3B8E53ED648A481AA35EC5A216C3A9EA5737A72DC1007B0EB4501E7E05934)
+- [`D4F4A91A5846AB2DA588CB5E327E2E17F079C317AED64014F9BDE7040FF2FE9B`](https://scan.testnet.initia.xyz/initiation-2/txs/D4F4A91A5846AB2DA588CB5E327E2E17F079C317AED64014F9BDE7040FF2FE9B)
+- [`11A28B27350D83477ADE71B5CC928F7030529FB54ACFD85441236B7C106084F4`](https://scan.testnet.initia.xyz/initiation-2/txs/11A28B27350D83477ADE71B5CC928F7030529FB54ACFD85441236B7C106084F4)
 
 ## How It Works
 
