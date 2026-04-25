@@ -1,10 +1,10 @@
 # Trading Agent and strategy tooling
 
-This document explains how Sinergy's trading/strategy agent works, which tools it can use, how it communicates with the `matcher`, and which areas matter most when operating or extending it.
+This document explains how Sinergy's trading/strategy agent works, which tools it can use, how it communicates with the `matcher`, and how created strategies move into signed live execution.
 
 ## Summary
 
-The agent lives in `services/strategy-agent` and exposes a Fastify HTTP API under `/agent/*`. Its job is not to place live orders: it interprets a user goal, creates or modifies strategies, validates the payload, and runs backtests through a closed set of tools served by the `matcher`.
+The agent lives in `services/strategy-agent` and exposes a Fastify HTTP API under `/agent/*`. It interprets a user goal, creates or modifies strategies, validates the payload, and runs backtests through a closed set of tools served by the `matcher`. Once a strategy is saved, the frontend and matcher can move it into live execution through signed strategy approvals and the execution endpoints.
 
 The main flow is:
 
@@ -27,6 +27,8 @@ The main flow is:
 | Shared tool contract | `packages/shared/src/strategy-tools/*` | Definitions, strict schemas, HTTP transport, and limits. |
 | Matcher tool API | `services/matcher/src/services/strategyToolApi.ts` | Dispatches each tool to `StrategyService`. |
 | Strategy service | `services/matcher/src/services/strategyService.ts` | Capabilities, templates, drafts, validation, compilation, and backtesting. |
+| Execution service | `services/matcher/src/services/strategyExecution.ts` | Inspects approved strategies, resolves live signals, executes router-backed swaps, and records execution history. |
+| Auto execution worker | `services/matcher/src/services/autoStrategyWorker.ts` | Polls active strategies, evaluates fresh candles, runs approved executions, and marks strategies that need reactivation. |
 | Web UI | `apps/web/src/components/StrategyAgentPanel.tsx` | Chat/plan/run UI, SSE handling, session history, and result rendering. |
 
 ## Agent API
@@ -317,10 +319,40 @@ Metrics include successful/failed tool calls, first-pass validation success, rep
 - In run mode, calls `/agent/strategy/run/stream` and renders SSE events.
 - Converts the `toolTrace` from `run_strategy_backtest` into a `StrategyBacktestBundle` containing `summary`, `trades`, and `overlay`.
 - Keeps per-owner session history and allows reviewing the strategy/backtest.
+- Saves valid strategies before execution, creates typed execution intents, collects wallet signatures, stores approvals, and can trigger approved execution.
+- Can bridge funding through the local OPinit deposit flow, activate automatic execution, and open live monitoring.
+
+`StrategyDashboardPage.tsx` is the live control surface:
+
+- Lists saved strategies with latest backtest snapshots and auto-execution status.
+- Enables or disables automatic execution for router-supported markets.
+- Shows live overlays, execution rows, monitor events, current position, and PnL summaries.
+
+## Live strategy execution
+
+Live execution is handled by the matcher rather than the agent tool loop. The flow is:
+
+1. The strategy is validated and saved.
+2. The frontend calls `POST /strategy/execution/intent` to build a typed approval payload.
+3. The wallet signs the strategy approval.
+4. The frontend calls `POST /strategy/execution/approve` to store the approval.
+5. The strategy can be run once with `POST /strategy/execution/execute`, or activated with `POST /strategy/auto/activate`.
+6. `AutoStrategyWorker` checks active strategies on an interval, evaluates fresh candles, executes approved signals, and records history.
+
+The matcher also exposes:
+
+- `GET /strategy/execution/:strategyId`
+- `GET /strategy/execution/history/:ownerAddress`
+- `GET /strategy/execution/live-overlay/:ownerAddress/:strategyId`
+- `GET /strategy/dashboard/:ownerAddress`
+- `POST /strategy/auto/deactivate`
+
+Current scope: automatic live execution is enabled for router-backed markets and live short execution is not supported yet.
 
 ## Key behaviors and guardrails
 
-- The agent does not promise live trading or paper trading; the current system supports strategy creation, validation, and backtesting.
+- The agent creates, validates, backtests, and saves strategies; live execution is handled by signed matcher execution approvals and the strategy execution service.
+- Automatic live execution currently requires a saved strategy, a fresh approval, and a router-supported market.
 - `delete_strategy` exists in the matcher but is blocked for the agent.
 - Schemas are strict: extra root-level keys fail validation.
 - `update_strategy_draft` only accepts `{ ownerAddress, strategy }`.
@@ -348,4 +380,3 @@ Metrics include successful/failed tool calls, first-pass validation success, rep
 | Backtest does not run | Check whether validation passed, whether enough candles exist, and whether `bars` is `<= 200000`. |
 | The agent keeps repeating steps | Inspect `toolTrace`, warnings such as `stalledTurns` or `loopsAborted`, and only increase `AGENT_MAX_STEPS` if the workflow really needs more steps. |
 | The frontend cannot reach the agent | Set `VITE_AGENT_URL` or check the `/agent` proxy in dev/deploy. |
-
