@@ -13,7 +13,7 @@ Sinergy's demo flow is best evaluated as a guided path from user intent to priva
 1. **Describe a strategy** in natural language.
 2. **Let the Sinergy Agent compile, validate, and backtest it** before capital is deployed.
 3. **Bridge assets from Initia L1 into `Sinergy-2`** through the DarkVault flow.
-4. **Run and monitor multiple private strategies** while only commitments, proofs, and settlement metadata are public.
+4. **Authorize, execute, and monitor live strategies** while only commitments, proofs, and settlement metadata are public.
 
 | What to review | Where |
 | --- | --- |
@@ -31,7 +31,7 @@ Sinergy's demo flow is best evaluated as a guided path from user intent to priva
 
 ![Sinergy overview flow](apps/web/public/Slides/image.png)
 
-Users describe their trading idea in plain language. Sinergy turns that intent into a validated, backtested strategy that can be prepared for private execution inside DarkVault.
+Users describe their trading idea in plain language. Sinergy turns that intent into a validated, backtested strategy that can be authorized, funded, and executed inside DarkVault.
 
 ### 2. From Initia L1 to Sinergy Rollup L2
 
@@ -43,7 +43,7 @@ Assets enter from Initia L1 through a verified bridge flow. Public settlement an
 
 ![Sinergy agent strategy generation and backtesting](apps/web/public/Slides/image3.png)
 
-The Sinergy Agent compiles a strategy draft, validates the rules and risk settings, and runs historical backtests before execution. The goal is to make advanced strategy creation feel conversational without exposing the trading plan to a public orderbook.
+The Sinergy Agent compiles a strategy draft, validates the rules and risk settings, and runs historical backtests before live execution. The goal is to make advanced strategy creation feel conversational without exposing the trading plan to a public orderbook.
 
 ### 4. Execution and Monitoring
 
@@ -56,11 +56,17 @@ Once approved, strategies run from one control surface. Orders, matching, strate
 - **Initia-native wallet UX** through `InterwovenKit`, including Initia username display when available.
 - **Natural-language strategy generation** through the Strategy Agent.
 - **Rule validation and historical backtesting** before execution.
+- **Signed live strategy approvals** using typed execution intents.
+- **Manual approved execution** through `/strategy/execution/execute`.
+- **Automatic strategy execution** through an `AutoStrategyWorker` that monitors active strategies and runs new checks.
+- **Live strategy dashboard and execution history** with status, live overlays, trade rows, and PnL summaries.
 - **Private matcher and router** for internal fills and external liquidity routing.
 - **DarkVault settlement flow** with a minimal public footprint.
 - **MiniEVM rollup deployment** on `Sinergy-2`.
 - **OPinit bridge-oriented asset flow** for connected Initia assets.
 - **ZK withdrawal architecture** with a Circom withdrawal circuit and Groth16 verifier path.
+
+Current live execution support is intentionally scoped: automatic execution is enabled for router-backed markets such as `cINIT/cUSDC` and `cETH/cUSDC`, and live short execution is not enabled yet.
 
 ## How It Works
 
@@ -68,8 +74,10 @@ Once approved, strategies run from one control surface. Orders, matching, strate
 2. **Contextual Awareness**: The agent input layer automatically builds the necessary prompt payload with real-time market and timeframe context.
 3. **AI Strategy Generation**: The AI agent interprets the request, drafts the strategy constraints, and orchestrates necessary trading tools.
 4. **Validation & Backtesting**: The system strictly validates rules and runs historical backtesting to ensure the strategy behaves as intended *before* any capital is deployed.
-5. **Private Settlement**: Approved execution state is anchored securely and privately on our `Sinergy-2` MiniEVM rollup.
-6. **Smart Routing**: When needed, the private matcher can seamlessly source deep liquidity from `InitiaDEX` and the broader Initia L1 (`initiation-2`).
+5. **Execution Approval**: The user signs a typed execution intent for the saved strategy, including strategy hash, market, nonce, deadline, and slippage guardrails.
+6. **Live Execution**: Approved strategies can be executed manually or activated for automatic monitoring by the matcher-side `AutoStrategyWorker`.
+7. **Private Settlement**: Execution state is anchored securely and privately on our `Sinergy-2` MiniEVM rollup.
+8. **Smart Routing**: When needed, the private matcher can source liquidity through router-backed markets connected to Initia liquidity.
 
 ## Why Privacy Matters in Sinergy
 
@@ -101,6 +109,7 @@ Sinergy also natively surfaces Initia usernames for connected wallets. When a wa
 - **Agent Layer**: Translates natural-language strategy intent into an executable plan, complete with validation and repair loops.
 - **Dark Vault**: Secures user funds within the settlement flow while minimizing the on-chain footprint and exposure of trading intent.
 - **Private Matcher & Router**: Handles private balances, executes local fills, and arbitrates external liquidity routing.
+- **Strategy Execution Engine**: Evaluates saved strategies against live candles, records execution history, and coordinates approved router swaps or no-action checks.
 - **Bridge-Backed Assets**: Natively operates using Initia-connected bridging standards.
 
 ## Live Testnet Snapshot
