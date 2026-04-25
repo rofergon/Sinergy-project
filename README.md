@@ -6,6 +6,14 @@ It transforms natural-language trading intents into validated, secure executions
 
 At its core, Sinergy is about making advanced trading feel simple without forcing users to expose their full intent on public rails. Instead of broadcasting strategy logic, order flow, and execution decisions to an open orderbook, Sinergy keeps sensitive trading coordination inside a private execution layer while still anchoring custody and settlement guarantees on `Sinergy-2`.
 
+## Live MVP
+
+The Sinergy MVP is functional and publicly available for judges during the hackathon review period:
+
+**[Launch the Sinergy Trading Agent MVP](https://app.sinergyco.xyz/)**
+
+The live MVP runs from a private server and is published through a Cloudflare Tunnel, so the origin server does not need to expose router ports directly to the public Internet. The tunnel routes the public Sinergy testnet surfaces to the private deployment, including the trading web app, bridge UI, matcher API, rollup RPC, REST, Tendermint, websocket, and indexer endpoints.
+
 ## Judge Quick Start
 
 Sinergy's demo flow is best evaluated as a guided path from user intent to private execution:
