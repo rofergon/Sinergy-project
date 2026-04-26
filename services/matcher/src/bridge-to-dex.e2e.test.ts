@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SinergyDeployment } from "@sinergy/shared";
-import { erc20Abi } from "@sinergy/shared";
+import { computeNoteCommitment, darkVaultV2Abi, erc20Abi } from "@sinergy/shared";
 import {
   decodeFunctionData,
   encodeAbiParameters,
@@ -26,6 +26,8 @@ type TokenLedger = Map<string, Map<string, bigint>>;
 const MATCHER_ADDRESS = "0x6eC8AcC95Da5f752eCeAB1c214C1b62080023283" as Address;
 const USER_ADDRESS = "0x6710B53Fad43E53ce0d3d3AbE299c38b4a39239d" as Address;
 const VAULT_ADDRESS = "0x3fF37bE2C8B8179cBfd97CB1e75fEd91e5e38B19" as Address;
+const ZK_VAULT_ADDRESS = "0xAE1eB47fE4361f9d40E61ec18B276B2dD19425F9" as Address;
+const STATE_ANCHOR_ADDRESS = "0xC971AdD80E3aAE5F457967B2aF62198884eF4bF8" as Address;
 const MARKET_ADDRESS = "0xe1d9c4EcC2ba58274733C61Fb25919F0eA902575" as Address;
 const CUSDC_ADDRESS = "0x6Ef1eB5AE5C6824F8B6ECA81E2DB193966D95967" as Address;
 const CINIT_ADDRESS = "0x308B830b96998E9080616C504C7562473E2d85df" as Address;
@@ -66,6 +68,65 @@ function makeDepositLog(user: Address, token: Address, amountAtomic: bigint, vau
     eventName: "Deposit",
     args: {
       user,
+      token
+    }
+  });
+  const topics = (Array.isArray(rawTopics) ? rawTopics.flat() : [rawTopics]).filter(
+    (topic): topic is Hex => typeof topic === "string" && topic.startsWith("0x")
+  );
+
+  return {
+    address: vaultAddress,
+    topics,
+    data: encodeAbiParameters([{ name: "amount", type: "uint256" }], [amountAtomic])
+  };
+}
+
+function makeWithdrawLog(
+  recipient: Address,
+  token: Address,
+  amountAtomic: bigint,
+  nonce: bigint,
+  vaultAddress: Address
+) {
+  const rawTopics = encodeEventTopics({
+    abi: darkPoolVaultAbi,
+    eventName: "Withdraw",
+    args: {
+      recipient,
+      token
+    }
+  });
+  const topics = (Array.isArray(rawTopics) ? rawTopics.flat() : [rawTopics]).filter(
+    (topic): topic is Hex => typeof topic === "string" && topic.startsWith("0x")
+  );
+
+  return {
+    address: vaultAddress,
+    topics,
+    data: encodeAbiParameters(
+      [
+        { name: "amount", type: "uint256" },
+        { name: "nonce", type: "uint256" }
+      ],
+      [amountAtomic, nonce]
+    )
+  };
+}
+
+function makeZkDepositLog(
+  depositor: Address,
+  token: Address,
+  amountAtomic: bigint,
+  receiverCommitment: Hex,
+  vaultAddress: Address
+) {
+  const rawTopics = encodeEventTopics({
+    abi: darkVaultV2Abi,
+    eventName: "Deposit",
+    args: {
+      depositor,
+      receiverCommitment,
       token
     }
   });
@@ -177,6 +238,13 @@ function createHarness(bridgedUsdcAtomic: bigint) {
   const markets = resolveMarkets(deployment);
   const store = new StateStore(join(root, "state.json"));
   const chainBalances: TokenLedger = new Map();
+  const receipts = new Map<
+    string,
+    {
+      status: "success" | "reverted";
+      logs: Array<{ address: Address; topics: Hex[]; data: Hex }>;
+    }
+  >();
   const owners = new Map<string, Address>([
     [keyOf(CUSDC_ADDRESS), MATCHER_ADDRESS],
     [keyOf(CINIT_ADDRESS), MATCHER_ADDRESS],
@@ -234,6 +302,13 @@ function createHarness(bridgedUsdcAtomic: bigint) {
     },
     async waitForTransactionReceipt({ hash }: { hash: Hex }) {
       return { hash };
+    },
+    async getTransactionReceipt({ hash }: { hash: Hex }) {
+      const receipt = receipts.get(keyOf(hash));
+      if (!receipt) {
+        throw new Error(`Receipt not found for ${hash}`);
+      }
+      return receipt;
     }
   };
 
@@ -245,21 +320,26 @@ function createHarness(bridgedUsdcAtomic: bigint) {
       }
 
       const txHash = `0x${(txCounter + 1000).toString(16).padStart(64, "0")}` as Hex;
-      const decoded = decodeFunctionData({
-        abi: erc20Abi,
-        data: pendingTx.data
-      });
+      try {
+        const decoded = decodeFunctionData({
+          abi: erc20Abi,
+          data: pendingTx.data
+        });
 
-      if (decoded.functionName === "mint") {
-        const [to, amount] = decoded.args as [Address, bigint];
-        addTokenBalance(chainBalances, pendingTx.to, to, amount);
-      } else if (decoded.functionName === "burn") {
-        const [from, amount] = decoded.args as [Address, bigint];
-        addTokenBalance(chainBalances, pendingTx.to, from, -amount);
-      } else if (decoded.functionName === "transfer") {
-        const [to, amount] = decoded.args as [Address, bigint];
-        addTokenBalance(chainBalances, pendingTx.to, MATCHER_ADDRESS, -amount);
-        addTokenBalance(chainBalances, pendingTx.to, to, amount);
+        if (decoded.functionName === "mint") {
+          const [to, amount] = decoded.args as [Address, bigint];
+          addTokenBalance(chainBalances, pendingTx.to, to, amount);
+        } else if (decoded.functionName === "burn") {
+          const [from, amount] = decoded.args as [Address, bigint];
+          addTokenBalance(chainBalances, pendingTx.to, from, -amount);
+        } else if (decoded.functionName === "transfer") {
+          const [to, amount] = decoded.args as [Address, bigint];
+          addTokenBalance(chainBalances, pendingTx.to, MATCHER_ADDRESS, -amount);
+          addTokenBalance(chainBalances, pendingTx.to, to, amount);
+        }
+      } catch {
+        // Non-ERC20 matcher transactions, such as state root anchors, are not material
+        // to this harness' token ledger.
       }
 
       pendingTx = null;
@@ -321,6 +401,7 @@ function createHarness(bridgedUsdcAtomic: bigint) {
     markets,
     store,
     chainBalances,
+    receipts,
     bridgeClaimService,
     publicClient,
     walletClient,
@@ -354,6 +435,10 @@ async function claimAndDepositQuote(
 
   addTokenBalance(harness.chainBalances, CUSDC_ADDRESS, USER_ADDRESS, -amountAtomic);
   addTokenBalance(harness.chainBalances, CUSDC_ADDRESS, VAULT_ADDRESS, amountAtomic);
+  harness.receipts.set(keyOf(txHash), {
+    status: "success",
+    logs: [makeDepositLog(USER_ADDRESS, CUSDC_ADDRESS, amountAtomic, VAULT_ADDRESS)]
+  });
 
   const vaultService = new VaultService(
     harness.store,
@@ -363,11 +448,7 @@ async function claimAndDepositQuote(
     harness.tokens,
     harness.markets
   );
-  const syncDeposit = await vaultService.syncDeposit(
-    txHash,
-    USER_ADDRESS,
-    [makeDepositLog(USER_ADDRESS, CUSDC_ADDRESS, amountAtomic, VAULT_ADDRESS)]
-  );
+  const syncDeposit = await vaultService.syncDeposit(txHash, USER_ADDRESS);
 
   assert.equal(syncDeposit.alreadyProcessed, false);
   if (syncDeposit.alreadyProcessed || !("token" in syncDeposit) || !("amountAtomic" in syncDeposit)) {
@@ -375,6 +456,16 @@ async function claimAndDepositQuote(
   }
   assert.equal(syncDeposit.token, "cUSDC");
   assert.equal(syncDeposit.amountAtomic, amountAtomic.toString());
+
+  const afterFirstSync = BigInt(
+    harness.store.get().balances[keyOf(USER_ADDRESS)]?.[keyOf(CUSDC_ADDRESS)] ?? "0"
+  );
+  const repeatedSync = await vaultService.syncDeposit(txHash, USER_ADDRESS);
+  assert.equal(repeatedSync.alreadyProcessed, true);
+  assert.equal(
+    BigInt(harness.store.get().balances[keyOf(USER_ADDRESS)]?.[keyOf(CUSDC_ADDRESS)] ?? "0"),
+    afterFirstSync
+  );
 }
 
 function createRouterStack(
@@ -497,6 +588,196 @@ async function drainWorker(worker: RebalanceWorker) {
   await (worker as any).tick();
   await (worker as any).tick();
 }
+
+test("vault deposit sync ignores client-supplied logs and requires receipt logs from the configured vault", async () => {
+  const harness = createHarness(0n);
+  const txHash = "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" as Hex;
+  const amountAtomic = 1_000_000n;
+  const forgedLog = makeDepositLog(USER_ADDRESS, CUSDC_ADDRESS, amountAtomic, VAULT_ADDRESS);
+
+  try {
+    const vaultService = new VaultService(
+      harness.store,
+      harness.publicClient as any,
+      harness.walletClient as any,
+      harness.deployment,
+      harness.tokens,
+      harness.markets
+    );
+
+    harness.receipts.set(keyOf(txHash), {
+      status: "success",
+      logs: []
+    });
+
+    await assert.rejects(
+      () => vaultService.syncDeposit(txHash, USER_ADDRESS, [forgedLog]),
+      /No vault deposit event found/
+    );
+    assert.equal(harness.store.get().balances[keyOf(USER_ADDRESS)]?.[keyOf(CUSDC_ADDRESS)], undefined);
+
+    harness.receipts.set(keyOf(txHash), {
+      status: "success",
+      logs: [makeDepositLog(USER_ADDRESS, CUSDC_ADDRESS, amountAtomic, MARKET_ADDRESS)]
+    });
+    await assert.rejects(
+      () => vaultService.syncDeposit(txHash, USER_ADDRESS),
+      /No vault deposit event found/
+    );
+    assert.equal(harness.store.get().balances[keyOf(USER_ADDRESS)]?.[keyOf(CUSDC_ADDRESS)], undefined);
+
+    harness.receipts.set(keyOf(txHash), {
+      status: "reverted",
+      logs: [forgedLog]
+    });
+    await assert.rejects(
+      () => vaultService.syncDeposit(txHash, USER_ADDRESS),
+      /Vault transaction was not successful/
+    );
+    assert.equal(harness.store.get().balances[keyOf(USER_ADDRESS)]?.[keyOf(CUSDC_ADDRESS)], undefined);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("vault zk deposit sync validates the receipt commitment before crediting balances", async () => {
+  const harness = createHarness(0n);
+  const badTxHash = "0xf000000000000000000000000000000000000000000000000000000000000001" as Hex;
+  const goodTxHash = "0xf000000000000000000000000000000000000000000000000000000000000002" as Hex;
+  const amountAtomic = 3_000_000n;
+  const zkNote = {
+    secret: "123456789",
+    blinding: "987654321",
+    token: CUSDC_ADDRESS,
+    amountAtomic
+  };
+  const commitment = await computeNoteCommitment(zkNote);
+  const wrongCommitment = await computeNoteCommitment({
+    ...zkNote,
+    blinding: "111111111"
+  });
+
+  try {
+    harness.deployment.contracts.zkVault = ZK_VAULT_ADDRESS;
+    harness.deployment.contracts.stateAnchor = STATE_ANCHOR_ADDRESS;
+    const vaultService = new VaultService(
+      harness.store,
+      harness.publicClient as any,
+      harness.walletClient as any,
+      harness.deployment,
+      harness.tokens,
+      harness.markets
+    );
+
+    harness.receipts.set(keyOf(badTxHash), {
+      status: "success",
+      logs: [
+        makeZkDepositLog(
+          USER_ADDRESS,
+          CUSDC_ADDRESS,
+          amountAtomic,
+          wrongCommitment,
+          ZK_VAULT_ADDRESS
+        )
+      ]
+    });
+    await assert.rejects(
+      () =>
+        vaultService.syncDeposit(badTxHash, USER_ADDRESS, undefined, {
+          commitment,
+          secret: zkNote.secret,
+          blinding: zkNote.blinding
+        }),
+      /Provided ZK note does not match the on-chain deposit commitment/
+    );
+    assert.equal(harness.store.get().balances[keyOf(USER_ADDRESS)]?.[keyOf(CUSDC_ADDRESS)], undefined);
+
+    harness.receipts.set(keyOf(goodTxHash), {
+      status: "success",
+      logs: [makeZkDepositLog(USER_ADDRESS, CUSDC_ADDRESS, amountAtomic, commitment, ZK_VAULT_ADDRESS)]
+    });
+    const result = await vaultService.syncDeposit(goodTxHash, USER_ADDRESS, undefined, {
+      commitment,
+      secret: zkNote.secret,
+      blinding: zkNote.blinding
+    });
+
+    assert.equal(result.alreadyProcessed, false);
+    if (result.alreadyProcessed || !("mode" in result) || !("amountAtomic" in result)) {
+      throw new Error("ZK deposit should not be marked as already processed in the harness");
+    }
+    assert.equal(result.mode, "zk");
+    assert.equal(result.amountAtomic, amountAtomic.toString());
+    assert.equal(harness.store.get().balances[keyOf(USER_ADDRESS)]?.[keyOf(CUSDC_ADDRESS)], amountAtomic.toString());
+    assert.equal(harness.store.get().zkNotes.length, 1);
+    assert.equal(harness.store.get().zkNotes[0]?.commitment, commitment);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("vault withdrawal sync ignores client-supplied logs and unlocks only receipt-confirmed withdrawals", async () => {
+  const harness = createHarness(0n);
+  const txHash = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" as Hex;
+  const amountAtomic = 2_000_000n;
+  const nonce = 7n;
+  const validLog = makeWithdrawLog(USER_ADDRESS, CUSDC_ADDRESS, amountAtomic, nonce, VAULT_ADDRESS);
+
+  try {
+    const vaultService = new VaultService(
+      harness.store,
+      harness.publicClient as any,
+      harness.walletClient as any,
+      harness.deployment,
+      harness.tokens,
+      harness.markets
+    );
+
+    harness.store.mutate((state) => {
+      state.locked[keyOf(USER_ADDRESS)] = {
+        [keyOf(CUSDC_ADDRESS)]: amountAtomic.toString()
+      };
+      state.pendingWithdrawals.push({
+        userAddress: USER_ADDRESS,
+        token: CUSDC_ADDRESS,
+        amountAtomic: amountAtomic.toString(),
+        nonce: Number(nonce),
+        deadline: Math.floor(Date.now() / 1000) + 60
+      });
+    });
+
+    harness.receipts.set(keyOf(txHash), {
+      status: "success",
+      logs: []
+    });
+    await assert.rejects(
+      () => vaultService.syncWithdrawal(txHash, USER_ADDRESS, [validLog]),
+      /No vault withdrawal event found/
+    );
+    assert.equal(harness.store.get().pendingWithdrawals.length, 1);
+    assert.equal(
+      harness.store.get().locked[keyOf(USER_ADDRESS)]?.[keyOf(CUSDC_ADDRESS)],
+      amountAtomic.toString()
+    );
+
+    harness.receipts.set(keyOf(txHash), {
+      status: "success",
+      logs: [validLog]
+    });
+    const result = await vaultService.syncWithdrawal(txHash, USER_ADDRESS);
+    assert.equal(result.alreadyProcessed, false);
+    assert.equal(result.mode, "legacy");
+    assert.equal(result.nonce, Number(nonce));
+    assert.equal(harness.store.get().pendingWithdrawals.length, 0);
+    assert.equal(harness.store.get().locked[keyOf(USER_ADDRESS)]?.[keyOf(CUSDC_ADDRESS)], "0");
+
+    const repeated = await vaultService.syncWithdrawal(txHash, USER_ADDRESS);
+    assert.equal(repeated.alreadyProcessed, true);
+    assert.equal(harness.store.get().pendingWithdrawals.length, 0);
+  } finally {
+    harness.restore();
+  }
+});
 
 test("end-to-end bridge-backed cUSDC can be claimed, deposited, and swapped into cINIT", async () => {
   const harness = createHarness(5_000_000n);
