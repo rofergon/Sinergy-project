@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import type { TxPopupData } from "./TransactionPopup";
-import { MsgCallResponse } from "@initia/initia.proto/minievm/evm/v1/tx";
 import { useInterwovenKit } from "@initia/interwovenkit-react";
 import type { EncodeObject } from "@cosmjs/proto-signing";
 import type { StdFee } from "@cosmjs/amino";
@@ -34,66 +33,6 @@ type Props = {
   onAfterMutation: () => Promise<void>;
   showTx: (data: TxPopupData) => void;
 };
-
-type SyncLog = {
-  address: Address;
-  topics: Hex[];
-  data: Hex;
-};
-
-function decodeMsgCallLogs(messageResponses: Array<{ typeUrl: string; value: Uint8Array }>) {
-  return messageResponses.flatMap((response) => {
-    if (response.typeUrl !== "/minievm.evm.v1.MsgCallResponse") {
-      return [];
-    }
-
-    try {
-      const decoded = MsgCallResponse.decode(response.value);
-      return decoded.logs.map(
-        (log) =>
-          ({
-            address: log.address as Address,
-            topics: log.topics as Hex[],
-            data: (log.data || "0x") as Hex,
-          }) satisfies SyncLog
-      );
-    } catch {
-      return [];
-    }
-  });
-}
-
-/**
- * Fallback: extract EVM logs from tx events when msgResponses-based
- * decoding returns nothing (can happen with certain InterwovenKit /
- * CosmJS versions on minievm chains).
- */
-function extractEvmLogsFromEvents(
-  events: readonly { readonly type: string; readonly attributes: readonly { readonly key: string; readonly value: string }[] }[]
-): SyncLog[] {
-  return events.flatMap((event) => {
-    if (event.type !== "evm") return [];
-    return event.attributes.flatMap((attr) => {
-      if (attr.key !== "log") return [];
-      try {
-        const parsed = JSON.parse(attr.value) as {
-          address: string;
-          topics: string[];
-          data: string;
-        };
-        return [
-          {
-            address: parsed.address as Address,
-            topics: parsed.topics as Hex[],
-            data: (parsed.data || "0x") as Hex,
-          } satisfies SyncLog,
-        ];
-      } catch {
-        return [];
-      }
-    });
-  });
-}
 
 export function VaultPanel({
   connected,
@@ -284,21 +223,12 @@ export function VaultPanel({
         })
       );
 
-      let logs = decodeMsgCallLogs(depositTx.msgResponses);
-      if (logs.length === 0 && depositTx.events) {
-        logs = extractEvmLogsFromEvents(depositTx.events);
-      }
-      if (logs.length === 0) {
-        throw new Error("Deposit completed but no EVM logs were returned.");
-      }
-
       await api("/vault/sync-deposit", {
         method: "POST",
         authAddress: address,
         body: JSON.stringify({
           txHash: depositTx.transactionHash,
           userAddress: address,
-          logs,
           zkNote: preparedZkNote
             ? {
                 commitment: preparedZkNote.commitment,
@@ -432,21 +362,12 @@ export function VaultPanel({
       );
       broadcasted = true;
 
-      let logs = decodeMsgCallLogs(withdrawTx.msgResponses);
-      if (logs.length === 0 && withdrawTx.events) {
-        logs = extractEvmLogsFromEvents(withdrawTx.events);
-      }
-      if (logs.length === 0) {
-        throw new Error("Withdrawal completed but no EVM logs were returned.");
-      }
-
       await api("/vault/sync-withdrawal", {
         method: "POST",
         authAddress: address,
         body: JSON.stringify({
           txHash: withdrawTx.transactionHash,
           userAddress: address,
-          logs,
         }),
       });
 
