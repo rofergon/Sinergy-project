@@ -14,6 +14,14 @@ The Sinergy MVP is functional and publicly available for judges during the hacka
 
 The live MVP runs from a private server and is published through a Cloudflare Tunnel, so the origin server does not need to expose router ports directly to the public Internet. The tunnel routes the public Sinergy testnet surfaces to the private deployment, including the trading web app, bridge UI, matcher API, rollup RPC, REST, Tendermint, websocket, and indexer endpoints.
 
+## Documentation Reference
+
+Dive deeper into Sinergy's technical design:
+- **Sinergy-2 Testnet Layer 2**: [docs/sinergy-2-testnet-layer2.md](docs/sinergy-2-testnet-layer2.md)
+- **DarkVault Privacy Model**: [docs/darkvault-privacy.md](docs/darkvault-privacy.md)
+- **Trading Agent Tooling**: [docs/trading-agent-tooling.md](docs/trading-agent-tooling.md)
+
+
 ## Judge Quick Start
 
 Sinergy's demo flow is best evaluated as a guided path from user intent to private execution:
@@ -318,9 +326,3 @@ npm run dev:bridge:testnet
 
 Users can enable auto-sign from the **Dark Vault** panel. The current setup strictly grants `MsgCall` permission on `Sinergy-2`, covering vault interactions while keeping the L1 bridge flow explicitly user-confirmed for safety.
 
-## Documentation Reference
-
-Dive deeper into Sinergy's technical design:
-- **Sinergy-2 Testnet Layer 2**: [docs/sinergy-2-testnet-layer2.md](docs/sinergy-2-testnet-layer2.md)
-- **DarkVault Privacy Model**: [docs/darkvault-privacy.md](docs/darkvault-privacy.md)
-- **Trading Agent Tooling**: [docs/trading-agent-tooling.md](docs/trading-agent-tooling.md)
