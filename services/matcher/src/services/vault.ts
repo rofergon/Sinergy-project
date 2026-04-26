@@ -6,7 +6,8 @@ import {
   encodeFunctionData,
   http,
   isAddressEqual,
-  parseEventLogs
+  parseEventLogs,
+  zeroAddress
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { SinergyDeployment } from "@sinergy/shared";
@@ -26,6 +27,10 @@ import { getZkMerkleRoot, nowIso, releaseExpiredZkNoteLocks } from "./zkState.js
 
 function keyOf(value: string): string {
   return value.toLowerCase();
+}
+
+function isConfiguredAddress(value?: Address): value is Address {
+  return Boolean(value && !isAddressEqual(value, zeroAddress));
 }
 
 function readBucket(
@@ -308,22 +313,26 @@ export class VaultService {
     });
   }
 
-  private async resolveExecutionLogs(
-    txHash: string,
-    logs?: Array<{ address: Address; topics: Hex[]; data: Hex }>
-  ) {
-    if (logs && logs.length > 0) {
-      return logs;
+  private async getSuccessfulReceiptLogs(txHash: string) {
+    const receipt = await this.publicClient.getTransactionReceipt({ hash: txHash as Hex });
+    if (receipt.status !== "success") {
+      throw new Error("Vault transaction was not successful");
+    }
+    return receipt.logs;
+  }
+
+  private filterLogsByEmitter(logs: ReadonlyArray<{ address: Address }>, emitter?: Address) {
+    if (!isConfiguredAddress(emitter)) {
+      return [];
     }
 
-    const receipt = await this.publicClient.getTransactionReceipt({ hash: txHash as Hex });
-    return receipt.logs;
+    return logs.filter((log) => isAddressEqual(log.address, emitter));
   }
 
   async syncDeposit(
     txHash: string,
     userAddress: Address,
-    logs?: Array<{ address: Address; topics: Hex[]; data: Hex }>,
+    _logs?: Array<{ address: Address; topics: Hex[]; data: Hex }>,
     zkNote?: {
       commitment: Hex;
       secret: string;
@@ -335,16 +344,18 @@ export class VaultService {
       return { alreadyProcessed: true };
     }
 
-    const executionLogs = await this.resolveExecutionLogs(txHash, logs);
+    const executionLogs = await this.getSuccessfulReceiptLogs(txHash);
+    const legacyLogs = this.filterLogsByEmitter(executionLogs, this.deployment.contracts.vault);
+    const zkLogs = this.filterLogsByEmitter(executionLogs, this.deployment.contracts.zkVault);
     const parsedLegacyLogs = parseEventLogs({
       abi: darkPoolVaultAbi,
       eventName: "Deposit",
-      logs: executionLogs as any
+      logs: legacyLogs as any
     });
     const parsedZkLogs = parseEventLogs({
       abi: darkVaultV2Abi,
       eventName: "Deposit",
-      logs: executionLogs as any
+      logs: zkLogs as any
     });
 
     const legacyDepositLog = parsedLegacyLogs.find((log) =>
@@ -547,7 +558,7 @@ export class VaultService {
   async syncWithdrawal(
     txHash: string,
     userAddress: Address,
-    logs?: Array<{ address: Address; topics: Hex[]; data: Hex }>
+    _logs?: Array<{ address: Address; topics: Hex[]; data: Hex }>
   ) {
     return this.store.mutateAsync(async (state) => {
       const txKey = keyOf(txHash);
@@ -555,16 +566,18 @@ export class VaultService {
         return { alreadyProcessed: true };
       }
 
-      const executionLogs = await this.resolveExecutionLogs(txHash, logs);
+      const executionLogs = await this.getSuccessfulReceiptLogs(txHash);
+      const legacyLogs = this.filterLogsByEmitter(executionLogs, this.deployment.contracts.vault);
+      const zkLogs = this.filterLogsByEmitter(executionLogs, this.deployment.contracts.zkVault);
       const parsedLegacyLogs = parseEventLogs({
         abi: darkPoolVaultAbi,
         eventName: "Withdraw",
-        logs: executionLogs as any
+        logs: legacyLogs as any
       });
       const parsedZkLogs = parseEventLogs({
         abi: darkVaultV2Abi,
         eventName: "Withdraw",
-        logs: executionLogs as any
+        logs: zkLogs as any
       });
 
       const legacyWithdrawLog = parsedLegacyLogs.find((log) =>
