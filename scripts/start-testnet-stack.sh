@@ -161,11 +161,39 @@ start_matcher() {
   wait_for_http "$MATCHER_HEALTH_URL" "matcher health"
 }
 
+ensure_strategy_agent_service() {
+  local unit_dir="${HOME}/.config/systemd/user"
+  local unit_file="${unit_dir}/sinergy-strategy-agent.service"
+  mkdir -p "$unit_dir"
+
+  cat >"$unit_file" <<EOF
+[Unit]
+Description=Sinergy strategy agent
+After=network.target sinergy-matcher.service
+
+[Service]
+Type=simple
+WorkingDirectory=$ROOT_DIR/services/strategy-agent
+ExecStart=/bin/bash -lc 'set -a && if [ -f ./.env ]; then . ./.env; fi && set +a && exec node --import tsx src/index.ts'
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+EOF
+
+  systemctl --user daemon-reload
+}
+
 start_strategy_agent() {
-  start_background_process \
-    "strategy-agent" \
-    "8790" \
-    "cd '$ROOT_DIR/services/strategy-agent' && npm run dev"
+  ensure_strategy_agent_service
+
+  if systemctl --user is-active --quiet sinergy-strategy-agent.service; then
+    log "strategy agent service already active"
+  else
+    log "starting strategy agent service"
+    systemctl --user restart sinergy-strategy-agent.service
+  fi
 
   wait_for_http "$STRATEGY_AGENT_URL" "strategy agent" 30 1 || true
 }
@@ -194,7 +222,7 @@ print_status() {
   printf '  executor: %s\n' "$(systemctl --user is-active opinitd.executor.service 2>/dev/null || echo inactive)"
   printf '  relayer:  %s\n' "$(docker ps --format '{{.Names}}' | has_exact_line 'weave-relayer' && echo active || echo inactive)"
   printf '  matcher:  %s\n' "$(systemctl --user is-active sinergy-matcher.service 2>/dev/null || echo inactive) / $(is_http_ready "$MATCHER_HEALTH_URL" && echo ready || echo unavailable)"
-  printf '  agent:    %s\n' "$(is_http_ready "$STRATEGY_AGENT_URL" && echo ready || echo unavailable)"
+  printf '  agent:    %s\n' "$(systemctl --user is-active sinergy-strategy-agent.service 2>/dev/null || echo inactive) / $(is_http_ready "$STRATEGY_AGENT_URL" && echo ready || echo unavailable)"
   printf '  web:      %s\n' "$(is_http_ready "$WEB_URL" && echo ready || echo unavailable)"
   printf '  bridge:   %s\n' "$(is_http_ready "$BRIDGE_URL" && echo ready || echo unavailable)"
 }

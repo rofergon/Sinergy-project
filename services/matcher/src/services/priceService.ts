@@ -263,8 +263,8 @@ export class PriceService {
     this.refreshLatestCache();
   }
 
-  async start() {
-    await this.syncAll().catch((error) => {
+  start() {
+    void this.syncAll().catch((error) => {
       console.error("[pricing] Initial sync failed:", error);
     });
 

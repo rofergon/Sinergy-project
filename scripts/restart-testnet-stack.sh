@@ -133,7 +133,12 @@ stop_bridge() {
 }
 
 stop_strategy_agent() {
-  stop_background_process "strategy-agent"
+  if systemctl --user is-active --quiet sinergy-strategy-agent.service; then
+    log "stopping strategy agent service"
+    systemctl --user stop sinergy-strategy-agent.service
+  else
+    stop_background_process "strategy-agent"
+  fi
 }
 
 stop_all() {
@@ -166,6 +171,30 @@ After=network.target
 Type=simple
 WorkingDirectory=$ROOT_DIR/services/matcher
 ExecStart=/bin/bash -lc 'set -a && if [ -f ./.env.testnet ]; then . ./.env.testnet; fi && set +a && exec node --import tsx src/index.ts'
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+EOF
+
+  systemctl --user daemon-reload
+}
+
+ensure_strategy_agent_service() {
+  local unit_dir="${HOME}/.config/systemd/user"
+  local unit_file="${unit_dir}/sinergy-strategy-agent.service"
+  mkdir -p "$unit_dir"
+
+  cat >"$unit_file" <<EOF
+[Unit]
+Description=Sinergy strategy agent
+After=network.target sinergy-matcher.service
+
+[Service]
+Type=simple
+WorkingDirectory=$ROOT_DIR/services/strategy-agent
+ExecStart=/bin/bash -lc 'set -a && if [ -f ./.env ]; then . ./.env; fi && set +a && exec node --import tsx src/index.ts'
 Restart=always
 RestartSec=2
 
@@ -254,10 +283,14 @@ start_matcher() {
 }
 
 start_strategy_agent() {
-  start_background_process \
-    "strategy-agent" \
-    "8790" \
-    "cd '$ROOT_DIR/services/strategy-agent' && npm run dev"
+  ensure_strategy_agent_service
+
+  if systemctl --user is-active --quiet sinergy-strategy-agent.service; then
+    log "strategy agent service already active"
+  else
+    log "starting strategy agent service"
+    systemctl --user restart sinergy-strategy-agent.service
+  fi
 
   wait_for_http "$STRATEGY_AGENT_URL" "strategy agent" 30 1 || true
 }
